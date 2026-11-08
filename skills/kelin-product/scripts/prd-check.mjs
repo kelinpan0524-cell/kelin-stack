@@ -32,7 +32,7 @@ const section = (keywords) => {
 const problems = [];
 const required = [
   [['目标用户', '用户与环境', '用户群体'], '目标用户与环境'],
-  [['核心流程', '主流程'], '核心流程'],
+  [['核心流程', '用户旅程', '主流程', '旅程'], '核心流程或用户旅程'],
   [['权限', '审批'], '权限与审批'],
   [['数据入口', '上传', '导入'], '数据入口（上传/导入）'],
   [['数据出口', '导出'], '数据出口（导出）'],
@@ -51,6 +51,12 @@ for (const [keywords, label] of required) {
 
 const acceptance = section(['验收']);
 if (acceptance && !acceptance.some((line) => /^\s*- \[[ x]\] /.test(line))) problems.push('验收标准 needs at least one checkbox');
+if (acceptance && !acceptance.some((line) => /[\d０-９]/.test(line))) {
+  problems.push('验收标准 needs at least one measurable item（可验证的数字、单位或命令退出码）');
+}
+
+const clarifyCount = (text.match(/\[待确认[^\]]*\]/g) || []).length;
+if (clarifyCount > 3) problems.push(`待确认 markers exceed 3（当前 ${clarifyCount} 个，会卡住开工）`);
 
 const permissions = section(['权限', '审批']);
 if (permissions) {
