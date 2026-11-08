@@ -107,14 +107,25 @@ node skills/kelin-mode/scripts/mode.mjs advance
 它默认验证 kelin-stack 自己，也能验证任何 ZCode 插件：
 
 ```sh
-node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --no-live --output /tmp/ks-static
-node skills/kelin-verify-stack/scripts/verify-stack.mjs run \
-  --feature zcode:skill-invocation:kelin-principles --output /tmp/ks-live
+# 默认：只跑静态检查，不花 token
+node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --output /tmp/ks-static
+
+# 需要真会话时显式加 --live
+node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --live --output /tmp/ks-live
 ```
 
-静态检查不花模型调用；live 检查会真开会话，按需使用。按本机实测：一个 live 功能约 10-20 秒、10 万级输入 token（大部分走缓存）；`--all` 当前跑 7 个 live 功能约 2 分钟，不会并行，内存占用只有一个会话。
+静态检查不花模型调用。live 检查每个功能约 42 万 tokens（大部分命中缓存）、10-20 秒；10 个 live 功能约 420 万 tokens、3 分钟。不并行，内存里同时只有一个会话。显式 `--feature zcode:skill-invocation:<名字>` 会直接跑 live；`--all` 和 `--changed` 默认只跑静态，加 `--live` 才跑配方。
 
-`--all` 只跑有配方的 live 功能，数量会打印出来；`--changed` 同理。显式 `--feature` 指定但没有配方时才会报 `missing-recipe`，需要 `--auto` 现场合成一条“正文回读”配方。
+## Token 预算
+
+| 动作 | 实测消耗 | 什么时候用 |
+| --- | --- | --- |
+| `run --all`（静态） | 0 | 每次改完 |
+| `run --all --live` | 约 420 万 tokens | 发版前、改了很多 skill 之后 |
+| 一个 live 功能 | 约 42 万 tokens | 只改了一个 skill 时 |
+| 一个子代理 | 新会话，10 万级上下文 | 窄任务，最多 2 个 |
+
+省法：默认静态；`--live` 只抽样；小任务用 `kelin-mode light`；不要每个阶段都起子代理。
 
 ## 安装
 
@@ -134,15 +145,26 @@ zcode plugins install kelin-stack@kelin-stack-market
 
 装完重启 ZCode，输入 `/kelin-plan` 就能看到。
 
+## 给 WorkBuddy 用
+
+WorkBuddy 支持标准 `SKILL.md`。分三种情况：
+
+- **纯指令类 skill**（plan、review、principles 等）：把 `skills/<名字>/` 整个目录拷到 `~/.workbuddy/skills/`（全局）或项目的 `.workbuddy/skills/` 即可；
+- **带脚本的 skill**（map、verify、agents、guard、ci 等）：脚本是 Node，无外部依赖；但命令里的 `skills/kelin-*/scripts/...` 是相对仓库根目录的，建议保留仓库 checkout，在仓库根目录执行；
+- **插件安装**：WorkBuddy 支持插件 ZIP / 自定义 marketplace，但清单格式和 ZCode 不同；本仓库目前只有 `.zcode-plugin` / `.claude-plugin` / `.cursor-plugin` 三份清单。需要的话可以补一份 WorkBuddy 清单，告诉我它的 manifest 路径和字段即可。
+
+注意：`kelin-verify-stack` 的 live 检查依赖 ZCode 的 `zcode` CLI，WorkBuddy 里只能跑静态检查；`/kelin-*` 斜杠命令名也可能随运行时不同。
+
 ## 开发
 
 ```sh
 node --test skills/kelin-verify-stack/tests/*.test.mjs
 node skills/kelin-verify-stack/scripts/offline-check.mjs
 node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
+node skills/kelin-guard/scripts/guard-check.mjs guards.json
 ```
 
-CI 每次 push 跑这三类：单元测试、离线结构检查、AGENTS.md 预算检查（不需要 ZCode 登录，不消耗模型）。
+CI 每次 push 跑这四类：单元测试、离线结构检查、AGENTS.md 预算、guards 完整性（不需要 ZCode 登录，不消耗模型）。
 
 改 skill 之后，按改动路径验证：
 

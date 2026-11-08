@@ -23,7 +23,7 @@ function usage() {
     '  verify.mjs doctor --output DIR [--plugin DIR] [--probe]',
     '  verify.mjs features [--plugin DIR]',
     '  verify.mjs classify [--plugin DIR] (--changed a,b | --changed-file FILE | --all) [--output DIR]',
-    '  verify.mjs run --output DIR [--plugin DIR] (--all | --feature F... | --changed a,b) [--wide REASON] [--auto] [--no-live] [--timeout MS]',
+    '  verify.mjs run --output DIR [--plugin DIR] (--all | --feature F... | --changed a,b) [--wide REASON] [--auto] [--live] [--no-live] [--timeout MS]',
     '  verify.mjs self-test --output DIR [--plugin DIR] [--no-live]',
     '  verify.mjs publish --run DIR --repo OWNER/REPO --pr N --confirm [--sha SHA]',
   ].join('\n');
@@ -31,7 +31,7 @@ function usage() {
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  const options = { command, features: [], changed: [], plugin: '', output: '', wide: '', timeout: 0, probe: false, auto: false, noLive: false, confirm: false, repo: '', pr: 0, sha: '', run: '', changedFile: '', all: false };
+  const options = { command, features: [], changed: [], plugin: '', output: '', wide: '', timeout: 0, probe: false, auto: false, live: false, noLive: false, confirm: false, repo: '', pr: 0, sha: '', run: '', changedFile: '', all: false };
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     const value = () => {
@@ -51,6 +51,7 @@ function parseArgs(argv) {
       case '--probe': options.probe = true; break;
       case '--auto': options.auto = true; break;
       case '--no-live': options.noLive = true; break;
+      case '--live': options.live = true; break;
       case '--confirm': options.confirm = true; break;
       case '--repo': options.repo = value(); break;
       case '--pr': options.pr = Number(value()); break;
@@ -215,16 +216,16 @@ async function runVerification(options) {
   } else if (options.changed.length) {
     selection = classify({ paths: options.changed, registry });
     const reachable = new Set(selection.features);
-    selected = available.filter((entry) => reachable.has(entry.feature) && (entry.kind === 'static' || options.auto || Boolean(recipes[entry.feature])));
-    const skipped = available.filter((entry) => reachable.has(entry.feature) && entry.kind === 'live' && !recipes[entry.feature] && !options.auto);
+    selected = available.filter((entry) => reachable.has(entry.feature) && (entry.kind === 'static' || options.auto || (options.live && Boolean(recipes[entry.feature]))));
+    const skipped = available.filter((entry) => reachable.has(entry.feature) && entry.kind === 'live' && !options.auto && !(options.live && recipes[entry.feature]));
     skippedLive.push(...skipped.map((entry) => entry.feature));
-    if (skipped.length) console.log(`--changed skips ${skipped.length} live features without a recipe (pass --auto to synthesize)`);
+    if (skipped.length) console.log(`--changed skips ${skipped.length} live features (${skipped.filter((entry) => recipes[entry.feature]).length} with recipes; pass --live)`);
   } else if (options.all) {
     selection = { paths: [], skills: [], features: available.map((entry) => entry.feature).sort(), noRuntime: false };
-    selected = available.filter((entry) => entry.kind === 'static' || options.auto || Boolean(recipes[entry.feature]));
-    const skipped = available.filter((entry) => entry.kind === 'live' && !recipes[entry.feature] && !options.auto);
+    selected = available.filter((entry) => entry.kind === 'static' || options.auto || (options.live && Boolean(recipes[entry.feature])));
+    const skipped = available.filter((entry) => entry.kind === 'live' && !options.auto && !(options.live && recipes[entry.feature]));
     skippedLive.push(...skipped.map((entry) => entry.feature));
-    if (skipped.length) console.log(`--all skips ${skipped.length} live features without a recipe (pass --auto to synthesize)`);
+    if (skipped.length) console.log(`--all skips ${skipped.length} live features (${skipped.filter((entry) => recipes[entry.feature]).length} with recipes; pass --live)`);
   } else {
     throw new Refused('Name features with --feature, or pass --all / --changed');
   }
@@ -355,6 +356,16 @@ async function runVerification(options) {
     receipt.ok = false;
   }
 
+  const usage = { sessions: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, totalTokens: 0 };
+  for (const observation of receipt.observations) {
+    if (!observation.usage) continue;
+    usage.sessions += 1;
+    usage.inputTokens += observation.usage.inputTokens || 0;
+    usage.outputTokens += observation.usage.outputTokens || 0;
+    usage.cacheReadTokens += observation.usage.cacheReadTokens || 0;
+    usage.totalTokens += observation.usage.totalTokens || 0;
+  }
+  receipt.usage = usage;
   receipt.finished = nowIso();
   await writeJson(path.join(output, 'receipt.json'), receipt);
   await writeFile(path.join(output, 'report.md'), renderReport(receipt));
@@ -406,7 +417,7 @@ async function selfTest(options) {
   const pluginRoot = path.resolve(options.plugin || (await discoverPlugin(zcodeRef)));
   const available = await inventory(pluginRoot, registry);
   const staticFeatures = available.filter((entry) => entry.kind === 'static').map((entry) => entry.feature);
-  const live = options.noLive ? [] : ['zcode:skill-invocation:principle-laziness-protocol'];
+  const live = options.noLive ? [] : ['zcode:skill-invocation:kelin-principles'];
   const result = await runVerification({ ...options, plugin: pluginRoot, features: [...staticFeatures, ...live], changed: [], all: false });
   result.receipt.unitTests = { ok: true, detail: `${(tests.stdout.match(/# pass \d+/) || ['pass'])[0]}` };
   return result;

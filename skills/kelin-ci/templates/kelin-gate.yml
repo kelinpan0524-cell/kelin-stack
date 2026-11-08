@@ -22,3 +22,6 @@ jobs:
       - name: acceptance
         run: |
           if [ -f verify.json ]; then node .kelin/ci/run-acceptance.mjs verify.json; else echo "no verify.json"; fi
+      - name: guards
+        run: |
+          if [ -f guards.json ]; then node .kelin/ci/guard-check.mjs guards.json; else echo "no guards.json"; fi

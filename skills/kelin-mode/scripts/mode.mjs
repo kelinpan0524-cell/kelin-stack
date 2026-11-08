@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const PHASES = ['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done'];
-const MODES = ['feature', 'fix', 'legacy', 'audit'];
+const PHASES_BY_MODE = { light: ['intake', 'design', 'build', 'verify', 'ship', 'reflect', 'done'] };
+const MODES = ['feature', 'fix', 'legacy', 'audit', 'light'];
+const phasesFor = (currentMode) => PHASES_BY_MODE[currentMode] || PHASES;
 const args = process.argv.slice(2);
 const command = args[0];
 const option = (name, fallback = '') => {
@@ -67,19 +69,21 @@ if (command === 'init') {
   mkdirSync(dir, { recursive: true });
   const state = { mode, phase: 'intake', started: new Date().toISOString(), history: [{ phase: 'intake', at: new Date().toISOString() }] };
   writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
-  console.log(JSON.stringify({ ok: true, root, mode, phase: 'intake', next: 'map', required: required('map', mode) }, null, 2));
+  const phases = phasesFor(mode);
+  console.log(JSON.stringify({ ok: true, root, mode, phase: 'intake', next: phases[1], required: required(phases[1], mode) }, null, 2));
   process.exit(0);
 }
 
 if (command === 'status') {
   const state = load();
   const result = inspect(state);
-  const index = PHASES.indexOf(state.phase);
+  const phases = phasesFor(state.mode);
+  const index = phases.indexOf(state.phase);
   console.log(JSON.stringify({
     ok: result.ready,
     mode: state.mode,
     phase: state.phase,
-    next: index >= 0 && index < PHASES.length - 1 ? PHASES[index + 1] : null,
+    next: index >= 0 && index < phases.length - 1 ? phases[index + 1] : null,
     required: result.files,
     missing: result.missing,
   }, null, 2));
@@ -88,7 +92,8 @@ if (command === 'status') {
 
 if (command === 'advance') {
   const state = load();
-  const index = PHASES.indexOf(state.phase);
+  const phases = phasesFor(state.mode);
+  const index = phases.indexOf(state.phase);
   if (index < 0) {
     console.error(`Unknown phase: ${state.phase}`);
     process.exit(2);
@@ -102,7 +107,7 @@ if (command === 'advance') {
     console.log(JSON.stringify({ ok: false, phase: state.phase, missing: result.missing }, null, 2));
     process.exit(1);
   }
-  state.phase = PHASES[index + 1];
+  state.phase = phases[index + 1];
   state.history.push({ phase: state.phase, at: new Date().toISOString() });
   writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
   console.log(JSON.stringify({ ok: true, phase: state.phase, next: required(state.phase, state.mode) }, null, 2));

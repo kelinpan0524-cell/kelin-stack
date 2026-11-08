@@ -28,11 +28,13 @@ S=skills/kelin-verify-stack
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/verify-stack.XXXXXX")/run"
 
 node "$S/scripts/verify-stack.mjs" doctor --output "$OUT/doctor"
-node "$S/scripts/verify-stack.mjs" run --all --no-live --output "$OUT/static"
-node "$S/scripts/verify-stack.mjs" run --feature zcode:skill-invocation:kelin-principles --output "$OUT/live"
+node "$S/scripts/verify-stack.mjs" run --all --output "$OUT/static"
+node "$S/scripts/verify-stack.mjs" run --all --live --output "$OUT/live"
 ```
 
 `--output` 必须是尚不存在或空的目录。每次验证用全新目录，不覆盖旧证据。不带 `--plugin` 时默认验证本插件（`kelin-stack`）。
+
+`run --all` 默认只跑静态检查，0 token；加 `--live` 才跑配方（每个约 42 万 tokens）。显式 `--feature zcode:skill-invocation:<名字>` 会直接跑 live。
 
 ## Doctor
 
@@ -114,7 +116,7 @@ fixture、日志、回执都在你指定的输出目录，不散落在插件目�
 - `verify-stack.mjs doctor --output <目录> [--plugin <插件目录>] [--probe]`
 - `verify-stack.mjs features [--plugin <插件目录>]`
 - `verify-stack.mjs classify [--plugin <目录>] (--changed a,b | --changed-file f | --all)`
-- `verify-stack.mjs run --output <全新目录> [--plugin <目录>] (--all | --feature <功能>... | --changed ...) [--wide <理由>] [--auto] [--no-live] [--timeout <毫秒>]`
+- `verify-stack.mjs run --output <全新目录> [--plugin <目录>] (--all | --feature <功能>... | --changed ...) [--wide <理由>] [--auto] [--live] [--no-live] [--timeout <毫秒>]`
 - `verify-stack.mjs self-test --output <全新目录> [--no-live]`
 - `node --test tests/`：验证器自身逻辑的单元测试，不证明插件可用
 

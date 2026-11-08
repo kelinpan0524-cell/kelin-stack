@@ -18,6 +18,7 @@ node skills/kelin-ci/scripts/install-ci.mjs <仓库目录> --test "npm test"
 - `.kelin/ci/agents-check.mjs`：AGENTS.md 长度/重复/断链/秘密；
 - `.kelin/ci/map-check.mjs`：功能地图是否覆盖所有路径；
 - `.kelin/ci/run-acceptance.mjs`：跑 `verify.json` 里的验收清单；
+- `.kelin/ci/guard-check.mjs`：校验 `guards.json` 里的防再犯记录；
 - `.github/workflows/kelin-gate.yml`：push 和 PR 时跑上面三项 + 你的测试命令；
 - `.github/pull_request_template.md`：强制写验证证据、风险回滚、防再犯。
 
@@ -30,7 +31,8 @@ node skills/kelin-ci/scripts/install-ci.mjs <仓库目录> --test "npm test"
 - 你的测试命令；
 - AGENTS.md 预算（超过 200 行直接失败）；
 - `feature-map.json` 覆盖检查（存在时）；
-- `verify.json` 验收清单（存在时）。
+- `verify.json` 验收清单（存在时）；
+- `guards.json` 防再犯记录（存在时）。
 
 **不跑** live skill 验证。原因：CI 里没有 ZCode 登录，每次 live 还要花 token。live 验证留在本地或发版前，用 `kelin-verify-stack` 手动跑。
 

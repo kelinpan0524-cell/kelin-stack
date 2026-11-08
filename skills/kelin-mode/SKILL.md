@@ -56,6 +56,7 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 
 | 模式 | 适用 | 主链路 |
 | --- | --- | --- |
+| `light` | 单文件、文案、小修 | goal（三行）→ build → verify（快速）→ ship → reflect |
 | `feature` | 加功能、改行为 | goal → plan → architect → map → tdd → verify → review → refine → ship |
 | `fix` | 修 bug、回归 | correctness（复现测试）→ tdd → guard → verify → review → ship |
 | `legacy` | 老仓库改造、迁移 | legacy（基线+地图+热点）→ plan → tdd（切片）→ verify → review → refine → ship |
@@ -145,6 +146,19 @@ node skills/kelin-mode/scripts/budget.mjs
 3. 边界值单独列：空、0、负数、重复、超长、并发。
 
 没有这三条，build 不算完成。
+
+## Token 预算
+
+链路长不等于一定贵：阶段在**同一个会话**里推进，不会每个阶段新开 session。真正贵的是子代理和 live 验证。
+
+| 动作 | 实测消耗 | 建议 |
+| --- | --- | --- |
+| 静态检查（`run --all` 默认） | 0 tokens | 每次改完都跑 |
+| 一个 live skill 验证 | 约 42 万 tokens（大部分命中缓存），10-20 秒 | 发版前或改 skill 后抽样 |
+| 一个子代理 | 新会话，10 万级上下文 | 最多 2 个，只做窄任务 |
+| 全链路 kelin-mode | 一个会话，随阶段缓慢增长 | 小任务用 `light` |
+
+省法：小任务 `light`；默认只跑静态；`--live` 按需；不要每个阶段都起子代理。
 
 ## 自治边界
 
