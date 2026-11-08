@@ -9,8 +9,13 @@ This project is an independent ZCode implementation inspired by:
 - open-pstack, https://github.com/ericlitman/open-pstack
   Copyright Eric Litman, MIT License. Verification-skill architecture and the
   exact-head evidence model.
+- ponytail, https://github.com/DietrichGebert/ponytail
+  Copyright Dietrich Gebert, MIT License. The necessity ladder, the
+  over-engineering review rubric, the audit report structure, and the
+  "shortcut:" comment convention used by kelin-refine and kelin-audit.
 
 No upstream source file is copied verbatim. The skill text, scripts, tests and
-verification harness in this repository were written for ZCode. Shared ideas:
-the plan/verify/review/ship workflow split, the "proof over claims" verification
-stance, and the feature-map plus recipe structure used by the verifier.
+verification harness in this repository were written for ZCode and translated
+into Chinese. Shared ideas: the plan/verify/review/ship workflow split, the
+"proof over claims" verification stance, the feature-map plus recipe structure
+used by the verifier, and the minimal-code ladder adapted for kelin-refine.

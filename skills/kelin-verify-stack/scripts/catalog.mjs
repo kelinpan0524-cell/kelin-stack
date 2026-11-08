@@ -339,6 +339,23 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-log:escapes-formula', body.includes("\t'=cmd()"), 'escaped'));
     rows.push({ tool: 'kelin-decision-log/scripts/log.mjs', rows: body.trim().split('\n').length - 1 });
   }
+  const kelinMode = path.join(ctx.pluginRoot, 'skills/kelin-mode/scripts/mode.mjs');
+  if (existsSync(kelinMode)) {
+    const repo = path.join(ctx.tempDir, 'mode-repo');
+    await mkdir(repo, { recursive: true });
+    const init = await run(process.execPath, [kelinMode, 'init', '--mode', 'feature', '--root', repo], { timeoutMs: 30_000 });
+    const enterMap = await run(process.execPath, [kelinMode, 'advance', '--root', repo], { timeoutMs: 30_000 });
+    const blocked = await run(process.execPath, [kelinMode, 'advance', '--root', repo], { timeoutMs: 30_000 });
+    await writeFile(path.join(repo, '.kelin', 'scope.md'), '影响文件：src/a.ts\n');
+    const unblocked = await run(process.execPath, [kelinMode, 'advance', '--root', repo], { timeoutMs: 30_000 });
+    const status = await run(process.execPath, [kelinMode, 'status', '--root', repo], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-mode:init', init.code === 0 && init.stdout.includes('"phase": "intake"'), `exit ${init.code}`));
+    assertions.push(assertion('kelin-mode:advance-intake', enterMap.code === 0 && enterMap.stdout.includes('"phase": "map"'), `exit ${enterMap.code}`));
+    assertions.push(assertion('kelin-mode:blocks-missing', blocked.code === 1 && blocked.stdout.includes('scope.md'), `exit ${blocked.code}`));
+    assertions.push(assertion('kelin-mode:unblocks', unblocked.code === 0 && unblocked.stdout.includes('"phase": "design"'), `exit ${unblocked.code}`));
+    assertions.push(assertion('kelin-mode:status', status.code === 0 && status.stdout.includes('"phase": "design"'), `exit ${status.code}`));
+    rows.push({ tool: 'kelin-mode/scripts/mode.mjs', initExit: init.code, blockedExit: blocked.code, unblockedExit: unblocked.code });
+  }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
   }

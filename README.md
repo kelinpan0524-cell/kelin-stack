@@ -4,23 +4,49 @@
 
 pstack 是为 Claude Code / Codex 写的。ZCode 的 skill、斜杠命令和插件模型都不一样，直接搬会水土不服：命令会撞名、依赖 bun、无头会话的接法也不同。所以这里是重写，不是 fork。
 
-## 一条链路，十七个命令
+## 一个命令跑完：`/kelin-mode`
+
+`/kelin-mode` 是编排层。它先判断任务类型，再按阶段调用对应 skill，每个阶段有产物和退出条件，缺一个就不能前进：
+
+| 模式 | 适用 | 主链路 |
+| --- | --- | --- |
+| `feature` | 加功能、改行为 | goal → plan → architect → map → tdd → verify → review → refine → ship |
+| `fix` | 修 bug、回归 | correctness（复现测试）→ tdd → verify → review → ship |
+| `legacy` | 老仓库改造 | legacy（基线+地图+热点）→ plan → tdd（切片）→ verify → review → refine → ship |
+| `audit` | 只审不改 | audit → map → plan（修复清单） |
+
+状态存在 `.kelin/state.json`，用脚本推进，不靠记忆：
+
+```sh
+node skills/kelin-mode/scripts/mode.mjs init --mode feature
+node skills/kelin-mode/scripts/mode.mjs status
+node skills/kelin-mode/scripts/mode.mjs advance
+```
+
+`advance` 检查当前阶段产物；`verify` 阶段还要求 `acceptance.json` 里 `ok: true`。手改 `state.json` 绕过检查没有意义——下一步照样会被门禁拦住。
+
+**24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；swap 超过 1GB 就只跑单代理。
+
+## 一条链路，二十二个命令
 
 **想清楚**
 
 | 命令 | 解决什么 | 可执行的检查 |
 | --- | --- | --- |
+| `/kelin-mode` | 不知道该做什么、下一步是什么 | 状态机 + 每阶段产物门禁 |
 | `/kelin-goal` | 目标写成愿望 | `goal-check.mjs` 校验完成条件/约束/检查点 |
 | `/kelin-plan` | 没想清就写代码 | `check-plan.mjs` 校验计划结构 |
 | `/kelin-architect` | 直接写实现，方向错了才发现 | 先出类型、签名、模块边界，停在草图 |
 | `/kelin-blast-radius` | 不知道改了会炸到哪 | 调用方/数据/测试/外部/回滚五面表 |
 | `/kelin-map` | 改哪该测什么靠猜 | `map-check.mjs` 校验功能地图全覆盖 |
+| `/kelin-legacy` | 老仓库不敢动 | 基线 + 热点 + 特征测试 + 切片改造 |
 
 **做扎实**
 
 | 命令 | 解决什么 | 可执行的检查 |
 | --- | --- | --- |
 | `/kelin-tdd` | 先写实现再补测试 | 红-绿-重构，复现测试必须先在旧代码上失败 |
+| `/kelin-correctness` | “看着对”当证据 | 证据阶梯：可失败测试、边界矩阵、差分、变异 sanity |
 | `/kelin-verify` | “应该可以了”没人敢信 | `run-acceptance.mjs` 跑验收清单 |
 | `/kelin-loop` | 无限重试、没有停止条件 | `loop-check.mjs` 校验停止条件/预算/升级线 |
 
@@ -29,6 +55,8 @@ pstack 是为 Claude Code / Codex 写的。ZCode 的 skill、斜杠命令和插�
 | 命令 | 解决什么 | 可执行的检查 |
 | --- | --- | --- |
 | `/kelin-review` | 明显的坑自己先踩 | 按 P0-P3 输出可定位问题 |
+| `/kelin-audit` | 不知道仓库哪里最容易出事 | 六类问题、最多 20 条、每条四要素 |
+| `/kelin-refine` | 代码越写越多 | 必要性阶梯，删重复/猜测性抽象 |
 | `/kelin-decision-log` | 事后说不清为什么这么改 | `log.mjs` 追加决策记录并防表格公式注入 |
 | `/kelin-ship` | 分支、PR、CI、部署乱 | `preflight.mjs` 拦截 main 直提/真实数据/密钥 |
 | `/kelin-release` | 手改版本号、没 CHANGELOG | `release.mjs` 默认 dry-run，发布需 `--confirm` |
@@ -122,12 +150,11 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 17 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 22 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
 | SessionStart hook、多 provider runner、T3 | 不做 | 会改全局会话行为或与 ZCode 自身的模型调度冲突 |
-| `check-plan`、`watch-pr`、`statechart` | `check-plan`、`watch`、`map-check`、`release`、`run-acceptance`、`preflight`、`goal-check`、`loop-check`、`log` | 优先开发流程里最容易出错的地方，且每个都能被验证器执行 |
-| Claude / Codex / T3 三套 harness | ZCode 无头会话一套 | 本机真实存在、可复现 |
+| 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
 | 20+ 条 principle-* | 合并成一页 `kelin-principles` | 原则多了没人读，十条能记住 |
-| 多代理并行编排（swarm/arena） | 暂不做 | ZCode 自身的子代理够用，先不引入第二套调度 |
 
 明确没做：跨 provider 编排、自动开 PR、自动合并、自动部署。这些不是“还没写”，是刻意不做——它们需要人拍板。
 
@@ -143,15 +170,20 @@ kelin-stack/
 │   ├── kelin-reviewer.md
 │   └── kelin-verifier.md
 ├── skills/
+│   ├── kelin-mode/{SKILL.md,scripts/mode.mjs}
 │   ├── kelin-goal/{SKILL.md,scripts/goal-check.mjs}
 │   ├── kelin-plan/{SKILL.md,scripts/check-plan.mjs}
 │   ├── kelin-architect/SKILL.md
 │   ├── kelin-blast-radius/SKILL.md
 │   ├── kelin-map/{SKILL.md,scripts/map-check.mjs}
+│   ├── kelin-legacy/SKILL.md
 │   ├── kelin-tdd/SKILL.md
+│   ├── kelin-correctness/SKILL.md
 │   ├── kelin-verify/{SKILL.md,scripts/run-acceptance.mjs}
 │   ├── kelin-loop/{SKILL.md,scripts/loop-check.mjs}
 │   ├── kelin-review/SKILL.md
+│   ├── kelin-audit/SKILL.md
+│   ├── kelin-refine/SKILL.md
 │   ├── kelin-decision-log/{SKILL.md,scripts/log.mjs}
 │   ├── kelin-ship/{SKILL.md,scripts/preflight.mjs}
 │   ├── kelin-release/{SKILL.md,scripts/release.mjs}
