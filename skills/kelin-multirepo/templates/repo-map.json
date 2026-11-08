@@ -1,0 +1,24 @@
+{
+  "repos": [
+    {
+      "name": "quote-api",
+      "path": "../quote-api",
+      "owner": "报价组",
+      "purpose": "报价计算与存储",
+      "deploy": "独立发布",
+      "dependsOn": ["auth-api"],
+      "contracts": ["openapi.yaml"],
+      "ownsData": ["quotes", "quote_lines"]
+    },
+    {
+      "name": "auth-api",
+      "path": "../auth-api",
+      "owner": "平台组",
+      "purpose": "登录与权限",
+      "deploy": "独立发布",
+      "dependsOn": [],
+      "contracts": ["openapi.yaml"],
+      "ownsData": ["users", "roles"]
+    }
+  ]
+}

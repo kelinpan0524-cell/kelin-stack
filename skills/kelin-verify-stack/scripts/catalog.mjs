@@ -455,7 +455,44 @@ async function checkTools(ctx) {
     const rejected = await run(process.execPath, [kelinProduct, bad], { timeoutMs: 30_000 });
     assertions.push(assertion('kelin-product:accepts', accepted.code === 0, `exit ${accepted.code}`));
     assertions.push(assertion('kelin-product:rejects', rejected.code === 1 && rejected.stdout.includes('权限与审批'), `exit ${rejected.code}`));
+    const batch = path.join(ctx.tempDir, 'prd-batch.md');
+    await writeFile(batch, `${await readFile(good, 'utf8')}\n数据量：10 万行\n`);
+    const batchMissing = await run(process.execPath, [kelinProduct, batch], { timeoutMs: 30_000 });
+    await writeFile(batch, `${await readFile(good, 'utf8')}\n数据量：10 万行\n\n## 批量修改\n- 先预览 diff，确认后提交，可按批次撤销\n`);
+    const batchOk = await run(process.execPath, [kelinProduct, batch], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-product:batch-required', batchMissing.code === 1 && batchMissing.stdout.includes('批量修改'), `exit ${batchMissing.code}`));
+    assertions.push(assertion('kelin-product:batch-accepts', batchOk.code === 0, `exit ${batchOk.code}`));
     rows.push({ tool: 'kelin-product/scripts/prd-check.mjs', acceptExit: accepted.code, rejectExit: rejected.code });
+  }
+  const kelinUnslop = path.join(ctx.pluginRoot, 'skills/kelin-unslop/scripts/slop-check.mjs');
+  if (existsSync(kelinUnslop)) {
+    const clean = path.join(ctx.tempDir, 'clean-copy.md');
+    await writeFile(clean, '# 标题\n\n这个接口返回 3 个字段。测试命令是 `npm test`。\n');
+    const cleanResult = await run(process.execPath, [kelinUnslop, clean, '--strict'], { timeoutMs: 30_000 });
+    const sloppy = path.join(ctx.tempDir, 'sloppy-copy.md');
+    await writeFile(sloppy, '# 标题\n\n综上所述，这个方案极大地赋能了业务闭环。\n');
+    const sloppyResult = await run(process.execPath, [kelinUnslop, sloppy, '--strict'], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-unslop:clean', cleanResult.code === 0, `exit ${cleanResult.code}`));
+    assertions.push(assertion('kelin-unslop:flags', sloppyResult.code === 1 && sloppyResult.stdout.includes('empty-summary') && sloppyResult.stdout.includes('buzzword'), `exit ${sloppyResult.code}`));
+    rows.push({ tool: 'kelin-unslop/scripts/slop-check.mjs', cleanExit: cleanResult.code, sloppyExit: sloppyResult.code });
+  }
+  const kelinMultirepo = path.join(ctx.pluginRoot, 'skills/kelin-multirepo/scripts/repo-check.mjs');
+  if (existsSync(kelinMultirepo)) {
+    const file = path.join(ctx.tempDir, 'repo-map.json');
+    await writeFile(file, JSON.stringify({ repos: [
+      { name: 'a', owner: 'team-a', purpose: 'a', dependsOn: [], ownsData: ['orders'] },
+      { name: 'b', owner: 'team-b', purpose: 'b', dependsOn: ['a'], ownsData: ['users'] },
+    ] }));
+    const good = await run(process.execPath, [kelinMultirepo, file], { timeoutMs: 30_000 });
+    await writeFile(file, JSON.stringify({ repos: [
+      { name: 'a', owner: 'team-a', purpose: 'a', dependsOn: ['b'], ownsData: ['orders'] },
+      { name: 'b', owner: 'team-b', purpose: 'b', dependsOn: ['a'], ownsData: ['orders'] },
+      { name: 'a', owner: 'team-c', purpose: 'dup', dependsOn: ['missing'] },
+    ] }));
+    const bad = await run(process.execPath, [kelinMultirepo, file], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-multirepo:accepts', good.code === 0, `exit ${good.code}`));
+    assertions.push(assertion('kelin-multirepo:blocks', bad.code === 1 && bad.stdout.includes('data-owner-conflict') && bad.stdout.includes('cycle') && bad.stdout.includes('duplicate-name'), `exit ${bad.code}`));
+    rows.push({ tool: 'kelin-multirepo/scripts/repo-check.mjs', goodExit: good.code, badExit: bad.code });
   }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };

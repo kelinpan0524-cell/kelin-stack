@@ -71,7 +71,7 @@ node skills/kelin-neat/scripts/neat-check.mjs neat.json
 
 ### 6. 复验
 
-再跑一次 `neat-check`，直到没有 fail。报告里贴命令和输出。
+再跑一次 `neat-check`，直到没有 fail。报告里贴命令和输出。文字表达再用 `kelin-unslop` 过一遍，别用一套套话换另一套。
 
 ### 7. 汇报
 

@@ -72,6 +72,16 @@ if (performance) {
   if (!/内存|启动|分页/.test(body)) problems.push('性能预算 must cover memory, startup or pagination');
 }
 
+if (/批量|大数据|数据量/.test(text)) {
+  const batch = section(['批量']);
+  if (!batch) problems.push('missing section: 批量修改');
+  else {
+    const body = batch.join('\n');
+    if (!/预览/.test(body)) problems.push('批量修改 must include a preview step');
+    if (!/撤销|回滚/.test(body)) problems.push('批量修改 must support undo or rollback');
+  }
+}
+
 const result = { file, ok: problems.length === 0, sections: headings.length, problems };
 console.log(JSON.stringify(result, null, 2));
 process.exit(result.ok ? 0 : 1);
