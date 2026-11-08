@@ -1,0 +1,63 @@
+PASS unit-tests (1354ms) node --test skills/kelin-verify-stack/tests/*.test.mjs
+PASS offline (40ms) node skills/kelin-verify-stack/scripts/offline-check.mjs
+PASS agents (34ms) node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
+PASS guards (31ms) node skills/kelin-guard/scripts/guard-check.mjs guards.json
+PASS neat (38ms) node skills/kelin-neat/scripts/neat-check.mjs neat.json
+PASS evals (36ms) node skills/kelin-evals/scripts/skill-eval.mjs --root .
+PASS verify-stack (6052ms) OUT=$(mktemp -d /tmp/ks-mode-audit.XXXXXX) && node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --output "$OUT"
+{
+  "ok": true,
+  "total": 7,
+  "failed": 0,
+  "rows": [
+    {
+      "id": "unit-tests",
+      "cmd": "node --test skills/kelin-verify-stack/tests/*.test.mjs",
+      "exit": 0,
+      "durationMs": 1354,
+      "output": "r/folders/8w/7yw4h2l10zb0glsjbcszrszc0000gn/T/kelin-mode-oleS46/.kelin/state.json\n--mode must be one of feature, fix, legacy, audit, light\n✔ init rejects a second run and an unknown mode (88.025792ms)\nrewind requires --reason \"<why>\"\n✔ rewind moves one phase back and records the reason (177.356875ms)\nℹ tests 21\nℹ suites 0\nℹ pass 21\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 1320.431"
+    },
+    {
+      "id": "offline",
+      "cmd": "node skills/kelin-verify-stack/scripts/offline-check.mjs",
+      "exit": 0,
+      "durationMs": 40,
+      "output": "{\n  \"ok\": true,\n  \"root\": \"/Users/arono/Projects/kelin-stack\",\n  \"manifests\": [\n    \".zcode-plugin/plugin.json\",\n    \".claude-plugin/plugin.json\"\n  ],\n  \"skills\": 31,\n  \"problems\": []\n}"
+    },
+    {
+      "id": "agents",
+      "cmd": "node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md",
+      "exit": 0,
+      "durationMs": 34,
+      "output": "{\n  \"ok\": true,\n  \"file\": \"AGENTS.md\",\n  \"lines\": 36,\n  \"bytes\": 1553,\n  \"maxLines\": 200,\n  \"warnLines\": 150,\n  \"findings\": []\n}"
+    },
+    {
+      "id": "guards",
+      "cmd": "node skills/kelin-guard/scripts/guard-check.mjs guards.json",
+      "exit": 0,
+      "durationMs": 31,
+      "output": "{\n  \"ok\": true,\n  \"file\": \"guards.json\",\n  \"guards\": 2,\n  \"problems\": []\n}"
+    },
+    {
+      "id": "neat",
+      "cmd": "node skills/kelin-neat/scripts/neat-check.mjs neat.json",
+      "exit": 0,
+      "durationMs": 38,
+      "output": "{\n  \"ok\": true,\n  \"root\": \"/Users/arono/Projects/kelin-stack\",\n  \"docs\": [\n    \"AGENTS.md\",\n    \"README.md\"\n  ],\n  \"manifestVersion\": \"0.12.1\",\n  \"ports\": 0,\n  \"findings\": []\n}"
+    },
+    {
+      "id": "evals",
+      "cmd": "node skills/kelin-evals/scripts/skill-eval.mjs --root .",
+      "exit": 0,
+      "durationMs": 36,
+      "output": "{\n  \"ok\": true,\n  \"root\": \"/Users/arono/Projects/kelin-stack\",\n  \"skills\": 31,\n  \"problems\": []\n}"
+    },
+    {
+      "id": "verify-stack",
+      "cmd": "OUT=$(mktemp -d /tmp/ks-mode-audit.XXXXXX) && node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --output \"$OUT\"",
+      "exit": 0,
+      "durationMs": 6052,
+      "output": "--all skips 31 live features (16 with recipes; pass --live)\nPlanned headless sessions: 0 (limit 12)\nPASS 5 features, 199 assertions -> /tmp/ks-mode-audit.9egEo9"
+    }
+  ]
+}

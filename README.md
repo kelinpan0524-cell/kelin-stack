@@ -177,7 +177,7 @@ node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
 node skills/kelin-guard/scripts/guard-check.mjs guards.json
 ```
 
-CI 每次 push 跑这四类：单元测试、离线结构检查、AGENTS.md 预算、guards 完整性（不需要 ZCode 登录，不消耗模型）。
+CI 每次 push 跑六类：单元测试、离线结构检查、AGENTS.md 预算、guards 完整性、文档一致性、skill 结构与触发检查（不需要 ZCode 登录，不消耗模型）。
 
 改 skill 之后，按改动路径验证：
 

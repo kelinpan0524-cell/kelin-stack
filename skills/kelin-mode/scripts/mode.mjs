@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const PHASES = ['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done'];
@@ -45,14 +45,18 @@ const load = () => {
 const inspect = (state) => {
   const files = required(state.phase, state.mode).map((file) => ({ file, exists: existsSync(path.join(dir, file)) }));
   const missing = files.filter((entry) => !entry.exists).map((entry) => entry.file);
-  let acceptanceOk = true;
   if (state.phase === 'verify' && !missing.length) {
     try {
-      acceptanceOk = JSON.parse(readFileSync(path.join(dir, 'acceptance.json'), 'utf8')).ok === true;
+      if (JSON.parse(readFileSync(path.join(dir, 'acceptance.json'), 'utf8')).ok !== true) missing.push('acceptance.json (ok must be true)');
     } catch {
-      acceptanceOk = false;
+      missing.push('acceptance.json (unreadable)');
     }
-    if (!acceptanceOk) missing.push('acceptance.json (ok must be true)');
+  }
+  if (state.phase === 'refine') {
+    const refineFile = path.join(dir, 'refine.md');
+    const acceptanceFile = path.join(dir, 'acceptance.json');
+    if (!existsSync(acceptanceFile)) missing.push('acceptance.json (missing)');
+    else if (existsSync(refineFile) && statSync(acceptanceFile).mtimeMs < statSync(refineFile).mtimeMs) missing.push('acceptance.json (rerun after refine)');
   }
   return { files, missing, ready: missing.length === 0 };
 };
@@ -114,5 +118,25 @@ if (command === 'advance') {
   process.exit(0);
 }
 
-console.error('Usage: node mode.mjs init --mode feature|fix|legacy|audit [--root DIR] | status [--root DIR] | advance [--root DIR]');
+if (command === 'rewind') {
+  const state = load();
+  const phases = phasesFor(state.mode);
+  const index = phases.indexOf(state.phase);
+  const reason = option('--reason', '');
+  if (!reason) {
+    console.error('rewind requires --reason "<why>"');
+    process.exit(2);
+  }
+  if (index <= 0) {
+    console.error(`Cannot rewind from ${state.phase}`);
+    process.exit(1);
+  }
+  state.phase = phases[index - 1];
+  state.history.push({ phase: state.phase, at: new Date().toISOString(), rewind: reason });
+  writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  console.log(JSON.stringify({ ok: true, phase: state.phase, reason }, null, 2));
+  process.exit(0);
+}
+
+console.error('Usage: node mode.mjs init --mode feature|fix|legacy|audit|light [--root DIR] | status [--root DIR] | advance [--root DIR] | rewind --reason "<why>" [--root DIR]');
 process.exit(2);

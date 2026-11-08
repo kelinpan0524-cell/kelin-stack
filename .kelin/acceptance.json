@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "total": 7,
+  "failed": 0,
+  "rows": [
+    {
+      "id": "unit-tests",
+      "exit": 0
+    },
+    {
+      "id": "offline",
+      "exit": 0
+    },
+    {
+      "id": "agents",
+      "exit": 0
+    },
+    {
+      "id": "guards",
+      "exit": 0
+    },
+    {
+      "id": "neat",
+      "exit": 0
+    },
+    {
+      "id": "evals",
+      "exit": 0
+    },
+    {
+      "id": "verify-stack",
+      "exit": 0
+    }
+  ]
+}

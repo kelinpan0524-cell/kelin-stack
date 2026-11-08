@@ -1,0 +1,14 @@
+{
+  "base": "..",
+  "roots": ["skills", "agents", "evals"],
+  "owners": [
+    { "pattern": "skills/*/SKILL.md", "feature": "skill-invocation", "verify": "无头会话调用并断言 Skill 被调用" },
+    { "pattern": "skills/*/scripts/**", "feature": "tools", "verify": "verify-stack tools 检查" },
+    { "pattern": "skills/*/templates/**", "feature": "templates", "verify": "goal-check / prd-check / repo-check" },
+    { "pattern": "skills/*/features/**", "feature": "verifier-config", "verify": "verify-stack catalog" },
+    { "pattern": "skills/*/tests/**", "feature": "unit-tests", "verify": "node --test" },
+    { "pattern": "agents/**", "feature": "agents", "verify": "agents-check + CLI catalog" },
+    { "pattern": "evals/**", "feature": "evals", "verify": "skill-eval 触发检查" }
+  ],
+  "nonRuntime": ["README.md", "AGENTS.md", "NOTICE", "LICENSE", "guards.json", "neat.json"]
+}
