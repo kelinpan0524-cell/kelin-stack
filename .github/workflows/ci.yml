@@ -13,4 +13,6 @@ jobs:
         with:
           node-version: 22
       - run: node --test skills/kelin-verify-stack/tests/core.test.mjs
+      - run: node --test skills/kelin-verify-stack/tests/mode.test.mjs
       - run: node skills/kelin-verify-stack/scripts/offline-check.mjs
+      - run: node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md

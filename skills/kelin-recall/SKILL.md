@@ -16,7 +16,7 @@ description: 接手或续做一件事之前，从仓库状态、提交历史、�
 
 ## 读取顺序（按成本从低到高）
 
-1. **任务板/文档**：项目 `AGENTS.md`、`README`、任务板里“进行中”的条目；
+1. **任务板/文档**：项目 `AGENTS.md`、`README`、任务板里“进行中”的条目。AGENTS.md 缺失或明显过期时，先跑 `kelin-agents`；
 2. **git**：
    ```sh
    git status --short

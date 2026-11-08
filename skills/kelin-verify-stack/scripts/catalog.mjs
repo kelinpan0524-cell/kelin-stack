@@ -369,6 +369,25 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-budget:range', payload && payload.maxAgents >= 0 && payload.maxAgents <= 2 && typeof payload.allowHeavy === 'boolean', payload ? `maxAgents=${payload.maxAgents}` : 'no json'));
     rows.push({ tool: 'kelin-mode/scripts/budget.mjs', maxAgents: payload?.maxAgents ?? null });
   }
+  const kelinAgents = path.join(ctx.pluginRoot, 'skills/kelin-agents/scripts/agents-check.mjs');
+  if (existsSync(kelinAgents)) {
+    const dir = path.join(ctx.tempDir, 'agents-repo');
+    await mkdir(path.join(dir, 'docs'), { recursive: true });
+    await writeFile(path.join(dir, 'docs/deploy.md'), 'deploy\n');
+    const good = path.join(dir, 'AGENTS.md');
+    await writeFile(good, '# AGENTS.md\n\n## 怎么跑\n- 测试：`npm test`\n\n## 硬约束\n- 用 uv，不用 pip\n\n## 更多\n- [deploy](docs/deploy.md)\n');
+    const accepted = await run(process.execPath, [kelinAgents, good], { timeoutMs: 30_000 });
+    const bad = path.join(dir, 'AGENTS.bad.md');
+    const filler = Array.from({ length: 205 }, (_, index) => `- rule ${index} keeps the file long enough to fail the budget`);
+    const fakeCredential = `api_key = "${['runtime', 'secret', '1234'].join('-')}"`;
+    await writeFile(bad, ['# AGENTS.md', '## 怎么跑', '- 测试：`npm test`', ...filler, '- rule 1 keeps the file long enough to fail the budget', '- [missing](docs/nope.md)', fakeCredential].join('\n'));
+    const rejected = await run(process.execPath, [kelinAgents, bad], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-agents:accepts', accepted.code === 0, `exit ${accepted.code}`));
+    assertions.push(assertion('kelin-agents:blocks-long', rejected.code === 1 && rejected.stdout.includes('too-long'), `exit ${rejected.code}`));
+    assertions.push(assertion('kelin-agents:blocks-broken-link', rejected.stdout.includes('broken-link'), 'links'));
+    assertions.push(assertion('kelin-agents:blocks-secret', rejected.stdout.includes('secret'), 'secrets'));
+    rows.push({ tool: 'kelin-agents/scripts/agents-check.mjs', acceptExit: accepted.code, rejectExit: rejected.code });
+  }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
   }

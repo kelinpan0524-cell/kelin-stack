@@ -98,7 +98,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 ## 每个阶段做什么
 
-**intake**：读项目 `AGENTS.md`、`git status`、最近提交；判断模式和风险级别。高风险（动数据、动权限、对外接口）先停下来问。
+**intake**：读项目 `AGENTS.md`、`git status`、最近提交；判断模式和风险级别。没有 AGENTS.md 就先用 `kelin-agents` 初始化；超过 150 行先精简；`agents-check` 有失败项先修，再开工。高风险（动数据、动权限、对外接口）先停下来问。
 
 **map**：用 `kelin-map` 建或更新功能地图。只改一小块时写 `scope.md`：影响哪些文件、哪些调用方、哪些测试。
 
@@ -114,7 +114,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **ship**：`kelin-ship` 跑 `preflight.mjs`，开 PR，`kelin-watch` 盯 CI。**部署不在这一步**。
 
-**done**：`kelin-reflect` 把结论写回 AGENTS.md 或记忆。
+**done**：`kelin-reflect` 把结论写回 AGENTS.md 或记忆。写回前跑一次 `kelin-agents` 的 `agents-check`，只加这次真实踩过的坑，不要写进度。
 
 ## 多代理与内存预算（24GB）
 

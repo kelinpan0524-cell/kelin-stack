@@ -68,5 +68,15 @@
         { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "像刚接手这个仓库" }
       ]
     }
+  ],
+  "zcode:skill-invocation:kelin-agents": [
+    {
+      "id": "readback-constraints",
+      "prompt": "/skill {qualified} 读这个 skill。把「给 agent 的硬约束清单」那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "给 agent 的硬约束清单" }
+      ]
+    }
   ]
 }
