@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "autonomy": {
+    "allow": ["read", "edit", "run-tests", "commit", "open-pr"],
+    "ask": ["deploy", "delete-data", "force-push", "publish-release", "send-message", "spend", "change-permissions"]
+  },
+  "paths": {
+    "writable": ["skills/", "agents/", "evals/", "docs/", "agents-digest/", "README.md", "AGENTS.md", "NOTICE"],
+    "forbidden": [".env", "secrets/", "*.pem"]
+  },
+  "checks": {
+    "required": ["unit-tests", "offline", "agents", "guards", "neat", "evals", "docs"]
+  },
+  "release": {
+    "bump": "minor",
+    "require": ["ci-green", "verify-receipt", "changelog"]
+  },
+  "budget": {
+    "maxAgents": 2,
+    "maxLiveEvals": 2
+  }
+}

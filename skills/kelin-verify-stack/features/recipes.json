@@ -4,8 +4,17 @@
       "id": "readback-rule-3",
       "prompt": "/skill {qualified} 读这个 skill。把第 3 条原则里写着「没跑就是没做」的那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "没跑就是没做" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "没跑就是没做"
+        }
       ]
     }
   ],
@@ -14,8 +23,17 @@
       "id": "readback-verification-sentence",
       "prompt": "/skill {qualified} 读这个 skill。把「步骤」第 1 节最后关于“验收标准写不出来”的那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "验收标准写不出可执行形式，说明还没想清楚，停下来问。" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "验收标准写不出可执行形式，说明还没想清楚，停下来问。"
+        }
       ]
     }
   ],
@@ -24,8 +42,17 @@
       "id": "readback-routing",
       "prompt": "/skill {qualified} 读这个 skill。把开头那句「你说一句要什么」所在的整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "调哪个 skill、什么时候停" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "调哪个 skill、什么时候停"
+        }
       ]
     }
   ],
@@ -34,8 +61,17 @@
       "id": "readback-render-first",
       "prompt": "/skill {qualified} 读这个 skill。把「先看渲染结果，再谈审美」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "先看渲染结果，再谈审美" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "先看渲染结果，再谈审美"
+        }
       ]
     }
   ],
@@ -44,8 +80,17 @@
       "id": "readback-evidence",
       "prompt": "/skill {qualified} 读这个 skill。把「能让错误代码失败的检查」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "能让错误代码失败的检查" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "能让错误代码失败的检查"
+        }
       ]
     }
   ],
@@ -54,8 +99,17 @@
       "id": "readback-every-line",
       "prompt": "/skill {qualified} 读这个 skill。把「让每一行都必须存在」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "让每一行都必须存在" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "让每一行都必须存在"
+        }
       ]
     }
   ],
@@ -64,8 +118,17 @@
       "id": "readback-inherit",
       "prompt": "/skill {qualified} 读这个 skill。把开头「像刚接手这个仓库」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "像刚接手这个仓库" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "像刚接手这个仓库"
+        }
       ]
     }
   ],
@@ -74,8 +137,17 @@
       "id": "readback-constraints",
       "prompt": "/skill {qualified} 读这个 skill。把「给 agent 的硬约束清单」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "给 agent 的硬约束清单" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "给 agent 的硬约束清单"
+        }
       ]
     }
   ],
@@ -84,8 +156,17 @@
       "id": "readback-machine-guard",
       "prompt": "/skill {qualified} 读这个 skill。把「下一次同样的错误必须被机器拦住」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "下一次同样的错误必须被机器拦住" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "下一次同样的错误必须被机器拦住"
+        }
       ]
     }
   ],
@@ -94,8 +175,17 @@
       "id": "readback-enforce",
       "prompt": "/skill {qualified} 读这个 skill。把「skill 靠自觉，CI 靠强制」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "skill 靠自觉，CI 靠强制" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "skill 靠自觉，CI 靠强制"
+        }
       ]
     }
   ],
@@ -104,8 +194,17 @@
       "id": "readback-single-home",
       "prompt": "/skill {qualified} 读这个 skill。把「一个事实只有一个家」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "一个事实只有一个家" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "一个事实只有一个家"
+        }
       ]
     }
   ],
@@ -114,8 +213,17 @@
       "id": "readback-safety",
       "prompt": "/skill {qualified} 读这个 skill。把「一个人的错误，不能变成所有人的损失」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "一个人的错误，不能变成所有人的损失" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "一个人的错误，不能变成所有人的损失"
+        }
       ]
     }
   ],
@@ -124,8 +232,17 @@
       "id": "readback-plain",
       "prompt": "/skill {qualified} 读这个 skill。把「让读者一眼知道你在说什么」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "让读者一眼知道你在说什么" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "让读者一眼知道你在说什么"
+        }
       ]
     }
   ],
@@ -134,8 +251,17 @@
       "id": "readback-map-first",
       "prompt": "/skill {qualified} 读这个 skill。把「仓库一多，乱的不是代码」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "仓库一多，乱的不是代码" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "仓库一多，乱的不是代码"
+        }
       ]
     }
   ],
@@ -144,8 +270,17 @@
       "id": "readback-skill-is-code",
       "prompt": "/skill {qualified} 读这个 skill。把「skill 也是代码」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "skill 也是代码" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "skill 也是代码"
+        }
       ]
     }
   ],
@@ -154,8 +289,36 @@
       "id": "readback-draft-first",
       "prompt": "/skill {qualified} 读这个 skill。把「先给草稿，再让他改」那一整句原样写进 ./answer.md，然后回复 DONE。",
       "assertions": [
-        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
-        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "先给草稿，再让他改" }
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "先给草稿，再让他改"
+        }
+      ]
+    }
+  ],
+  "zcode:skill-invocation:kelin-docs": [
+    {
+      "id": "readback-generated",
+      "prompt": "/skill {qualified} 读这个 skill。把「手写的索引一定会漂移」那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "verbatim-body",
+          "type": "file_contains",
+          "path": "answer.md",
+          "value": "手写的索引一定会漂移"
+        }
       ]
     }
   ]

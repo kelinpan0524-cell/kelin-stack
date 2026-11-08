@@ -15,6 +15,7 @@
 - 版本号同时改 `.zcode-plugin/plugin.json` 和 `.claude-plugin/plugin.json`，两处必须一致。
 - 报告和门禁字段只允许可打印 ASCII、不超过 160 字符、不含反引号和尖括号。
 - 同一事实只在一个地方写；改完文档跑 `node skills/kelin-neat/scripts/neat-check.mjs neat.json`。
+- `docs/skills.md` 和 `agents-digest/kelin-AGENTS.md` 是生成文件，勿手改；跑 `gen-docs.mjs` 更新，CI 查 drift。
 
 ## 完成标准
 

@@ -105,13 +105,29 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 `advance` 只检查产物文件是否存在；内容质量要用对应脚本校验（`goal-check`、`check-plan`、`map-check`、`run-acceptance`），校验不过不要 `advance`。**不要手改 `state.json` 绕过它。**
 
+## 策略文件
+
+根目录放 `kelin-policy.json`（模板在 `skills/kelin-mode/templates/kelin-policy.json`）：
+
+- `autonomy.allow/ask`：能自动做什么、必须先问什么；
+- `paths.writable/forbidden`：能改哪些路径、绝对不碰哪些；
+- `checks.required`：交付前必须通过的检查；
+- `release`：版本策略和发布前置；
+- `budget.maxAgents/maxLiveEvals`：并发和 live 验证上限。
+
+```sh
+node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
+```
+
+没有这个文件时用默认边界，但不会因此扩大权限。
+
 ## 每个阶段做什么
 
-**intake**：读项目 `AGENTS.md`、`git status`、最近提交；判断模式和风险级别。没有 AGENTS.md 就先用 `kelin-agents` 初始化；超过 150 行先精简；`agents-check` 有失败项先修，再开工。高风险（动数据、动权限、对外接口）先停下来问。
+**intake**：读项目 `AGENTS.md`、`kelin-policy.json`（如果有）、`git status`、最近提交；判断模式和风险级别。策略里的 `allow` 可以直接做，`ask` 必须先问，写文件只落在 `paths.writable`，`forbidden` 不碰，子代理和 live 验证不超过 `budget`。没有 AGENTS.md 就先用 `kelin-agents` 初始化；超过 150 行先精简；`agents-check` 有失败项先修，再开工。高风险（动数据、动权限、对外接口）先停下来问。
 
 **map**：用 `kelin-map` 建或更新功能地图。只改一小块时写 `scope.md`：影响哪些文件、哪些调用方、哪些测试。
 
-**design**：`kelin-goal` 写目标契约，`kelin-plan` 拆任务，`kelin-architect` 出类型和签名，`kelin-blast-radius` 算影响面。产品类任务（有用户、权限、上传导出、数据量）先跑 `kelin-product`，把用户环境、权限矩阵、上传预览确认、分页和性能预算定下来。**停在这里等确认**，除非用户已明确授权连续执行。
+**design**：`kelin-goal` 写目标契约，`kelin-plan` 拆任务，`kelin-architect` 出类型和签名，`kelin-blast-radius` 算影响面。产品类任务（有用户、权限、上传导出、数据量）先跑 `kelin-product`，把用户环境、权限矩阵、上传预览确认、分页和性能预算定下来。feature/legacy 跨模块的计划，写完跑 `kelin-plan` 的计划评审门（产品 + 工程两个镜头，最多 2 个子代理），有 `pending` 决策就停。**停在这里等确认**，除非用户已明确授权连续执行。
 
 **build**：`kelin-tdd` 红-绿-重构。修 bug 时用 `kelin-guard` 选最强且最便宜的防再犯手段，并证明它在旧代码上会失败。每完成一个可验证单元就提交一次，提交信息带 `[ZCode]`。写 `build.md`：改了哪些文件、加了哪些测试和 guard、还剩什么。
 
@@ -121,9 +137,9 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **refine**：`kelin-refine` 按必要性阶梯删代码、合并重复、去掉没人用的抽象。改完重跑 verify。
 
-**ship**：`kelin-ship` 跑 `preflight.mjs`，开 PR，`kelin-watch` 盯 CI。**部署不在这一步**。
+**ship**：先跑 `kelin-neat` 把文档和代码对齐，再 `kelin-ship` 跑 `preflight.mjs`，开 PR，`kelin-watch` 盯 CI。**部署不在这一步**。
 
-**done**：先跑 `kelin-neat` 把文档和代码对齐，再用 `kelin-reflect` 把结论写回 AGENTS.md 或记忆。写回前跑一次 `kelin-agents` 的 `agents-check`，只加这次真实踩过的坑，不要写进度。
+**done**：只做 `kelin-reflect`。文档对齐已经在 ship 前完成，不要在这里补。
 
 ## 多代理与内存预算（24GB）
 
