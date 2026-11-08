@@ -27,7 +27,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
-## 一条链路，二十四个命令
+## 一条链路，二十六个命令
 
 **想清楚**
 
@@ -40,6 +40,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 | `/kelin-blast-radius` | 不知道改了会炸到哪 | 调用方/数据/测试/外部/回滚五面表 |
 | `/kelin-map` | 改哪该测什么靠猜 | `map-check.mjs` 校验功能地图全覆盖 |
 | `/kelin-legacy` | 老仓库不敢动 | 基线 + 热点 + 特征测试 + 切片改造 |
+| `/kelin-ci` | 规则只写在文档里，没人强制 | 装 CI 门禁 + PR 模板 |
 
 **做扎实**
 
@@ -59,6 +60,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 | `/kelin-audit` | 不知道仓库哪里最容易出事 | 六类问题、最多 20 条、每条四要素 |
 | `/kelin-refine` | 代码越写越多 | 必要性阶梯，删重复/猜测性抽象 |
 | `/kelin-decision-log` | 事后说不清为什么这么改 | `log.mjs` 追加决策记录并防表格公式注入 |
+| `/kelin-guard` | 同一个 bug 反复出现 | 回归测试/类型/lint/CI 阶梯，必须证明能拦住旧代码 |
 | `/kelin-ship` | 分支、PR、CI、部署乱 | `preflight.mjs` 拦截 main 直提/真实数据/密钥 |
 | `/kelin-release` | 手改版本号、没 CHANGELOG | `release.mjs` 默认 dry-run，发布需 `--confirm` |
 | `/kelin-watch` | CI 红了就重跑 | `watch.mjs` 只报新问题并分类失败原因 |
@@ -161,7 +163,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 24 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 26 个 | 每个都对应一个会真实发生的错误，不凑数 |
 | poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
 | SessionStart hook、多 provider runner、T3 | 不做 | 会改全局会话行为或与 ZCode 自身的模型调度冲突 |
 | 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
@@ -187,6 +189,7 @@ kelin-stack/
 │   ├── kelin-architect/SKILL.md
 │   ├── kelin-blast-radius/SKILL.md
 │   ├── kelin-map/{SKILL.md,scripts/map-check.mjs}
+│   ├── kelin-ci/{SKILL.md,scripts/install-ci.mjs,templates/*}
 │   ├── kelin-legacy/SKILL.md
 │   ├── kelin-tdd/SKILL.md
 │   ├── kelin-correctness/SKILL.md
@@ -197,6 +200,7 @@ kelin-stack/
 │   ├── kelin-audit/SKILL.md
 │   ├── kelin-refine/SKILL.md
 │   ├── kelin-decision-log/{SKILL.md,scripts/log.mjs}
+│   ├── kelin-guard/{SKILL.md,scripts/guard-check.mjs}
 │   ├── kelin-ship/{SKILL.md,scripts/preflight.mjs}
 │   ├── kelin-release/{SKILL.md,scripts/release.mjs}
 │   ├── kelin-watch/{SKILL.md,scripts/watch.mjs}

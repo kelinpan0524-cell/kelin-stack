@@ -388,6 +388,36 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-agents:blocks-secret', rejected.stdout.includes('secret'), 'secrets'));
     rows.push({ tool: 'kelin-agents/scripts/agents-check.mjs', acceptExit: accepted.code, rejectExit: rejected.code });
   }
+  const kelinGuard = path.join(ctx.pluginRoot, 'skills/kelin-guard/scripts/guard-check.mjs');
+  if (existsSync(kelinGuard)) {
+    const dir = path.join(ctx.tempDir, 'guard-repo');
+    await mkdir(path.join(dir, 'test'), { recursive: true });
+    await writeFile(path.join(dir, 'test/quote.test.js'), 'export {};\n');
+    const file = path.join(dir, 'guards.json');
+    const entry = { id: 'q0', bug: 'qty 0 divides by zero', rootCause: 'no qty>0 check', guard: { type: 'test', location: 'test/quote.test.js', command: 'node --test test/quote.test.js' }, proof: { command: 'revert then node --test test/quote.test.js', expected: 'fail-on-old' } };
+    await writeFile(file, JSON.stringify({ guards: [entry] }));
+    const accepted = await run(process.execPath, [kelinGuard, file], { timeoutMs: 30_000 });
+    await writeFile(file, JSON.stringify({ guards: [{ ...entry, proof: undefined }] }));
+    const rejected = await run(process.execPath, [kelinGuard, file], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-guard:accepts', accepted.code === 0, `exit ${accepted.code}`));
+    assertions.push(assertion('kelin-guard:requires-proof', rejected.code === 1 && rejected.stdout.includes('proof.expected'), `exit ${rejected.code}`));
+    rows.push({ tool: 'kelin-guard/scripts/guard-check.mjs', acceptExit: accepted.code, rejectExit: rejected.code });
+  }
+  const kelinCi = path.join(ctx.pluginRoot, 'skills/kelin-ci/scripts/install-ci.mjs');
+  if (existsSync(kelinCi)) {
+    const repo = path.join(ctx.tempDir, 'ci-repo');
+    await mkdir(repo, { recursive: true });
+    const first = await run(process.execPath, [kelinCi, repo, '--test', 'node --test'], { timeoutMs: 30_000 });
+    const workflow = path.join(repo, '.github', 'workflows', 'kelin-gate.yml');
+    const body = existsSync(workflow) ? await readFile(workflow, 'utf8') : '';
+    const second = await run(process.execPath, [kelinCi, repo, '--test', 'node --test'], { timeoutMs: 30_000 });
+    const forced = await run(process.execPath, [kelinCi, repo, '--test', 'node --test', '--force'], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-ci:installs', first.code === 0 && body.includes('node --test') && body.includes('agents-check'), `exit ${first.code}`));
+    assertions.push(assertion('kelin-ci:pr-template', existsSync(path.join(repo, '.github', 'pull_request_template.md')), 'template'));
+    assertions.push(assertion('kelin-ci:no-overwrite', second.code === 0 && second.stdout.includes('skipped'), `exit ${second.code}`));
+    assertions.push(assertion('kelin-ci:force-overwrites', forced.code === 0 && forced.stdout.includes('kelin-gate.yml'), `exit ${forced.code}`));
+    rows.push({ tool: 'kelin-ci/scripts/install-ci.mjs', installExit: first.code, skipExit: second.code });
+  }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
   }
