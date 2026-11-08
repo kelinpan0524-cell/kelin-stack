@@ -439,6 +439,24 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-neat:residue-warn', dirty.stdout.includes('plan-residue') && dirty.stdout.includes('duplicate'), 'warnings'));
     rows.push({ tool: 'kelin-neat/scripts/neat-check.mjs', cleanExit: clean.code, dirtyExit: dirty.code });
   }
+  const kelinProduct = path.join(ctx.pluginRoot, 'skills/kelin-product/scripts/prd-check.mjs');
+  if (existsSync(kelinProduct)) {
+    const good = path.join(ctx.tempDir, 'prd-good.md');
+    await writeFile(good, [
+      '# PRD', '## 目标用户与环境', '- 岗位：报价员；设备：老笔记本；网络：内网',
+      '## 核心流程', '1. 上传 → 预览 → 确认', '## 权限与审批', '- 角色：报价员、主管；审批：主管复核；申请人不能自批',
+      '## 数据入口（上传/导入）', '- 先解析预览，人工确认后入库', '## 数据出口（导出）', '- xlsx，列顺序与页面一致',
+      '## 异常与防错', '- 行号 + 列名 + 原因', '## 性能预算', '- 首屏 < 3 秒；常驻内存 < 200MB；列表分页',
+      '## 验收标准', '- [ ] `npm test` 退出 0', '## 技术栈与理由', '- 选轻量方案，匹配老设备', '## 不做的事', '- 不做移动端',
+    ].join('\n'));
+    const accepted = await run(process.execPath, [kelinProduct, good], { timeoutMs: 30_000 });
+    const bad = path.join(ctx.tempDir, 'prd-bad.md');
+    await writeFile(bad, '# PRD\n## 目标用户与环境\n- 所有人\n');
+    const rejected = await run(process.execPath, [kelinProduct, bad], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-product:accepts', accepted.code === 0, `exit ${accepted.code}`));
+    assertions.push(assertion('kelin-product:rejects', rejected.code === 1 && rejected.stdout.includes('权限与审批'), `exit ${rejected.code}`));
+    rows.push({ tool: 'kelin-product/scripts/prd-check.mjs', acceptExit: accepted.code, rejectExit: rejected.code });
+  }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
   }
