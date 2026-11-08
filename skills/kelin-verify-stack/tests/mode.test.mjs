@@ -47,11 +47,19 @@ test('mode walks every phase and enforces artifacts', async () => {
   await artifact(root, 'acceptance.json', '{"ok": true}\n');
   assert.equal(run(['advance'], root).code, 0);
 
-  for (const [file, phase] of [['review.md', 'refine'], ['refine.md', 'ship'], ['ship.md', 'reflect']]) {
-    await artifact(root, file);
-    assert.equal(run(['advance'], root).code, 0);
-    assert.match(run(['status'], root).stdout, new RegExp(`"phase": "${phase}"`));
-  }
+  await artifact(root, 'review.md');
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "refine"/);
+
+  await artifact(root, 'refine.md');
+  assert.equal(run(['advance'], root).code, 1, 'refine must rerun acceptance before ship');
+  await artifact(root, 'acceptance.json', '{"ok": true}\n');
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "ship"/);
+
+  await artifact(root, 'ship.md');
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "reflect"/);
 
   await artifact(root, 'reflect.md');
   assert.equal(run(['advance'], root).code, 0);
@@ -100,4 +108,16 @@ test('init rejects a second run and an unknown mode', async () => {
   assert.equal(run(['init', '--mode', 'feature'], root).code, 1);
   const other = await mkdtemp(path.join(tmpdir(), 'kelin-mode-'));
   assert.equal(run(['init', '--mode', 'nope'], other).code, 2);
+});
+
+test('rewind moves one phase back and records the reason', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-rewind-'));
+  assert.equal(run(['init', '--mode', 'feature'], root).code, 0);
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "map"/);
+  assert.equal(run(['rewind'], root).code, 2);
+  assert.equal(run(['rewind', '--reason', 'recheck scope'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "intake"/);
+  const state = JSON.parse(await readFile(path.join(root, '.kelin', 'state.json'), 'utf8'));
+  assert.equal(state.history.at(-1).rewind, 'recheck scope');
 });

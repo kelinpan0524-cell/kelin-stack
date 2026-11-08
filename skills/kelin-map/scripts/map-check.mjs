@@ -4,7 +4,8 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const file = process.argv[2] || 'feature-map.json';
-const base = path.dirname(path.resolve(file));
+const configDir = path.dirname(path.resolve(file));
+let base = configDir;
 
 const glob = (pattern) => {
   if (!pattern.includes('*')) return (target) => target === pattern;
@@ -38,9 +39,13 @@ const roots = Array.isArray(spec.roots) ? spec.roots : [];
 const owners = Array.isArray(spec.owners) ? spec.owners : [];
 const nonRuntime = Array.isArray(spec.nonRuntime) ? spec.nonRuntime : [];
 
+if (typeof spec.base === 'string' && spec.base) base = path.resolve(configDir, spec.base);
 if (!roots.length) problems.push('roots is empty');
 if (!owners.length) problems.push('owners is empty');
 
+for (const root of roots) {
+  if (typeof root !== 'string' || !root || root.startsWith('/') || root.includes('..')) problems.push(`unsafe root: ${root}`);
+}
 for (const entry of [...owners, ...nonRuntime.map((pattern) => ({ pattern }))]) {
   if (typeof entry.pattern !== 'string' || !entry.pattern || entry.pattern.startsWith('/') || entry.pattern.includes('..')) {
     problems.push(`unsafe pattern: ${entry.pattern}`);

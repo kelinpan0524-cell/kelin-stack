@@ -60,7 +60,7 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 | 标准 | 普通功能 | `acceptance.json` + 边界矩阵 |
 | 严格 | 钱、权限、迁移、对外接口 | 标准 + 差分对照或变异 sanity |
 
-## 四种模式
+## 五种模式
 
 | 模式 | 适用 | 主链路 |
 | --- | --- | --- |
@@ -68,7 +68,7 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 | `feature` | 加功能、改行为 | goal → plan → architect → map → tdd → verify → review → refine → ship |
 | `fix` | 修 bug、回归 | correctness（复现测试）→ tdd → guard → verify → review → ship |
 | `legacy` | 老仓库改造、迁移 | legacy（基线+地图+热点）→ plan → tdd（切片）→ verify → review → refine → ship |
-| `audit` | 只审不改 | audit → map → plan（修复清单） |
+| `audit` | 只审不改 | 按状态机走；build 记录发现，refine 阶段才改 |
 
 模式由 `kelin-mode` 在 intake 阶段判断；判断不了就问一句，不要猜。
 
@@ -103,7 +103,7 @@ node skills/kelin-mode/scripts/mode.mjs status
 node skills/kelin-mode/scripts/mode.mjs advance
 ```
 
-`advance` 会检查当前阶段的产物；缺了会列出缺什么，退出 1。**不要手改 `state.json` 绕过它。**
+`advance` 只检查产物文件是否存在；内容质量要用对应脚本校验（`goal-check`、`check-plan`、`map-check`、`run-acceptance`），校验不过不要 `advance`。**不要手改 `state.json` 绕过它。**
 
 ## 每个阶段做什么
 
