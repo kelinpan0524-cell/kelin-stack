@@ -1,6 +1,6 @@
 ---
 name: kelin-agents
-description: 初始化、审查和精简仓库的 AGENTS.md：只保留 agent 自己发现不了的硬约束，控制在 100-150 行，超了先删不压缩，缺了就按模板建。用户说“写个 AGENTS.md”“agent.md 太长了”“整理一下项目规则”“新仓库初始化”时使用。
+description: 初始化、审查和精简仓库的 AGENTS.md，并幂等补上 kelin-stack 工作流块：只保留 agent 自己发现不了的硬约束，控制在 100-150 行，超了先删不压缩，缺了就按模板建。用户说“写个 AGENTS.md”“agent.md 太长了”“整理一下项目规则”“新仓库初始化”时使用。
 ---
 
 # AGENTS.md 维护
@@ -108,9 +108,21 @@ node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
 - monorepo：根目录只放全局约束，子包各放一个短的，根里用链接指过去；
 - 长内容：放 `docs/` 或 skill，AGENTS.md 只留索引。
 
+## 自动补工作流块
+
+已有 AGENTS.md 时，用脚本补一段带标记的工作流规则：
+
+```sh
+node skills/kelin-agents/scripts/ensure-workflow.mjs AGENTS.md
+```
+
+- 只追加 `<!-- kelin:workflow:start -->` 到 `<!-- kelin:workflow:end -->` 之间的块，不动其他内容；
+- 已经有标记、或已经写了等价的 kelin-mode 规则，就跳过；
+- 跑多少次都只有一份；`--dry-run` 先看要加什么。
+
 ## 和 kelin-mode 的衔接
 
-- **intake**：先读 AGENTS.md。没有就 `init`；超过 150 行先 `trim`；`agents-check` 有失败项先修，再开工。
+- **intake**：先跑 `ensure-workflow` 补工作流块；超过 150 行先 `trim`；`agents-check` 有失败项先修，再开工。
 - **done / reflect**：只把这次真实踩过的坑写回，写完再跑一次 `agents-check`。
 - 不要在每个阶段都往 AGENTS.md 里追加；它是长期约束，不是进度日志。
 
