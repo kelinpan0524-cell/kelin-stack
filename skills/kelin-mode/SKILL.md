@@ -57,7 +57,7 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 | 模式 | 适用 | 主链路 |
 | --- | --- | --- |
 | `feature` | 加功能、改行为 | goal → plan → architect → map → tdd → verify → review → refine → ship |
-| `fix` | 修 bug、回归 | correctness（复现测试）→ tdd → verify → review → ship |
+| `fix` | 修 bug、回归 | correctness（复现测试）→ tdd → guard → verify → review → ship |
 | `legacy` | 老仓库改造、迁移 | legacy（基线+地图+热点）→ plan → tdd（切片）→ verify → review → refine → ship |
 | `audit` | 只审不改 | audit → map → plan（修复清单） |
 
@@ -104,7 +104,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **design**：`kelin-goal` 写目标契约，`kelin-plan` 拆任务，`kelin-architect` 出类型和签名，`kelin-blast-radius` 算影响面。**停在这里等确认**，除非用户已明确授权连续执行。
 
-**build**：`kelin-tdd` 红-绿-重构。每完成一个可验证单元就提交一次，提交信息带 `[ZCode]`。写 `build.md`：改了哪些文件、加了哪些测试、还剩什么。
+**build**：`kelin-tdd` 红-绿-重构。修 bug 时用 `kelin-guard` 选最强且最便宜的防再犯手段，并证明它在旧代码上会失败。每完成一个可验证单元就提交一次，提交信息带 `[ZCode]`。写 `build.md`：改了哪些文件、加了哪些测试和 guard、还剩什么。
 
 **verify**：把验收写成 `verify.json`，用 `run-acceptance.mjs` 跑出 `acceptance.json`。任何一条失败就回 build，不要进 review。
 

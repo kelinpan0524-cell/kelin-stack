@@ -1,0 +1,24 @@
+name: kelin-gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: tests
+        run: __TEST_COMMAND__
+      - name: agents budget
+        run: node .kelin/ci/agents-check.mjs AGENTS.md
+      - name: feature map
+        run: |
+          if [ -f feature-map.json ]; then node .kelin/ci/map-check.mjs feature-map.json; else echo "no feature-map.json"; fi
+      - name: acceptance
+        run: |
+          if [ -f verify.json ]; then node .kelin/ci/run-acceptance.mjs verify.json; else echo "no verify.json"; fi

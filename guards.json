@@ -1,0 +1,32 @@
+{
+  "guards": [
+    {
+      "id": "mode-reflect-phase",
+      "bug": "reflect.md was never validated because the state machine jumped from ship straight to done",
+      "rootCause": "PHASES omitted a reflect phase, so required('done') was unreachable",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-verify-stack/tests/mode.test.mjs",
+        "command": "node --test skills/kelin-verify-stack/tests/mode.test.mjs"
+      },
+      "proof": {
+        "command": "revert the reflect phase, then node --test skills/kelin-verify-stack/tests/mode.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "agents-check-title-and-command-section",
+      "bug": "agents-check reported the H1 title as an empty section and did not recognize 怎么跑 as a commands section",
+      "rootCause": "empty-section scanned level-1 headings; the command regex lacked 跑",
+      "guard": {
+        "type": "ci",
+        "location": "skills/kelin-verify-stack/scripts/catalog.mjs",
+        "command": "node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --no-live"
+      },
+      "proof": {
+        "command": "revert agents-check, rerun static; kelin-agents:accepts must fail",
+        "expected": "fail-on-old"
+      }
+    }
+  ]
+}
