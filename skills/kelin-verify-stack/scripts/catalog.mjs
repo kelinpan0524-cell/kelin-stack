@@ -462,6 +462,14 @@ async function checkTools(ctx) {
     const batchOk = await run(process.execPath, [kelinProduct, batch], { timeoutMs: 30_000 });
     assertions.push(assertion('kelin-product:batch-required', batchMissing.code === 1 && batchMissing.stdout.includes('批量修改'), `exit ${batchMissing.code}`));
     assertions.push(assertion('kelin-product:batch-accepts', batchOk.code === 0, `exit ${batchOk.code}`));
+    const clarify = path.join(ctx.tempDir, 'prd-clarify.md');
+    await writeFile(clarify, `${await readFile(good, 'utf8')}\n[待确认] a\n[待确认] b\n[待确认] c\n[待确认] d\n`);
+    const clarifyResult = await run(process.execPath, [kelinProduct, clarify], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-product:clarify-cap', clarifyResult.code === 1 && clarifyResult.stdout.includes('待确认'), `exit ${clarifyResult.code}`));
+    const vague = path.join(ctx.tempDir, 'prd-vague.md');
+    await writeFile(vague, (await readFile(good, 'utf8')).replace('- [ ] `npm test` 退出 0', '- [ ] 界面美观，功能正常'));
+    const vagueResult = await run(process.execPath, [kelinProduct, vague], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-product:measurable', vagueResult.code === 1 && vagueResult.stdout.includes('可验证'), `exit ${vagueResult.code}`));
     rows.push({ tool: 'kelin-product/scripts/prd-check.mjs', acceptExit: accepted.code, rejectExit: rejected.code });
   }
   const kelinUnslop = path.join(ctx.pluginRoot, 'skills/kelin-unslop/scripts/slop-check.mjs');
