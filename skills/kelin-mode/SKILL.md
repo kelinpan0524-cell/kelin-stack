@@ -115,7 +115,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **ship**：`kelin-ship` 跑 `preflight.mjs`，开 PR，`kelin-watch` 盯 CI。**部署不在这一步**。
 
-**done**：`kelin-reflect` 把结论写回 AGENTS.md 或记忆。写回前跑一次 `kelin-agents` 的 `agents-check`，只加这次真实踩过的坑，不要写进度。
+**done**：先跑 `kelin-neat` 把文档和代码对齐，再用 `kelin-reflect` 把结论写回 AGENTS.md 或记忆。写回前跑一次 `kelin-agents` 的 `agents-check`，只加这次真实踩过的坑，不要写进度。
 
 ## 多代理与内存预算（24GB）
 

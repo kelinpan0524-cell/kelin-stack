@@ -27,7 +27,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
-## 一条链路，二十六个命令
+## 一条链路，二十七个命令
 
 **想清楚**
 
@@ -71,6 +71,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 | --- | --- | --- |
 | `/kelin-recall` | 隔几天忘了做到哪 | 从 git、任务板、记忆重建状态 |
 | `/kelin-agents` | AGENTS.md 越写越长或根本没写 | `agents-check.mjs` 查长度/重复/断链/秘密 |
+| `/kelin-neat` | README、docs、旧计划互相矛盾 | `neat-check.mjs` 查断链/端口冲突/版本漂移/重复 |
 | `/kelin-reflect` | 同样的问题反复犯 | 结论写回 AGENTS.md 或记忆 |
 | `/kelin-principles` | 底线被忘记 | 十条原则，每条带反例 |
 
@@ -185,7 +186,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 26 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 27 个 | 每个都对应一个会真实发生的错误，不凑数 |
 | poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
 | SessionStart hook、多 provider runner、T3 | 不做 | 会改全局会话行为或与 ZCode 自身的模型调度冲突 |
 | 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
@@ -228,6 +229,7 @@ kelin-stack/
 │   ├── kelin-watch/{SKILL.md,scripts/watch.mjs}
 │   ├── kelin-recall/SKILL.md
 │   ├── kelin-agents/{SKILL.md,scripts/agents-check.mjs}
+│   ├── kelin-neat/{SKILL.md,scripts/neat-check.mjs}
 │   ├── kelin-reflect/SKILL.md
 │   ├── kelin-principles/SKILL.md
 │   └── kelin-verify-stack/
