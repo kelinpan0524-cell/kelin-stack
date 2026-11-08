@@ -422,6 +422,23 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-ci:force-overwrites', forced.code === 0 && forced.stdout.includes('kelin-gate.yml'), `exit ${forced.code}`));
     rows.push({ tool: 'kelin-ci/scripts/install-ci.mjs', installExit: first.code, skipExit: second.code });
   }
+  const kelinNeat = path.join(ctx.pluginRoot, 'skills/kelin-neat/scripts/neat-check.mjs');
+  if (existsSync(kelinNeat)) {
+    const dir = path.join(ctx.tempDir, 'neat-repo');
+    await mkdir(path.join(dir, 'docs'), { recursive: true });
+    await writeFile(path.join(dir, 'docs/a.md'), 'web: 3000\n');
+    await writeFile(path.join(dir, 'README.md'), 'web: 3000\n\n[doc](docs/a.md)\n');
+    const clean = await run(process.execPath, [kelinNeat, '--root', dir], { timeoutMs: 30_000 });
+    await writeFile(path.join(dir, 'docs/b.md'), 'web: 4000\n\n[missing](docs/nope.md)\n\nthis sentence is long enough to count as a duplicate across two docs\n');
+    await writeFile(path.join(dir, 'README.md'), 'web: 3000\n\n[doc](docs/a.md)\n\nthis sentence is long enough to count as a duplicate across two docs\n');
+    await writeFile(path.join(dir, 'PLAN.md'), '# plan\n');
+    const dirty = await run(process.execPath, [kelinNeat, '--root', dir], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-neat:clean', clean.code === 0, `exit ${clean.code}`));
+    assertions.push(assertion('kelin-neat:port-conflict', dirty.code === 1 && dirty.stdout.includes('port-conflict'), `exit ${dirty.code}`));
+    assertions.push(assertion('kelin-neat:broken-link', dirty.stdout.includes('broken-link'), 'links'));
+    assertions.push(assertion('kelin-neat:residue-warn', dirty.stdout.includes('plan-residue') && dirty.stdout.includes('duplicate'), 'warnings'));
+    rows.push({ tool: 'kelin-neat/scripts/neat-check.mjs', cleanExit: clean.code, dirtyExit: dirty.code });
+  }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
   }

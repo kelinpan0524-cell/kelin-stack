@@ -1,0 +1,5 @@
+{
+  "docs": ["README.md", "AGENTS.md", "docs/**/*.md"],
+  "ignore": ["node_modules/**", ".git/**", "dist/**", "out/**"],
+  "plans": ["PLAN.md", "TODO.md", "docs/plans/**"]
+}
