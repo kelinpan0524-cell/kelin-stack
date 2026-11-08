@@ -222,7 +222,11 @@ async function checkTools(ctx) {
     await writeFile(bad, '# 目标\n做一件事\n');
     const rejected = await run(process.execPath, [kelinPlan, bad], { timeoutMs: 30_000 });
     assertions.push(assertion('kelin-plan:rejects-incomplete', rejected.code === 1 && /验收标准/.test(rejected.stdout), `exit ${rejected.code}`));
-    rows.push({ tool: 'kelin-plan/scripts/check-plan.mjs', usageExit: usage.code, acceptExit: accepted.code, rejectExit: rejected.code });
+    const light = path.join(ctx.tempDir, 'light-plan.md');
+    await writeFile(light, '# 目标\n改一句文案\n\n# 验收标准\n- [ ] 页面显示新文案\n\n# 下一步\n- 改 `src/copy.ts`\n');
+    const lightAccepted = await run(process.execPath, [kelinPlan, light, '--level', 'light'], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-plan:light', lightAccepted.code === 0, `exit ${lightAccepted.code}`));
+    rows.push({ tool: 'kelin-plan/scripts/check-plan.mjs', usageExit: usage.code, acceptExit: accepted.code, rejectExit: rejected.code, lightExit: lightAccepted.code });
   }
   const kelinVerify = path.join(ctx.pluginRoot, 'skills/kelin-verify/scripts/run-acceptance.mjs');
   if (existsSync(kelinVerify)) {
@@ -412,7 +416,7 @@ async function checkTools(ctx) {
     const body = existsSync(workflow) ? await readFile(workflow, 'utf8') : '';
     const second = await run(process.execPath, [kelinCi, repo, '--test', 'node --test'], { timeoutMs: 30_000 });
     const forced = await run(process.execPath, [kelinCi, repo, '--test', 'node --test', '--force'], { timeoutMs: 30_000 });
-    assertions.push(assertion('kelin-ci:installs', first.code === 0 && body.includes('node --test') && body.includes('agents-check'), `exit ${first.code}`));
+    assertions.push(assertion('kelin-ci:installs', first.code === 0 && body.includes('node --test') && body.includes('agents-check') && body.includes('guard-check'), `exit ${first.code}`));
     assertions.push(assertion('kelin-ci:pr-template', existsSync(path.join(repo, '.github', 'pull_request_template.md')), 'template'));
     assertions.push(assertion('kelin-ci:no-overwrite', second.code === 0 && second.stdout.includes('skipped'), `exit ${second.code}`));
     assertions.push(assertion('kelin-ci:force-overwrites', forced.code === 0 && forced.stdout.includes('kelin-gate.yml'), `exit ${forced.code}`));

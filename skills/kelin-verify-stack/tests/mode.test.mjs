@@ -72,6 +72,28 @@ test('legacy mode requires a feature map instead of scope', async () => {
   assert.equal(run(['advance'], root).code, 0);
 });
 
+test('light mode skips map and review', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-light-'));
+  assert.equal(run(['init', '--mode', 'light'], root).code, 0);
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "design"/);
+  await artifact(root, 'goal.md');
+  await artifact(root, 'plan.md');
+  assert.equal(run(['advance'], root).code, 0);
+  await artifact(root, 'build.md');
+  assert.equal(run(['advance'], root).code, 0);
+  await artifact(root, 'verify.json');
+  await artifact(root, 'acceptance.json', '{"ok": true}\n');
+  assert.equal(run(['advance'], root).code, 0);
+  await artifact(root, 'ship.md');
+  assert.equal(run(['advance'], root).code, 0);
+  await artifact(root, 'reflect.md');
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "done"/);
+  const state = JSON.parse(await readFile(path.join(root, '.kelin', 'state.json'), 'utf8'));
+  assert.equal(state.history.length, 7);
+});
+
 test('init rejects a second run and an unknown mode', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-'));
   assert.equal(run(['init', '--mode', 'feature'], root).code, 0);

@@ -33,6 +33,7 @@ export function renderReport(receipt) {
     `- 开始：${receipt.started}`,
     `- 结束：${receipt.finished}`,
     `- 功能：${receipt.features.length} 个；断言：${assertions.length} 条（失败 ${failedAssertions.length} 条）；无头会话：${receipt.sessionsRun} 个`,
+    `- 模型消耗：${receipt.usage?.totalTokens ? `${receipt.usage.totalTokens.toLocaleString()} tokens（输入 ${receipt.usage.inputTokens.toLocaleString()}，缓存 ${receipt.usage.cacheReadTokens.toLocaleString()}）` : '无（全部为静态检查）'}`,
     '',
     '## 逐项结果',
     '',
