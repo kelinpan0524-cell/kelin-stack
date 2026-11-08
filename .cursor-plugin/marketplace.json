@@ -1,0 +1,16 @@
+{
+  "name": "kelin-stack-market",
+  "owner": {
+    "name": "Arono"
+  },
+  "metadata": {
+    "description": "Kelin Stack：把活干扎实的工作流插件"
+  },
+  "plugins": [
+    {
+      "name": "kelin-stack",
+      "source": ".",
+      "description": "规划、验证、自审、交付、接手、复盘，外加一套可执行的插件验证器。"
+    }
+  ]
+}

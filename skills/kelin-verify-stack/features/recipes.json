@@ -1,0 +1,22 @@
+{
+  "zcode:skill-invocation:kelin-principles": [
+    {
+      "id": "readback-rule-3",
+      "prompt": "/skill {qualified} 读这个 skill。把第 3 条原则里写着「没跑就是没做」的那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "没跑就是没做" }
+      ]
+    }
+  ],
+  "zcode:skill-invocation:kelin-plan": [
+    {
+      "id": "readback-verification-sentence",
+      "prompt": "/skill {qualified} 读这个 skill。把「步骤」第 1 节最后关于“验收标准写不出来”的那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "验收标准写不出可执行形式，说明还没想清楚，停下来问。" }
+      ]
+    }
+  ]
+}
