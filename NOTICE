@@ -13,6 +13,9 @@ This project is an independent ZCode implementation inspired by:
   Copyright Dietrich Gebert, MIT License. The necessity ladder, the
   over-engineering review rubric, the audit report structure, and the
   "shortcut:" comment convention used by kelin-refine and kelin-audit.
+- impeccable (Apache License 2.0) is an optional external UI skill. kelin-ui
+  delegates to it when it is installed and ships its own checklist otherwise.
+  No impeccable code or text is copied into this repository.
 
 No upstream source file is copied verbatim. The skill text, scripts, tests and
 verification harness in this repository were written for ZCode and translated

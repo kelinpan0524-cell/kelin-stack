@@ -14,7 +14,6 @@ const SKILL_ROOT = path.join(import.meta.dirname, '..');
 const REGISTRY = path.join(SKILL_ROOT, 'features', 'registry.json');
 const RECIPES = path.join(SKILL_ROOT, 'features', 'recipes.json');
 const SESSION_LIMIT = 12;
-const HARNESS = 'zcode';
 
 class Refused extends Error {}
 
@@ -202,6 +201,7 @@ async function runVerification(options) {
   const availableSet = new Set(available.map((entry) => entry.feature));
   let selected;
   let selection;
+  const skippedLive = [];
   if (options.features.length) {
     const unknown = options.features.filter((feature) => !availableSet.has(feature));
     if (unknown.length) throw new Error(`Unknown feature: ${unknown.join(', ')}`);
@@ -215,16 +215,25 @@ async function runVerification(options) {
   } else if (options.changed.length) {
     selection = classify({ paths: options.changed, registry });
     const reachable = new Set(selection.features);
-    selected = available.filter((entry) => reachable.has(entry.feature));
+    selected = available.filter((entry) => reachable.has(entry.feature) && (entry.kind === 'static' || options.auto || Boolean(recipes[entry.feature])));
+    const skipped = available.filter((entry) => reachable.has(entry.feature) && entry.kind === 'live' && !recipes[entry.feature] && !options.auto);
+    skippedLive.push(...skipped.map((entry) => entry.feature));
+    if (skipped.length) console.log(`--changed skips ${skipped.length} live features without a recipe (pass --auto to synthesize)`);
   } else if (options.all) {
     selection = { paths: [], skills: [], features: available.map((entry) => entry.feature).sort(), noRuntime: false };
-    selected = available;
+    selected = available.filter((entry) => entry.kind === 'static' || options.auto || Boolean(recipes[entry.feature]));
+    const skipped = available.filter((entry) => entry.kind === 'live' && !recipes[entry.feature] && !options.auto);
+    skippedLive.push(...skipped.map((entry) => entry.feature));
+    if (skipped.length) console.log(`--all skips ${skipped.length} live features without a recipe (pass --auto to synthesize)`);
   } else {
     throw new Refused('Name features with --feature, or pass --all / --changed');
   }
-  if (!selected.length) throw new Refused('No feature selected');
+  if (!selected.length) {
+    throw new Refused(skippedLive.length ? `Only live features without a recipe were selected: ${skippedLive.join(', ')}; pass --auto` : 'No feature selected');
+  }
 
   const cases = resolveCases({ selected, recipes, pluginMeta, pluginRoot, registry, auto: options.auto, noLive: options.noLive, timeout: options.timeout || 300_000 });
+  if (!cases.length) throw new Refused('No runnable features after filters; drop --no-live or name a static feature');
   const planned = cases.filter((entry) => entry.kind === 'live').length;
   console.log(`Planned headless sessions: ${planned} (limit ${SESSION_LIMIT})`);
   if (planned > SESSION_LIMIT && !options.wide) {

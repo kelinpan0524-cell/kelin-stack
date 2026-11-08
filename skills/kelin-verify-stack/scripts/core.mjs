@@ -106,10 +106,11 @@ export async function skillNames(pluginRoot, registry) {
 export async function inventory(pluginRoot, registry) {
   const features = [];
   const has = async (rel) => pathExists(path.join(pluginRoot, rel));
+  const firstDir = (patterns, fallback) => (patterns[0] || fallback).replace(/\/\*\*$/, '');
   const shipped = {
     agents: await has(registry.agents),
-    assets: await has('assets'),
-    hooks: await has('hooks'),
+    assets: await has(firstDir(registry.assets, 'assets')),
+    hooks: await has(firstDir(registry.hooks, 'hooks')),
   };
   const setupNames = (await skillNames(pluginRoot, registry)).filter((name) => name.startsWith('setup-'));
   for (const name of STATIC_FEATURES.filter((feature) => feature !== 'project-skill')) {

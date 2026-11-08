@@ -4,7 +4,7 @@ import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path';
 import { sha256 } from './io.mjs';
 
-const IGNORED = new Set(['.v2c', '.video_agent', '.DS_Store', 'node_modules', 'out']);
+const IGNORED = new Set(['.v2c', '.video_agent', '.DS_Store', 'node_modules']);
 
 export function parseRunJson(stdout) {
   const start = stdout.indexOf('{');

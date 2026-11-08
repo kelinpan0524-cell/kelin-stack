@@ -356,6 +356,19 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-mode:status', status.code === 0 && status.stdout.includes('"phase": "design"'), `exit ${status.code}`));
     rows.push({ tool: 'kelin-mode/scripts/mode.mjs', initExit: init.code, blockedExit: blocked.code, unblockedExit: unblocked.code });
   }
+  const kelinBudget = path.join(ctx.pluginRoot, 'skills/kelin-mode/scripts/budget.mjs');
+  if (existsSync(kelinBudget)) {
+    const result = await run(process.execPath, [kelinBudget], { timeoutMs: 30_000 });
+    let payload = null;
+    try {
+      payload = JSON.parse(result.stdout);
+    } catch {
+      payload = null;
+    }
+    assertions.push(assertion('kelin-budget:runs', result.code === 0 && Boolean(payload), `exit ${result.code}`));
+    assertions.push(assertion('kelin-budget:range', payload && payload.maxAgents >= 0 && payload.maxAgents <= 2 && typeof payload.allowHeavy === 'boolean', payload ? `maxAgents=${payload.maxAgents}` : 'no json'));
+    rows.push({ tool: 'kelin-mode/scripts/budget.mjs', maxAgents: payload?.maxAgents ?? null });
+  }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
   }
@@ -363,14 +376,16 @@ async function checkTools(ctx) {
 }
 
 async function checkSetup(ctx) {
-  const dir = path.join(ctx.pluginRoot, 'skills/setup-pstack');
-  if (!(await pathExists(dir))) {
+  const names = await skillNames(ctx.pluginRoot, ctx.registry);
+  const name = names.find((entry) => entry.startsWith('setup-'));
+  if (!name) {
     return { feature: `${ctx.harness}:setup`, kind: 'static', ok: true, applicable: false, assertions: [assertion('setup-shipped', true, 'not shipped')], details: {} };
   }
+  const dir = path.join(ctx.pluginRoot, ctx.registry.skills, name);
   const file = path.join(dir, 'SKILL.md');
   const parsed = parseFrontmatter(await readFile(file, 'utf8'));
   const assertions = [
-    assertion('setup-frontmatter', parsed.hasFrontmatter && parsed.data.name === 'setup-pstack', parsed.data.name || 'none'),
+    assertion('setup-frontmatter', parsed.hasFrontmatter && parsed.data.name === name, parsed.data.name || 'none'),
     assertion('setup-body', parsed.body.trim().length > 200, `${parsed.body.trim().length} chars`),
   ];
   const refs = new Set([...parsed.body.matchAll(/references\/[A-Za-z0-9._\-/]+\.md/g)].map((match) => match[0]));
@@ -378,7 +393,7 @@ async function checkSetup(ctx) {
     const exists = await pathExists(path.join(dir, ref));
     assertions.push(assertion(`setup-ref:${ref}`, exists, exists ? 'exists' : 'missing'));
   }
-  return { feature: `${ctx.harness}:setup`, kind: 'static', ok: assertions.every((entry) => entry.ok), staticOnly: true, assertions, details: { references: [...refs] } };
+  return { feature: `${ctx.harness}:setup`, kind: 'static', ok: assertions.every((entry) => entry.ok), staticOnly: true, assertions, details: { skill: name, references: [...refs] } };
 }
 
 async function checkProjectSkill(ctx) {

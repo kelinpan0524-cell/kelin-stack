@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-const PHASES = ['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'done'];
+const PHASES = ['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done'];
 const MODES = ['feature', 'fix', 'legacy', 'audit'];
 const args = process.argv.slice(2);
 const command = args[0];
@@ -26,7 +26,8 @@ const required = (phase, currentMode) => {
     case 'review': return ['review.md'];
     case 'refine': return ['refine.md'];
     case 'ship': return ['ship.md'];
-    case 'done': return ['reflect.md'];
+    case 'reflect': return ['reflect.md'];
+    case 'done': return [];
     default: return [];
   }
 };

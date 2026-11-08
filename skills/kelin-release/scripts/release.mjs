@@ -115,10 +115,15 @@ if (existsSync(changelog)) {
 }
 steps.push('write changelog');
 
-run('commit', 'git', ['add', ...withVersion.map((file) => path.relative(root, file)), 'CHANGELOG.md']);
-run('commit', 'git', ['commit', '-m', `chore(release): v${next}`]);
-run('tag', 'git', ['tag', `v${next}`]);
-run('push tag', 'git', ['push', 'origin', `v${next}`]);
-run('github release', 'gh', ['release', 'create', `v${next}`, '--title', `v${next}`, '--notes', entry]);
+try {
+  run('commit', 'git', ['add', ...withVersion.map((file) => path.relative(root, file)), 'CHANGELOG.md']);
+  run('commit', 'git', ['commit', '-m', `chore(release): v${next}`]);
+  run('tag', 'git', ['tag', `v${next}`]);
+  run('push tag', 'git', ['push', 'origin', `v${next}`]);
+  run('github release', 'gh', ['release', 'create', `v${next}`, '--title', `v${next}`, '--notes', entry]);
+} catch (error) {
+  console.log(JSON.stringify({ ok: false, version: next, steps, error: String(error.message || error).slice(0, 800) }, null, 2));
+  process.exit(1);
+}
 
 console.log(JSON.stringify({ ok: true, version: next, steps }, null, 2));

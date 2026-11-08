@@ -14,6 +14,44 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 用：需求已经明确到“能做”，你愿意让 agent 连续做完几个阶段。
 别用：需求还在讨论、要动生产数据、要对外发布、你只想问个问题。
 
+## 不知道做什么？先读这张表
+
+| 你看到的情况 | 该做什么 | 不该做什么 |
+| --- | --- | --- |
+| 只有一个文件、改动不到 30 分钟 | 直接改 + `kelin-verify` 快速档 | 不要开 mode，不要 plan |
+| 2-5 个文件、需求清楚 | `kelin-plan` + `kelin-tdd` + `kelin-verify` | 不要开子代理 |
+| 跨模块、动数据、对外接口 | `kelin-mode feature` | 不要跳过 map |
+| 需求还模糊 | `kelin-goal` 问清楚 | 不要开始写代码 |
+| 同一问题反复失败 | `kelin-loop`（设上限） | 不要无限重试 |
+| 只想知道哪里有问题 | `kelin-audit` | 不要顺手改 |
+| 老仓库、迁移 | `kelin-mode legacy` | 不要大爆炸重写 |
+| 前端界面 | 加 `kelin-ui` | 不要只看代码 |
+
+### 什么时候用 ZCode 的 `/workflow`
+
+- 用：任务能拆成 ≥3 个互不写同一文件的子任务；`budget.mjs` 显示 `maxAgents >= 2`；你不需要在旁边逐步确认。
+- 不用：1-2 个文件；需要连续对话；多个子任务要改同一批文件；机器已经在 swap。
+- 用的时候并发也压到 ≤2，每个子任务的验收写成可执行命令。
+
+### 什么时候 plan，什么时候跳过
+
+- plan：跨文件、跨模块、动数据/权限/对外接口，或上次类似任务返工过。
+- 跳过：单文件、可逆、有现成模式、不到 30 分钟。
+- 不确定时做最轻的 plan：三行写清目标、验收、任务。
+
+### 什么时候 refine
+
+- verify 通过之后，diff 超过 100 行，或新增了抽象/依赖/死代码。
+- 不做：紧急修复、纯配置、diff 不到 20 行。
+
+### verify 的三档
+
+| 档 | 用于 | 做什么 |
+| --- | --- | --- |
+| 快速 | 文案、样式、单文件 | 一条命令或一张截图 |
+| 标准 | 普通功能 | `acceptance.json` + 边界矩阵 |
+| 严格 | 钱、权限、迁移、对外接口 | 标准 + 差分对照或变异 sanity |
+
 ## 四种模式
 
 | 模式 | 适用 | 主链路 |
@@ -30,7 +68,7 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 状态存在 `.kelin/state.json`，阶段顺序固定：
 
 ```
-intake → map → design → build → verify → review → refine → ship → done
+intake → map → design → build → verify → review → refine → ship → reflect → done
 ```
 
 每个阶段的**退出条件是一组文件**，缺一个就不能前进：
@@ -45,7 +83,8 @@ intake → map → design → build → verify → review → refine → ship �
 | review | `review.md` | P0-P3 审查结论 |
 | refine | `refine.md` | 删了什么、简化了什么 |
 | ship | `ship.md` | 分支、PR、CI 结论 |
-| done | `reflect.md` | 复盘与沉淀 |
+| reflect | `reflect.md` | 复盘与沉淀 |
+| done | 无 | 终点，不能再前进 |
 
 用脚本推进，不靠记忆：
 
@@ -79,19 +118,19 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 ## 多代理与内存预算（24GB）
 
+先跑一次预算检查，按它的建议决定并发：
+
+```sh
+node skills/kelin-mode/scripts/budget.mjs
+```
+
+输出里的 `maxAgents` 是硬上限：0 就单干，1 最多一个子代理，2 才是“一写一读”。
+
 硬限制，防止把机器拖死：
 
 - **最多 2 个子代理**，且同一时刻只允许 1 个写、1 个读；写操作永远由主代理做。
 - 子代理只做窄任务：读代码画地图、按清单审查、跑只读检查。**不允许嵌套子代理。**
-- 起代理前看一眼内存：
-
-```sh
-sysctl -n vm.swapusage
-memory_pressure | tail -1
-```
-
-swap 已用超过 1GB，或空闲内存低于 2GB，就**只跑单代理**。
-
+- swap 超过 1GB 或空闲内存低于 2GB，只跑单代理。
 - 不并行跑构建和测试；不并行跑两个测试套件；不在这台机器上开浏览器自动化 + 构建。
 - 读文件先用 grep 定位再读区间，单次不超过 400 行；不要整仓读。
 - Node 脚本统一加 `NODE_OPTIONS=--max-old-space-size=2048`。
