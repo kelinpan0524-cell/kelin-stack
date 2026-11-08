@@ -27,7 +27,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
-## 一条链路，三十一个命令
+## 一条链路，三十二个命令
 
 **想清楚**
 
@@ -84,8 +84,9 @@ node skills/kelin-mode/scripts/mode.mjs advance
 | --- | --- | --- |
 | `/kelin-verify-stack` | 插件到底能不能用 | 真开无头会话 + 机器断言 + 哈希回执 |
 | `/kelin-evals` | skill 改坏了没人知道 | `skill-eval.mjs` 查结构/触发词/引用/长度 |
+| `/kelin-docs` | 索引和 skill 对不上 | `gen-docs.mjs --check` 比对生成文件 |
 
-命令统一带 `kelin-` 前缀，避免和 ZCode 内置命令、你已装的其他 skill 冲突。
+命令统一带 `kelin-` 前缀，避免和 ZCode 内置命令、你已装的其他 skill 冲突。完整索引见 [docs/skills.md](docs/skills.md)（生成文件，勿手改）。
 
 ## AGENTS.md 的预算
 
@@ -175,9 +176,13 @@ node --test skills/kelin-verify-stack/tests/*.test.mjs
 node skills/kelin-verify-stack/scripts/offline-check.mjs
 node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
 node skills/kelin-guard/scripts/guard-check.mjs guards.json
+node skills/kelin-neat/scripts/neat-check.mjs neat.json
+node skills/kelin-evals/scripts/skill-eval.mjs --root .
+node skills/kelin-docs/scripts/gen-docs.mjs --check
+node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
 ```
 
-CI 每次 push 跑六类：单元测试、离线结构检查、AGENTS.md 预算、guards 完整性、文档一致性、skill 结构与触发检查（不需要 ZCode 登录，不消耗模型）。
+CI 每次 push 跑八类：单元测试、离线结构检查、AGENTS.md 预算、guards 完整性、文档一致性、skill 结构与触发检查、生成文档 drift、策略文件校验（不需要 ZCode 登录，不消耗模型）。
 
 改 skill 之后，按改动路径验证：
 
@@ -198,7 +203,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 31 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 32 个 | 每个都对应一个会真实发生的错误，不凑数 |
 | poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
 | SessionStart hook、多 provider runner、T3 | 不做 | 会改全局会话行为或与 ZCode 自身的模型调度冲突 |
 | 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
@@ -221,7 +226,7 @@ kelin-stack/
 │   ├── kelin-mode/{SKILL.md,scripts/mode.mjs,scripts/budget.mjs}
 │   ├── kelin-goal/{SKILL.md,scripts/goal-check.mjs,templates/goal.md}
 │   ├── kelin-product/{SKILL.md,scripts/prd-check.mjs,templates/PRD.md}
-│   ├── kelin-plan/{SKILL.md,scripts/check-plan.mjs}
+│   ├── kelin-plan/{SKILL.md,scripts/check-plan.mjs,scripts/plan-gate.mjs,templates/plan-gate.json}
 │   ├── kelin-architect/SKILL.md
 │   ├── kelin-blast-radius/SKILL.md
 │   ├── kelin-map/{SKILL.md,scripts/map-check.mjs}
@@ -248,12 +253,16 @@ kelin-stack/
 │   ├── kelin-reflect/SKILL.md
 │   ├── kelin-principles/SKILL.md
 │   ├── kelin-evals/{SKILL.md,scripts/skill-eval.mjs}
+│   ├── kelin-docs/{SKILL.md,scripts/gen-docs.mjs}
 │   └── kelin-verify-stack/
 │       ├── SKILL.md
 │       ├── features/{registry.json,recipes.json}
 │       ├── scripts/*.mjs
 │       └── tests/core.test.mjs
 ├── evals/trigger-evals.json
+├── docs/skills.md
+├── agents-digest/kelin-AGENTS.md
+├── kelin-policy.json
 ├── guards.json
 ├── neat.json
 ├── LICENSE

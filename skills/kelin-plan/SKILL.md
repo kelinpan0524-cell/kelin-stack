@@ -103,3 +103,24 @@ node skills/kelin-plan/scripts/check-plan.mjs plan.md
 ```
 
 退出 0 表示结构完整：有目标、验收标准、方案/推荐、任务拆解、风险，且任务里写了怎么验证。退出 1 会列出缺哪节。放进 CI，计划就不会退化成愿望清单。
+
+## 计划评审门（feature / legacy）
+
+跨模块或要动数据/权限的计划，写完后先过两道镜头，再开工：
+
+1. **产品镜头**：这事值得做吗、范围对不对、有没有更小的版本；
+2. **工程镜头**：类型与边界、失败模式、测试计划、迁移与回滚。
+
+规则：
+
+- 最多 2 个子代理；`budget.mjs` 的 `maxAgents` 小于 2 时，两个镜头都由主代理自己做；
+- 只把**需要人拍板**的项交出来：范围取舍、不可逆选择、需求冲突；能自己定的一律自己定；
+- 结果写 `plan-gate.json`，开工前跑：
+
+```sh
+node skills/kelin-plan/scripts/plan-gate.mjs plan-gate.json --require-resolved
+```
+
+有 `pending` 决策就退出 1，不要进 build。
+
+修 bug、单文件、文案改动跳过这道门。

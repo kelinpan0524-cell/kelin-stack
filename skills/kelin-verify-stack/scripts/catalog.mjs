@@ -505,6 +505,35 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-evals:blocks-bad', badCheck.code === 1 && badCheck.stdout.includes('name-mismatch') && badCheck.stdout.includes('broken-link'), `exit ${badCheck.code}`));
     rows.push({ tool: 'kelin-evals/scripts/skill-eval.mjs', selfExit: selfCheck.code, badExit: badCheck.code });
   }
+  const kelinDocs = path.join(ctx.pluginRoot, 'skills/kelin-docs/scripts/gen-docs.mjs');
+  if (existsSync(kelinDocs)) {
+    const docsCheck = await run(process.execPath, [kelinDocs, '--root', ctx.pluginRoot, '--check'], { timeoutMs: 60_000 });
+    assertions.push(assertion('kelin-docs:no-drift', docsCheck.code === 0, `exit ${docsCheck.code}`));
+    rows.push({ tool: 'kelin-docs/scripts/gen-docs.mjs', exit: docsCheck.code });
+  }
+  const kelinPlanGate = path.join(ctx.pluginRoot, 'skills/kelin-plan/scripts/plan-gate.mjs');
+  if (existsSync(kelinPlanGate)) {
+    const gateFile = path.join(ctx.tempDir, 'plan-gate.json');
+    const base = { lenses: [{ name: 'product', reviewer: 'self', findings: [] }, { name: 'engineering', reviewer: 'self', findings: [] }], decisions: [{ id: 'D1', question: 'scope?', recommendation: 'keep', status: 'approved' }] };
+    await writeFile(gateFile, JSON.stringify(base));
+    const resolved = await run(process.execPath, [kelinPlanGate, gateFile, '--require-resolved'], { timeoutMs: 30_000 });
+    await writeFile(gateFile, JSON.stringify({ ...base, decisions: [{ ...base.decisions[0], status: 'pending' }] }));
+    const pending = await run(process.execPath, [kelinPlanGate, gateFile, '--require-resolved'], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-plan:gate-resolved', resolved.code === 0, `exit ${resolved.code}`));
+    assertions.push(assertion('kelin-plan:gate-pending', pending.code === 1 && pending.stdout.includes('unresolved'), `exit ${pending.code}`));
+    rows.push({ tool: 'kelin-plan/scripts/plan-gate.mjs', resolvedExit: resolved.code, pendingExit: pending.code });
+  }
+  const kelinPolicy = path.join(ctx.pluginRoot, 'skills/kelin-mode/scripts/policy-check.mjs');
+  const policyFile = path.join(ctx.pluginRoot, 'kelin-policy.json');
+  if (existsSync(kelinPolicy) && existsSync(policyFile)) {
+    const goodPolicy = await run(process.execPath, [kelinPolicy, policyFile], { timeoutMs: 30_000 });
+    const badFile = path.join(ctx.tempDir, 'bad-policy.json');
+    await writeFile(badFile, JSON.stringify({ version: 1, autonomy: { allow: ['read'], ask: ['deploy'] }, paths: { writable: ['src/'], forbidden: ['.env'] }, checks: { required: ['tests'] }, release: { bump: 'nope', require: ['ci'] }, budget: { maxAgents: 9, maxLiveEvals: 1 } }));
+    const badPolicy = await run(process.execPath, [kelinPolicy, badFile], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-policy:accepts', goodPolicy.code === 0, `exit ${goodPolicy.code}`));
+    assertions.push(assertion('kelin-policy:rejects', badPolicy.code === 1 && badPolicy.stdout.includes('release-bump') && badPolicy.stdout.includes('budget-agents'), `exit ${badPolicy.code}`));
+    rows.push({ tool: 'kelin-mode/scripts/policy-check.mjs', goodExit: goodPolicy.code, badExit: badPolicy.code });
+  }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
   }

@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "autonomy": {
+    "allow": ["read", "edit", "run-tests", "commit", "open-pr"],
+    "ask": ["deploy", "delete-data", "force-push", "publish-release", "send-message", "spend", "change-permissions"]
+  },
+  "paths": {
+    "writable": ["src/", "docs/"],
+    "forbidden": [".env", "secrets/", "*.pem"]
+  },
+  "checks": {
+    "required": ["unit-tests", "lint"]
+  },
+  "release": {
+    "bump": "patch",
+    "require": ["ci-green", "verify-receipt", "changelog"]
+  },
+  "budget": {
+    "maxAgents": 2,
+    "maxLiveEvals": 2
+  }
+}

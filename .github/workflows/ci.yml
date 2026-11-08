@@ -19,3 +19,5 @@ jobs:
       - run: node skills/kelin-guard/scripts/guard-check.mjs guards.json
       - run: node skills/kelin-neat/scripts/neat-check.mjs neat.json
       - run: node skills/kelin-evals/scripts/skill-eval.mjs --root .
+      - run: node skills/kelin-docs/scripts/gen-docs.mjs --check
+      - run: node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
