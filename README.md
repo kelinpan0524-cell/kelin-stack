@@ -34,7 +34,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 | 命令 | 解决什么 | 可执行的检查 |
 | --- | --- | --- |
 | `/kelin-mode` | 不知道该做什么、下一步是什么 | 状态机 + 每阶段产物门禁 |
-| `/kelin-goal` | 目标写成愿望 | `goal-check.mjs` 校验完成条件/约束/检查点 |
+| `/kelin-goal` | 目标写成愿望；想跑 goal 但说不清 | `goal-check.mjs` 校验完成条件/约束/检查点；先给草稿再问三问 |
 | `/kelin-product` | 给错的人、权限没设计、上传没防错 | `prd-check.mjs` 校验 PRD 必含项 |
 | `/kelin-plan` | 没想清就写代码 | `check-plan.mjs` 校验计划结构 |
 | `/kelin-architect` | 直接写实现，方向错了才发现 | 先出类型、签名、模块边界，停在草图 |
@@ -219,7 +219,7 @@ kelin-stack/
 │   └── kelin-verifier.md
 ├── skills/
 │   ├── kelin-mode/{SKILL.md,scripts/mode.mjs,scripts/budget.mjs}
-│   ├── kelin-goal/{SKILL.md,scripts/goal-check.mjs}
+│   ├── kelin-goal/{SKILL.md,scripts/goal-check.mjs,templates/goal.md}
 │   ├── kelin-product/{SKILL.md,scripts/prd-check.mjs,templates/PRD.md}
 │   ├── kelin-plan/{SKILL.md,scripts/check-plan.mjs}
 │   ├── kelin-architect/SKILL.md

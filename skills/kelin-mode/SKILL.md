@@ -24,6 +24,7 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 | 2-5 个文件、需求清楚 | `kelin-plan` + `kelin-tdd` + `kelin-verify` | 不要开子代理 |
 | 跨模块、动数据、对外接口 | `kelin-mode feature` | 不要跳过 map |
 | 需求还模糊 | `kelin-goal` 问清楚 | 不要开始写代码 |
+| 想跑 goal 但说不清 | `kelin-goal` 先给草稿、三问、写 goal+plan，再给 `/goal` 命令 | 不要让用户先组织语言 |
 | 同一问题反复失败 | `kelin-loop`（设上限） | 不要无限重试 |
 | 只想知道哪里有问题 | `kelin-audit` | 不要顺手改 |
 | 老仓库、迁移 | `kelin-mode legacy` | 不要大爆炸重写 |

@@ -148,5 +148,15 @@
         { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "skill 也是代码" }
       ]
     }
+  ],
+  "zcode:skill-invocation:kelin-goal": [
+    {
+      "id": "readback-draft-first",
+      "prompt": "/skill {qualified} 读这个 skill。把「先给草稿，再让他改」那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "先给草稿，再让他改" }
+      ]
+    }
   ]
 }
