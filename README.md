@@ -6,101 +6,21 @@ pstack 是为 Claude Code / Codex 写的。ZCode 的 skill、斜杠命令和插�
 
 ## 一个命令跑完：`/kelin-mode`
 
-`/kelin-mode` 是编排层。它先判断任务类型，再按阶段调用对应 skill，每个阶段有产物和退出条件，缺一个就不能前进：
-
-| 模式 | 适用 | 主链路 |
-| --- | --- | --- |
-| `feature` | 加功能、改行为 | goal → plan → architect → map → tdd → verify → review → refine → ship |
-| `fix` | 修 bug、回归 | correctness（复现测试）→ tdd → verify → review → ship |
-| `legacy` | 老仓库改造 | legacy（基线+地图+热点）→ plan → tdd（切片）→ verify → review → refine → ship |
-| `audit` | 只审不改 | audit → map → plan（修复清单） |
-
-状态存在 `.kelin/state.json`，用脚本推进，不靠记忆：
-
-```sh
-node skills/kelin-mode/scripts/mode.mjs init --mode feature
-node skills/kelin-mode/scripts/mode.mjs status
-node skills/kelin-mode/scripts/mode.mjs advance
-```
-
-`advance` 检查当前阶段产物；`verify` 阶段还要求 `acceptance.json` 里 `ok: true`。手改 `state.json` 绕过检查没有意义——下一步照样会被门禁拦住。
+`/kelin-mode` 是编排层。它先判断任务类型，再按阶段调用 skill；五个模式：`light`、`feature`、`fix`、`legacy`、`audit`。状态存在 `.kelin/state.json`，用 `mode.mjs` 推进，每个阶段有产物门禁。阶段顺序、命令和门禁规则见 [kelin-mode](skills/kelin-mode/SKILL.md)。
 
 **24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
 ## 一条链路，三十二个命令
 
-**想清楚**
+按阶段分组；每个命令的用途、是否有脚本、是否有 live 检查，见生成索引 [docs/skills.md](docs/skills.md)。
 
-| 命令 | 解决什么 | 可执行的检查 |
-| --- | --- | --- |
-| `/kelin-mode` | 不知道该做什么、下一步是什么 | 状态机 + 每阶段产物门禁 |
-| `/kelin-goal` | 目标写成愿望；想跑 goal 但说不清 | `goal-check.mjs` 校验完成条件/约束/检查点；先给草稿再问三问 |
-| `/kelin-product` | 给错的人、权限没设计、上传没防错 | `prd-check.mjs` 校验 PRD 必含项 |
-| `/kelin-plan` | 没想清就写代码 | `check-plan.mjs` 校验计划结构 |
-| `/kelin-architect` | 直接写实现，方向错了才发现 | 先出类型、签名、模块边界，停在草图 |
-| `/kelin-blast-radius` | 不知道改了会炸到哪 | 调用方/数据/测试/外部/回滚五面表 |
-| `/kelin-map` | 改哪该测什么靠猜 | `map-check.mjs` 校验功能地图全覆盖 |
-| `/kelin-legacy` | 老仓库不敢动 | 基线 + 热点 + 特征测试 + 切片改造 |
-| `/kelin-multirepo` | 多仓库乱、数据共库 | `repo-check.mjs` 查 owner 冲突/循环依赖/契约缺失 |
-| `/kelin-ci` | 规则只写在文档里，没人强制 | 装 CI 门禁 + PR 模板 |
+- **想清楚**：`kelin-mode`、`kelin-goal`、`kelin-product`、`kelin-plan`、`kelin-architect`、`kelin-blast-radius`、`kelin-map`、`kelin-legacy`、`kelin-multirepo`、`kelin-ci`
+- **做扎实**：`kelin-tdd`、`kelin-correctness`、`kelin-verify`、`kelin-loop`
+- **交出去**：`kelin-review`、`kelin-ui`、`kelin-audit`、`kelin-refine`、`kelin-unslop`、`kelin-decision-log`、`kelin-guard`、`kelin-ship`、`kelin-release`、`kelin-watch`
+- **接得住**：`kelin-recall`、`kelin-agents`、`kelin-neat`、`kelin-reflect`、`kelin-principles`
+- **验证自己**：`kelin-verify-stack`、`kelin-evals`、`kelin-docs`
 
-**做扎实**
-
-| 命令 | 解决什么 | 可执行的检查 |
-| --- | --- | --- |
-| `/kelin-tdd` | 先写实现再补测试 | 红-绿-重构，复现测试必须先在旧代码上失败 |
-| `/kelin-correctness` | “看着对”当证据 | 证据阶梯：可失败测试、边界矩阵、差分、变异 sanity |
-| `/kelin-verify` | “应该可以了”没人敢信 | `run-acceptance.mjs` 跑验收清单 |
-| `/kelin-loop` | 无限重试、没有停止条件 | `loop-check.mjs` 校验停止条件/预算/升级线 |
-
-**交出去**
-
-| 命令 | 解决什么 | 可执行的检查 |
-| --- | --- | --- |
-| `/kelin-review` | 明显的坑自己先踩 | 按 P0-P3 输出可定位问题 |
-| `/kelin-ui` | 界面只看代码不看渲染 | 层级/状态/响应式/a11y/文案/性能；装了 impeccable 就调它 |
-| `/kelin-audit` | 不知道仓库哪里最容易出事 | 六类问题、最多 20 条、每条四要素 |
-| `/kelin-refine` | 代码越写越多 | 必要性阶梯，删重复/猜测性抽象 |
-| `/kelin-unslop` | 文字一股 AI 味 | `slop-check.mjs` 查套话/大词/三段式 |
-| `/kelin-decision-log` | 事后说不清为什么这么改 | `log.mjs` 追加决策记录并防表格公式注入 |
-| `/kelin-guard` | 同一个 bug 反复出现 | 回归测试/类型/lint/CI 阶梯，必须证明能拦住旧代码 |
-| `/kelin-ship` | 分支、PR、CI、部署乱 | `preflight.mjs` 拦截 main 直提/真实数据/密钥 |
-| `/kelin-release` | 手改版本号、没 CHANGELOG | `release.mjs` 默认 dry-run，发布需 `--confirm` |
-| `/kelin-watch` | CI 红了就重跑 | `watch.mjs` 只报新问题并分类失败原因 |
-
-**接得住、学得会**
-
-| 命令 | 解决什么 | 可执行的检查 |
-| --- | --- | --- |
-| `/kelin-recall` | 隔几天忘了做到哪 | 从 git、任务板、记忆重建状态 |
-| `/kelin-agents` | AGENTS.md 越写越长或根本没写 | `agents-check.mjs` 查长度/重复/断链/秘密 |
-| `/kelin-neat` | README、docs、旧计划互相矛盾 | `neat-check.mjs` 查断链/端口冲突/版本漂移/重复 |
-| `/kelin-reflect` | 同样的问题反复犯 | 结论写回 AGENTS.md 或记忆 |
-| `/kelin-principles` | 底线被忘记 | 十条原则，每条带反例 |
-
-**验证这套东西本身**
-
-| 命令 | 解决什么 | 可执行的检查 |
-| --- | --- | --- |
-| `/kelin-verify-stack` | 插件到底能不能用 | 真开无头会话 + 机器断言 + 哈希回执 |
-| `/kelin-evals` | skill 改坏了没人知道 | `skill-eval.mjs` 查结构/触发词/引用/长度 |
-| `/kelin-docs` | 索引和 skill 对不上 | `gen-docs.mjs --check` 比对生成文件 |
-
-命令统一带 `kelin-` 前缀，避免和 ZCode 内置命令、你已装的其他 skill 冲突。完整索引见 [docs/skills.md](docs/skills.md)（生成文件，勿手改）。
-
-## AGENTS.md 的预算
-
-`/kelin-agents` 管仓库的 AGENTS.md：**100-150 行为宜，200 行硬上限**。只写 agent 自己发现不了的约束——反习惯规则、完成标准、成对 don't/do、决策表；不写目录结构、技术栈介绍、项目状态和一次性指令。
-
-`kelin-mode` 的 intake 会先检查它：没有就建，超过 150 行先删，`agents-check` 有失败项先修再开工。收尾只把这次真实踩过的坑写回，不写进度。
-
-## Hook 与 eval
-
-- 静态验收：`node skills/kelin-evals/scripts/skill-eval.mjs --root .`，查 frontmatter、长度、引用、断链、触发词；
-- 触发 eval：`evals/trigger-evals.json` 用真实说法检查描述是否还提这个场景；
-- 行为 eval：`verify-stack` 的 recipes，真开无头会话加机器断言。
-
-**本插件不加 SessionStart hook**。AGENTS.md 已经能自动带出“跨文件任务先 `/kelin-mode`”；hook 每次会话都跑，增加上下文和故障面；能用 CI 强制的（格式、密钥、结构检查）放 CI，比 hook 更可验证。
+命令统一带 `kelin-` 前缀，避免和 ZCode 内置命令、已装 skill 冲突。
 
 ## 两个子代理
 
@@ -215,59 +135,15 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 ```
 kelin-stack/
-├── .github/workflows/ci.yml
-├── .zcode-plugin/plugin.json
-├── .claude-plugin/{plugin.json,marketplace.json}
-├── .cursor-plugin/marketplace.json
-├── agents/
-│   ├── kelin-reviewer.md
-│   └── kelin-verifier.md
-├── skills/
-│   ├── kelin-mode/{SKILL.md,scripts/mode.mjs,scripts/budget.mjs}
-│   ├── kelin-goal/{SKILL.md,scripts/goal-check.mjs,templates/goal.md}
-│   ├── kelin-product/{SKILL.md,scripts/prd-check.mjs,templates/PRD.md}
-│   ├── kelin-plan/{SKILL.md,scripts/check-plan.mjs,scripts/plan-gate.mjs,templates/plan-gate.json}
-│   ├── kelin-architect/SKILL.md
-│   ├── kelin-blast-radius/SKILL.md
-│   ├── kelin-map/{SKILL.md,scripts/map-check.mjs}
-│   ├── kelin-ci/{SKILL.md,scripts/install-ci.mjs,templates/*}
-│   ├── kelin-legacy/SKILL.md
-│   ├── kelin-multirepo/{SKILL.md,scripts/repo-check.mjs,templates/repo-map.json}
-│   ├── kelin-tdd/SKILL.md
-│   ├── kelin-correctness/SKILL.md
-│   ├── kelin-verify/{SKILL.md,scripts/run-acceptance.mjs}
-│   ├── kelin-loop/{SKILL.md,scripts/loop-check.mjs}
-│   ├── kelin-review/SKILL.md
-│   ├── kelin-ui/SKILL.md
-│   ├── kelin-audit/SKILL.md
-│   ├── kelin-refine/SKILL.md
-│   ├── kelin-unslop/{SKILL.md,scripts/slop-check.mjs}
-│   ├── kelin-decision-log/{SKILL.md,scripts/log.mjs}
-│   ├── kelin-guard/{SKILL.md,scripts/guard-check.mjs}
-│   ├── kelin-ship/{SKILL.md,scripts/preflight.mjs}
-│   ├── kelin-release/{SKILL.md,scripts/release.mjs}
-│   ├── kelin-watch/{SKILL.md,scripts/watch.mjs}
-│   ├── kelin-recall/SKILL.md
-│   ├── kelin-agents/{SKILL.md,scripts/agents-check.mjs}
-│   ├── kelin-neat/{SKILL.md,scripts/neat-check.mjs}
-│   ├── kelin-reflect/SKILL.md
-│   ├── kelin-principles/SKILL.md
-│   ├── kelin-evals/{SKILL.md,scripts/skill-eval.mjs}
-│   ├── kelin-docs/{SKILL.md,scripts/gen-docs.mjs}
-│   └── kelin-verify-stack/
-│       ├── SKILL.md
-│       ├── features/{registry.json,recipes.json}
-│       ├── scripts/*.mjs
-│       └── tests/core.test.mjs
-├── evals/trigger-evals.json
-├── docs/skills.md
-├── agents-digest/kelin-AGENTS.md
-├── kelin-policy.json
-├── guards.json
-├── neat.json
-├── LICENSE
-├── NOTICE
-└── README.md
+├── skills/            # 32 个 skill，完整索引见 docs/skills.md
+├── agents/            # 2 个子代理：审查、验证
+├── evals/             # 触发 eval
+├── agents-digest/     # 一页速查，给不装插件的 agent
+├── docs/              # 生成的 skill 索引
+├── kelin-policy.json  # 自动化边界与预算
+├── guards.json        # bug → 防再犯记录
+├── neat.json          # 文档一致性配置
+└── .github/           # CI 门禁
 ```
 
 ## 许可
