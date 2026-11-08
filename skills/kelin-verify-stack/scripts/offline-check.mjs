@@ -56,8 +56,11 @@ try {
   const recipes = JSON.parse(await readFile(path.join(skillsDir, 'kelin-verify-stack', 'features', 'recipes.json'), 'utf8'));
   for (const [feature, cases] of Object.entries(recipes)) {
     if (!cases.length) fail(`recipe has no cases: ${feature}`);
+    const target = feature.replace(/^zcode:skill-invocation:/, '');
+    if (!skills.includes(target)) fail(`recipe targets a missing skill: ${feature}`);
     for (const item of cases) {
       if (!item.prompt || !item.assertions?.length) fail(`recipe case incomplete: ${feature}/${item.id}`);
+      if (!item.assertions.some((entry) => entry.type === 'skill_called')) fail(`recipe does not assert skill_called: ${feature}/${item.id}`);
     }
   }
 } catch (error) {

@@ -25,9 +25,9 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 `advance` 检查当前阶段产物；`verify` 阶段还要求 `acceptance.json` 里 `ok: true`。手改 `state.json` 绕过检查没有意义——下一步照样会被门禁拦住。
 
-**24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；swap 超过 1GB 就只跑单代理。
+**24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
-## 一条链路，二十二个命令
+## 一条链路，二十三个命令
 
 **想清楚**
 
@@ -55,6 +55,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 | 命令 | 解决什么 | 可执行的检查 |
 | --- | --- | --- |
 | `/kelin-review` | 明显的坑自己先踩 | 按 P0-P3 输出可定位问题 |
+| `/kelin-ui` | 界面只看代码不看渲染 | 层级/状态/响应式/a11y/文案/性能；装了 impeccable 就调它 |
 | `/kelin-audit` | 不知道仓库哪里最容易出事 | 六类问题、最多 20 条、每条四要素 |
 | `/kelin-refine` | 代码越写越多 | 必要性阶梯，删重复/猜测性抽象 |
 | `/kelin-decision-log` | 事后说不清为什么这么改 | `log.mjs` 追加决策记录并防表格公式注入 |
@@ -102,7 +103,9 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run \
   --feature zcode:skill-invocation:kelin-principles --output /tmp/ks-live
 ```
 
-静态检查不花模型调用；live 检查会真开会话，按需使用。
+静态检查不花模型调用；live 检查会真开会话，按需使用。按本机实测：一个 live 功能约 10-20 秒、10 万级输入 token（大部分走缓存）；`--all` 当前跑 7 个 live 功能约 2 分钟，不会并行，内存占用只有一个会话。
+
+`--all` 只跑有配方的 live 功能，数量会打印出来；`--changed` 同理。显式 `--feature` 指定但没有配方时才会报 `missing-recipe`，需要 `--auto` 现场合成一条“正文回读”配方。
 
 ## 安装
 
@@ -150,7 +153,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 22 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 23 个 | 每个都对应一个会真实发生的错误，不凑数 |
 | poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
 | SessionStart hook、多 provider runner、T3 | 不做 | 会改全局会话行为或与 ZCode 自身的模型调度冲突 |
 | 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
@@ -170,7 +173,7 @@ kelin-stack/
 │   ├── kelin-reviewer.md
 │   └── kelin-verifier.md
 ├── skills/
-│   ├── kelin-mode/{SKILL.md,scripts/mode.mjs}
+│   ├── kelin-mode/{SKILL.md,scripts/mode.mjs,scripts/budget.mjs}
 │   ├── kelin-goal/{SKILL.md,scripts/goal-check.mjs}
 │   ├── kelin-plan/{SKILL.md,scripts/check-plan.mjs}
 │   ├── kelin-architect/SKILL.md
@@ -182,6 +185,7 @@ kelin-stack/
 │   ├── kelin-verify/{SKILL.md,scripts/run-acceptance.mjs}
 │   ├── kelin-loop/{SKILL.md,scripts/loop-check.mjs}
 │   ├── kelin-review/SKILL.md
+│   ├── kelin-ui/SKILL.md
 │   ├── kelin-audit/SKILL.md
 │   ├── kelin-refine/SKILL.md
 │   ├── kelin-decision-log/{SKILL.md,scripts/log.mjs}

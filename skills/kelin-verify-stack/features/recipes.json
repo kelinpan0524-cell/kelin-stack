@@ -18,5 +18,55 @@
         { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "验收标准写不出可执行形式，说明还没想清楚，停下来问。" }
       ]
     }
+  ],
+  "zcode:skill-invocation:kelin-mode": [
+    {
+      "id": "readback-routing",
+      "prompt": "/skill {qualified} 读这个 skill。把开头那句「你说一句要什么」所在的整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "调哪个 skill、什么时候停" }
+      ]
+    }
+  ],
+  "zcode:skill-invocation:kelin-ui": [
+    {
+      "id": "readback-render-first",
+      "prompt": "/skill {qualified} 读这个 skill。把「先看渲染结果，再谈审美」那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "先看渲染结果，再谈审美" }
+      ]
+    }
+  ],
+  "zcode:skill-invocation:kelin-correctness": [
+    {
+      "id": "readback-evidence",
+      "prompt": "/skill {qualified} 读这个 skill。把「能让错误代码失败的检查」那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "能让错误代码失败的检查" }
+      ]
+    }
+  ],
+  "zcode:skill-invocation:kelin-refine": [
+    {
+      "id": "readback-every-line",
+      "prompt": "/skill {qualified} 读这个 skill。把「让每一行都必须存在」那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "让每一行都必须存在" }
+      ]
+    }
+  ],
+  "zcode:skill-invocation:kelin-audit": [
+    {
+      "id": "readback-inherit",
+      "prompt": "/skill {qualified} 读这个 skill。把开头「像刚接手这个仓库」那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "像刚接手这个仓库" }
+      ]
+    }
   ]
 }
