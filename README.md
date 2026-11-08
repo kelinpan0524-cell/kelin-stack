@@ -27,7 +27,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
-## 一条链路，三十个命令
+## 一条链路，三十一个命令
 
 **想清楚**
 
@@ -83,6 +83,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 | 命令 | 解决什么 | 可执行的检查 |
 | --- | --- | --- |
 | `/kelin-verify-stack` | 插件到底能不能用 | 真开无头会话 + 机器断言 + 哈希回执 |
+| `/kelin-evals` | skill 改坏了没人知道 | `skill-eval.mjs` 查结构/触发词/引用/长度 |
 
 命令统一带 `kelin-` 前缀，避免和 ZCode 内置命令、你已装的其他 skill 冲突。
 
@@ -91,6 +92,14 @@ node skills/kelin-mode/scripts/mode.mjs advance
 `/kelin-agents` 管仓库的 AGENTS.md：**100-150 行为宜，200 行硬上限**。只写 agent 自己发现不了的约束——反习惯规则、完成标准、成对 don't/do、决策表；不写目录结构、技术栈介绍、项目状态和一次性指令。
 
 `kelin-mode` 的 intake 会先检查它：没有就建，超过 150 行先删，`agents-check` 有失败项先修再开工。收尾只把这次真实踩过的坑写回，不写进度。
+
+## Hook 与 eval
+
+- 静态验收：`node skills/kelin-evals/scripts/skill-eval.mjs --root .`，查 frontmatter、长度、引用、断链、触发词；
+- 触发 eval：`evals/trigger-evals.json` 用真实说法检查描述是否还提这个场景；
+- 行为 eval：`verify-stack` 的 recipes，真开无头会话加机器断言。
+
+**本插件不加 SessionStart hook**。AGENTS.md 已经能自动带出“跨文件任务先 `/kelin-mode`”；hook 每次会话都跑，增加上下文和故障面；能用 CI 强制的（格式、密钥、结构检查）放 CI，比 hook 更可验证。
 
 ## 两个子代理
 
@@ -189,7 +198,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 30 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 31 个 | 每个都对应一个会真实发生的错误，不凑数 |
 | poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
 | SessionStart hook、多 provider runner、T3 | 不做 | 会改全局会话行为或与 ZCode 自身的模型调度冲突 |
 | 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
@@ -238,11 +247,15 @@ kelin-stack/
 │   ├── kelin-neat/{SKILL.md,scripts/neat-check.mjs}
 │   ├── kelin-reflect/SKILL.md
 │   ├── kelin-principles/SKILL.md
+│   ├── kelin-evals/{SKILL.md,scripts/skill-eval.mjs}
 │   └── kelin-verify-stack/
 │       ├── SKILL.md
 │       ├── features/{registry.json,recipes.json}
 │       ├── scripts/*.mjs
 │       └── tests/core.test.mjs
+├── evals/trigger-evals.json
+├── guards.json
+├── neat.json
 ├── LICENSE
 ├── NOTICE
 └── README.md
