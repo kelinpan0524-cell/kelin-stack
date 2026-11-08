@@ -78,18 +78,17 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run \
 
 ## 安装
 
-本地目录：
-
-```sh
-git clone https://github.com/kelinpan0524-cell/kelin-stack.git
-zcode plugins marketplace add ./kelin-stack
-zcode plugins install kelin-stack@kelin-stack-market
-```
-
-直接从 GitHub：
+直接从 GitHub（推荐，安装的是仓库里的文件，不含 `.git`）：
 
 ```sh
 zcode plugins marketplace add kelinpan0524-cell/kelin-stack
+zcode plugins install kelin-stack@kelin-stack-market
+```
+
+本地开发时可用目录安装；注意它会把整个目录（含 `.git`）拷进插件缓存：
+
+```sh
+zcode plugins marketplace add ./kelin-stack
 zcode plugins install kelin-stack@kelin-stack-market
 ```
 

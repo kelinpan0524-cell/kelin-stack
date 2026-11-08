@@ -1,7 +1,7 @@
 {
   "name": "kelin-stack",
   "displayName": "Kelin Stack",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "一套把工作做扎实的流程：先规划、再验证、交付前自审、按纪律上线、结束后复盘。每个环节都有可执行的检查，不靠感觉。",
   "author": {
     "name": "Arono"

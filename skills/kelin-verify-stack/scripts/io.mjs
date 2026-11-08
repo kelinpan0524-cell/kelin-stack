@@ -38,10 +38,12 @@ export async function ensureFreshDir(dir) {
 }
 
 export async function listFiles(root, rel = '') {
+  const ignored = new Set(['.git', 'node_modules', '.DS_Store', 'verify-runs', 'out', '.v2c', '.video_agent']);
   const dir = path.join(root, rel);
   const entries = await readdir(dir, { withFileTypes: true });
   const out = [];
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (ignored.has(entry.name)) continue;
     const next = rel ? `${rel}/${entry.name}` : entry.name;
     if (entry.isDirectory()) out.push(...(await listFiles(root, next)));
     else if (entry.isFile()) out.push(next);
