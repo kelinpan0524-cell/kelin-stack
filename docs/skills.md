@@ -6,11 +6,11 @@
 
 | 命令 | 用途 | 脚本 | live recipe |
 | --- | --- | --- | --- |
-| `/kelin-agents` | 初始化、审查和精简仓库的 AGENTS.md：只保留 agent 自己发现不了的硬约束，控制… | 有 | 有 |
+| `/kelin-agents` | 初始化、审查和精简仓库的 AGENTS.md，并幂等补上 kelin-stack 工作流块：… | 有 | 有 |
 | `/kelin-architect` | 写代码前先出设计草图：类型、签名、模块边界、数据流、失败模式，给两个方案和推荐，停在草图等确… | 无 | 无 |
 | `/kelin-audit` | 全仓或整包审查：正确性、安全、负载、测试缺口、性能、冗余代码，按严重度出报告，最多 20 条… | 无 | 有 |
 | `/kelin-blast-radius` | 改动前算影响面：谁调用、谁依赖这份数据、哪些测试覆盖、哪些外部系统会受影响、回滚代价多大 | 无 | 无 |
-| `/kelin-ci` | 把 kelin-stack 的检查装进任意仓库的 CI 和 PR 模板：跑测试、AGENTS… | 有 | 有 |
+| `/kelin-ci` | 把 kelin-stack 的检查装进任意仓库的 CI、PR 模板和本地 pre-commi… | 有 | 有 |
 | `/kelin-correctness` | 回答“怎么知道 AI 写的代码是对的” | 无 | 有 |
 | `/kelin-decision-log` | 记录关键决策：时间、阶段、做了什么决定、为什么、证据、结果 | 有 | 无 |
 | `/kelin-docs` | 从 skills 目录生成文档：skill 索引、命令速查、一页 agent digest，… | 有 | 有 |

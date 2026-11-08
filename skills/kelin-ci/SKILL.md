@@ -1,6 +1,6 @@
 ---
 name: kelin-ci
-description: 把 kelin-stack 的检查装进任意仓库的 CI 和 PR 模板：跑测试、AGENTS.md 预算、功能地图覆盖、验收清单，并让这些成为合并门禁。用户说“给仓库加 CI”“PR 质量太低”“把检查接进 GitHub Actions”时使用。
+description: 把 kelin-stack 的检查装进任意仓库的 CI、PR 模板和本地 pre-commit：跑测试、AGENTS.md 预算、功能地图覆盖、验收清单，并让这些成为合并门禁。用户说“给仓库加 CI”“PR 质量太低”“把检查接进 GitHub Actions”“装个提交前检查”时使用。
 ---
 
 # 接 CI 和 PR 门禁
@@ -23,6 +23,20 @@ node skills/kelin-ci/scripts/install-ci.mjs <仓库目录> --test "npm test"
 - `.github/pull_request_template.md`：强制写验证证据、风险回滚、防再犯。
 
 已存在的文件默认不覆盖；确实要换用 `--force`。
+
+## 本地快检（pre-commit）
+
+CI 之前再加一道几秒钟的本地门：
+
+```sh
+node skills/kelin-ci/scripts/install-precommit.mjs <仓库目录>
+```
+
+它只做三件事：拦 `.env`/私钥文件、拦表格文件（xlsx/xls/numbers）、扫新增行里的密钥特征。CSV/TSV 只警告不拦。完整测试和验收仍然在 CI 和 `kelin-verify`，不在提交钩子里跑。
+
+- `--check` 看有没有装；`--uninstall` 卸掉；
+- 已有别人的 pre-commit 时默认不覆盖，确认后加 `--force`；
+- 临时绕过：`KELIN_SKIP_PRECOMMIT=1 git commit ...`。
 
 ## CI 跑什么，不跑什么
 

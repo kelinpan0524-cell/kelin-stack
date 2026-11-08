@@ -123,7 +123,7 @@ node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
 
 ## 每个阶段做什么
 
-**intake**：读项目 `AGENTS.md`、`kelin-policy.json`（如果有）、`git status`、最近提交；判断模式和风险级别。策略里的 `allow` 可以直接做，`ask` 必须先问，写文件只落在 `paths.writable`，`forbidden` 不碰，子代理和 live 验证不超过 `budget`。没有 AGENTS.md 就先用 `kelin-agents` 初始化；超过 150 行先精简；`agents-check` 有失败项先修，再开工。高风险（动数据、动权限、对外接口）先停下来问。
+**intake**：先跑 `node skills/kelin-agents/scripts/ensure-workflow.mjs AGENTS.md`（缺文件就建，缺工作流块就补，有就跳过；只追加标记块，不重写文件），再读 `AGENTS.md`、`kelin-policy.json`（如果有）、`git status`、最近提交；判断模式和风险级别。策略里的 `allow` 可以直接做，`ask` 必须先问，写文件只落在 `paths.writable`，`forbidden` 不碰，子代理和 live 验证不超过 `budget`。没有 AGENTS.md 时脚本会建一份骨架；超过 150 行先精简；`agents-check` 有失败项先修，再开工。高风险（动数据、动权限、对外接口）先停下来问。
 
 **map**：用 `kelin-map` 建或更新功能地图。只改一小块时写 `scope.md`：影响哪些文件、哪些调用方、哪些测试。
 

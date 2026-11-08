@@ -392,6 +392,19 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-agents:blocks-secret', rejected.stdout.includes('secret'), 'secrets'));
     rows.push({ tool: 'kelin-agents/scripts/agents-check.mjs', acceptExit: accepted.code, rejectExit: rejected.code });
   }
+  const kelinEnsureWorkflow = path.join(ctx.pluginRoot, 'skills/kelin-agents/scripts/ensure-workflow.mjs');
+  if (existsSync(kelinEnsureWorkflow)) {
+    const dir = path.join(ctx.tempDir, 'ensure-workflow');
+    await mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'AGENTS.md');
+    await writeFile(file, '# AGENTS.md\n\n## 怎么跑\n- 测试：`npm test`\n');
+    const first = await run(process.execPath, [kelinEnsureWorkflow, file], { timeoutMs: 30_000 });
+    const second = await run(process.execPath, [kelinEnsureWorkflow, file], { timeoutMs: 30_000 });
+    const body = await readFile(file, 'utf8');
+    assertions.push(assertion('kelin-agents:ensure-workflow', first.code === 0 && body.includes('kelin:workflow:start'), `exit ${first.code}`));
+    assertions.push(assertion('kelin-agents:ensure-idempotent', second.code === 0 && body.split('kelin:workflow:start').length === 2, `exit ${second.code}`));
+    rows.push({ tool: 'kelin-agents/scripts/ensure-workflow.mjs', firstExit: first.code, secondExit: second.code });
+  }
   const kelinGuard = path.join(ctx.pluginRoot, 'skills/kelin-guard/scripts/guard-check.mjs');
   if (existsSync(kelinGuard)) {
     const dir = path.join(ctx.tempDir, 'guard-repo');
@@ -421,6 +434,15 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-ci:no-overwrite', second.code === 0 && second.stdout.includes('skipped'), `exit ${second.code}`));
     assertions.push(assertion('kelin-ci:force-overwrites', forced.code === 0 && forced.stdout.includes('kelin-gate.yml'), `exit ${forced.code}`));
     rows.push({ tool: 'kelin-ci/scripts/install-ci.mjs', installExit: first.code, skipExit: second.code });
+  }
+  const kelinPrecommit = path.join(ctx.pluginRoot, 'skills/kelin-ci/scripts/install-precommit.mjs');
+  if (existsSync(kelinPrecommit)) {
+    const hooks = path.join(ctx.tempDir, 'precommit-hooks');
+    const install = await run(process.execPath, [kelinPrecommit, '--hooks-dir', hooks], { timeoutMs: 30_000 });
+    const check = await run(process.execPath, [kelinPrecommit, '--hooks-dir', hooks, '--check'], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-ci:precommit-install', install.code === 0 && existsSync(path.join(hooks, 'pre-commit')) && existsSync(path.join(hooks, 'kelin-precommit.mjs')), `exit ${install.code}`));
+    assertions.push(assertion('kelin-ci:precommit-check', check.code === 0 && check.stdout.includes('installed'), `exit ${check.code}`));
+    rows.push({ tool: 'kelin-ci/scripts/install-precommit.mjs', installExit: install.code, checkExit: check.code });
   }
   const kelinNeat = path.join(ctx.pluginRoot, 'skills/kelin-neat/scripts/neat-check.mjs');
   if (existsSync(kelinNeat)) {
