@@ -16,8 +16,20 @@ const swap = (() => {
   }
 })();
 
+const availableGB = (() => {
+  try {
+    const text = execFileSync('vm_stat', [], { encoding: 'utf8' });
+    const pageSize = Number(/page size of (\d+) bytes/.exec(text)?.[1] || 4096);
+    const pages = (name) => Number(new RegExp(`${name}:\\s+(\\d+)`).exec(text)?.[1] || 0);
+    const bytes = (pages('Pages free') + pages('Pages inactive') + pages('Pages speculative') + pages('Pages purgeable')) * pageSize;
+    return Math.round((bytes / 1024 ** 3) * 10) / 10;
+  } catch {
+    return Math.round((os.freemem() / 1024 ** 3) * 10) / 10;
+  }
+})();
+
 const totalGB = Math.round((os.totalmem() / 1024 ** 3) * 10) / 10;
-const freeGB = Math.round((os.freemem() / 1024 ** 3) * 10) / 10;
+const freeGB = availableGB;
 const load1 = Math.round(os.loadavg()[0] * 100) / 100;
 const cores = os.cpus().length;
 
@@ -25,14 +37,14 @@ let maxAgents = 2;
 let allowHeavy = true;
 const reasons = [];
 
-if (freeGB < 1.5 || swap.usedMB > 1024) {
+if (freeGB < 2 || swap.usedMB > 8192) {
   maxAgents = 0;
   allowHeavy = false;
-  reasons.push(freeGB < 1.5 ? `free memory ${freeGB}GB < 1.5GB` : `swap used ${swap.usedMB}MB > 1024MB`);
-} else if (freeGB < 3 || load1 > cores) {
+  reasons.push(freeGB < 2 ? `available memory ${freeGB}GB < 2GB` : `swap used ${swap.usedMB}MB > 8192MB`);
+} else if (freeGB < 4 || swap.usedMB > 4096 || load1 > cores) {
   maxAgents = 1;
   allowHeavy = false;
-  reasons.push(freeGB < 3 ? `free memory ${freeGB}GB < 3GB` : `load ${load1} > cores ${cores}`);
+  reasons.push(freeGB < 4 ? `available memory ${freeGB}GB < 4GB` : swap.usedMB > 4096 ? `swap used ${swap.usedMB}MB > 4096MB` : `load ${load1} > cores ${cores}`);
 }
 
 const result = {
