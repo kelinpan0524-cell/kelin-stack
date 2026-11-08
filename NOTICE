@@ -1,0 +1,16 @@
+Kelin Stack
+
+Copyright (c) 2026 Arono
+
+This project is an independent ZCode implementation inspired by:
+
+- pstack, https://github.com/cursor/plugins/tree/main/pstack
+  Copyright Cursor, MIT License. Original skill set and workflow design by Lauren Tan.
+- open-pstack, https://github.com/ericlitman/open-pstack
+  Copyright Eric Litman, MIT License. Verification-skill architecture and the
+  exact-head evidence model.
+
+No upstream source file is copied verbatim. The skill text, scripts, tests and
+verification harness in this repository were written for ZCode. Shared ideas:
+the plan/verify/review/ship workflow split, the "proof over claims" verification
+stance, and the feature-map plus recipe structure used by the verifier.

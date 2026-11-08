@@ -1,0 +1,22 @@
+{
+  "skills": "skills",
+  "agents": "agents",
+  "manifests": [
+    ".claude-plugin/plugin.json",
+    ".cursor-plugin/plugin.json",
+    ".zcode-plugin/plugin.json"
+  ],
+  "assets": ["assets/**"],
+  "hooks": ["hooks/**"],
+  "setup": ["skills/setup-pstack/**"],
+  "tools": ["skills/*/scripts/**"],
+  "nonRuntime": [
+    "docs/**",
+    "automations/**",
+    "README.md",
+    "LICENSE",
+    "LICENSE.md",
+    ".gitignore",
+    "CHANGELOG.md"
+  ]
+}
