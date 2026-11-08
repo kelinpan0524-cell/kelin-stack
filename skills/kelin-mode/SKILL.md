@@ -7,6 +7,8 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 
 目标：**你说一句要什么，agent 自己知道下一步做什么、调哪个 skill、什么时候停。**
 
+如果仓库的 `AGENTS.md` 写了“跨文件/多步/产品类任务先 `/kelin-mode`”，就不用每次说命令，agent 会自己进来。
+
 它不是“更努力的自动补全”。它是一个有状态、有门禁、会停下来的流程机。
 
 ## 什么时候用，什么时候别用
@@ -25,7 +27,9 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 | 同一问题反复失败 | `kelin-loop`（设上限） | 不要无限重试 |
 | 只想知道哪里有问题 | `kelin-audit` | 不要顺手改 |
 | 老仓库、迁移 | `kelin-mode legacy` | 不要大爆炸重写 |
+| 涉及多个仓库、跨仓数据 | `kelin-multirepo` + `kelin-mode legacy` | 不要两个仓同时改、不要共享库表 |
 | 前端界面 | 加 `kelin-ui` | 不要只看代码 |
+| 文字太 AI 味 | `kelin-unslop` | 不要用一套套话换另一套 |
 
 ### 什么时候用 ZCode 的 `/workflow`
 

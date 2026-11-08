@@ -54,6 +54,10 @@ AGENTS.md 不是项目说明书，是**给 agent 的硬约束清单**。写长�
 
 ## 更深的文档
 - 部署：[docs/deploy.md](docs/deploy.md)
+
+## kelin-stack
+- 跨文件、多步、产品类任务先 `/kelin-mode`；单文件小修直接做。
+- 收尾先 `/kelin-neat` 对齐文档，再 `/kelin-reflect`。
 ```
 
 没有命令可写就留空并注明“待补”，不要编。
