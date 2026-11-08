@@ -108,5 +108,15 @@
         { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "一个事实只有一个家" }
       ]
     }
+  ],
+  "zcode:skill-invocation:kelin-product": [
+    {
+      "id": "readback-safety",
+      "prompt": "/skill {qualified} 读这个 skill。把「一个人的错误，不能变成所有人的损失」那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "assertions": [
+        { "id": "skill-load", "type": "skill_called", "value": "{qualified}" },
+        { "id": "verbatim-body", "type": "file_contains", "path": "answer.md", "value": "一个人的错误，不能变成所有人的损失" }
+      ]
+    }
   ]
 }

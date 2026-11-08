@@ -27,7 +27,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
-## 一条链路，二十七个命令
+## 一条链路，二十八个命令
 
 **想清楚**
 
@@ -35,6 +35,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 | --- | --- | --- |
 | `/kelin-mode` | 不知道该做什么、下一步是什么 | 状态机 + 每阶段产物门禁 |
 | `/kelin-goal` | 目标写成愿望 | `goal-check.mjs` 校验完成条件/约束/检查点 |
+| `/kelin-product` | 给错的人、权限没设计、上传没防错 | `prd-check.mjs` 校验 PRD 必含项 |
 | `/kelin-plan` | 没想清就写代码 | `check-plan.mjs` 校验计划结构 |
 | `/kelin-architect` | 直接写实现，方向错了才发现 | 先出类型、签名、模块边界，停在草图 |
 | `/kelin-blast-radius` | 不知道改了会炸到哪 | 调用方/数据/测试/外部/回滚五面表 |
@@ -186,7 +187,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 27 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 28 个 | 每个都对应一个会真实发生的错误，不凑数 |
 | poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
 | SessionStart hook、多 provider runner、T3 | 不做 | 会改全局会话行为或与 ZCode 自身的模型调度冲突 |
 | 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
@@ -208,6 +209,7 @@ kelin-stack/
 ├── skills/
 │   ├── kelin-mode/{SKILL.md,scripts/mode.mjs,scripts/budget.mjs}
 │   ├── kelin-goal/{SKILL.md,scripts/goal-check.mjs}
+│   ├── kelin-product/{SKILL.md,scripts/prd-check.mjs,templates/PRD.md}
 │   ├── kelin-plan/{SKILL.md,scripts/check-plan.mjs}
 │   ├── kelin-architect/SKILL.md
 │   ├── kelin-blast-radius/SKILL.md

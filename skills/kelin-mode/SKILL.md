@@ -35,8 +35,11 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 
 ### 什么时候 plan，什么时候跳过
 
+判断依据是**任务信号**，不是用户有没有说“plan”。
+
 - plan：跨文件、跨模块、动数据/权限/对外接口，或上次类似任务返工过。
 - 跳过：单文件、可逆、有现成模式、不到 30 分钟。
+- 产品类任务（有用户、权限、上传导出、数据量）即使没说 plan，也要先走 `kelin-product` + `kelin-plan`。
 - 不确定时做最轻的 plan：三行写清目标、验收、任务。
 
 ### 什么时候 refine
@@ -103,7 +106,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 
 **map**：用 `kelin-map` 建或更新功能地图。只改一小块时写 `scope.md`：影响哪些文件、哪些调用方、哪些测试。
 
-**design**：`kelin-goal` 写目标契约，`kelin-plan` 拆任务，`kelin-architect` 出类型和签名，`kelin-blast-radius` 算影响面。**停在这里等确认**，除非用户已明确授权连续执行。
+**design**：`kelin-goal` 写目标契约，`kelin-plan` 拆任务，`kelin-architect` 出类型和签名，`kelin-blast-radius` 算影响面。产品类任务（有用户、权限、上传导出、数据量）先跑 `kelin-product`，把用户环境、权限矩阵、上传预览确认、分页和性能预算定下来。**停在这里等确认**，除非用户已明确授权连续执行。
 
 **build**：`kelin-tdd` 红-绿-重构。修 bug 时用 `kelin-guard` 选最强且最便宜的防再犯手段，并证明它在旧代码上会失败。每完成一个可验证单元就提交一次，提交信息带 `[ZCode]`。写 `build.md`：改了哪些文件、加了哪些测试和 guard、还剩什么。
 
