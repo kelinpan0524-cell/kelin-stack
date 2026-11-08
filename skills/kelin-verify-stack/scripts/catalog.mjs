@@ -494,6 +494,17 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-multirepo:blocks', bad.code === 1 && bad.stdout.includes('data-owner-conflict') && bad.stdout.includes('cycle') && bad.stdout.includes('duplicate-name'), `exit ${bad.code}`));
     rows.push({ tool: 'kelin-multirepo/scripts/repo-check.mjs', goodExit: good.code, badExit: bad.code });
   }
+  const kelinEvals = path.join(ctx.pluginRoot, 'skills/kelin-evals/scripts/skill-eval.mjs');
+  if (existsSync(kelinEvals)) {
+    const selfCheck = await run(process.execPath, [kelinEvals, '--root', ctx.pluginRoot], { timeoutMs: 60_000 });
+    const badRoot = path.join(ctx.tempDir, 'eval-repo');
+    await mkdir(path.join(badRoot, 'skills', 'bad'), { recursive: true });
+    await writeFile(path.join(badRoot, 'skills', 'bad', 'SKILL.md'), '---\nname: other\ndescription: short\n---\n\n[missing](nope.md)\n');
+    const badCheck = await run(process.execPath, [kelinEvals, '--root', badRoot], { timeoutMs: 30_000 });
+    assertions.push(assertion('kelin-evals:self', selfCheck.code === 0, `exit ${selfCheck.code}`));
+    assertions.push(assertion('kelin-evals:blocks-bad', badCheck.code === 1 && badCheck.stdout.includes('name-mismatch') && badCheck.stdout.includes('broken-link'), `exit ${badCheck.code}`));
+    rows.push({ tool: 'kelin-evals/scripts/skill-eval.mjs', selfExit: selfCheck.code, badExit: badCheck.code });
+  }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
   }
