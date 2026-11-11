@@ -88,4 +88,4 @@ git commit -m "[ZCode] 一句话说结果" -m "为什么这么改，风险是什
 node skills/kelin-ship/scripts/preflight.mjs
 ```
 
-在暂存之后执行。它检查：是不是直接在 main/master、有没有暂存表格类真实数据、暂存内容里有没有密钥特征。有问题退出 1，并列出文件；通过退出 0。
+在暂存之后执行。它检查：是不是直接在 main/master、有没有暂存表格类真实数据、暂存内容里有没有密钥特征；存在 `.kelin/review.json` 时还要求评审指纹是 `CURRENT`，`STALE`/`UNVERIFIED` 直接退出 1。`--require-review` 要求必须有评审回执，`--no-review` 显式跳过评审检查。有问题退出 1，并列出文件；通过退出 0。

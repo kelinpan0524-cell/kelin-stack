@@ -1,6 +1,6 @@
 ---
 name: kelin-mode
-description: 自动编排整套 kelin-stack：先判断任务类型（新功能/修 bug/老仓库改造/全仓审计），再按阶段调用 goal、plan、architect、map、tdd、verify、review、refine、ship，每一步有产物和退出条件。多代理最多 2 个，适配 24GB 内存。用户输入 /kelin-mode，或说“全自动做完这个需求”“对老仓库启动 kelin-mode”时使用。
+description: 自动编排整套 kelin-stack：安装后 SessionStart 自动启用；非平凡任务自动进入，按阶段调用 goal、plan、architect、map、tdd、verify、review、refine、ship，每一步有产物和退出条件。多代理最多 2 个，适配 24GB 内存。用户输入 /kelin-mode，或说“全自动做完这个需求”时使用。
 ---
 
 # kelin-mode
@@ -10,6 +10,8 @@ description: 自动编排整套 kelin-stack：先判断任务类型（新功能/
 如果仓库的 `AGENTS.md` 写了“跨文件/多步/产品类任务先 `/kelin-mode`”，就不用每次说命令，agent 会自己进来。
 
 它不是“更努力的自动补全”。它是一个有状态、有门禁、会停下来的流程机。
+
+安装后 SessionStart 会自动注入激活上下文；用户只需要记住 `kelin-mode`，不需要每次点名 skill。完整阶段路由见 [references/routing.md](references/routing.md)。
 
 ## 什么时候用，什么时候别用
 
@@ -122,6 +124,8 @@ node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
 没有这个文件时用默认边界，但不会因此扩大权限。
 
 ## 每个阶段做什么
+
+每阶段默认调用的 skill 见 [references/routing.md](references/routing.md)；按任务信号自动选，不要等用户点名。下面是各阶段的退出条件。
 
 **intake**：先跑 `node skills/kelin-agents/scripts/ensure-workflow.mjs AGENTS.md`（缺文件就建，缺工作流块就补，有就跳过；只追加标记块，不重写文件），再读 `AGENTS.md`、`kelin-policy.json`（如果有）、`git status`、最近提交；判断模式和风险级别。策略里的 `allow` 可以直接做，`ask` 必须先问，写文件只落在 `paths.writable`，`forbidden` 不碰，子代理和 live 验证不超过 `budget`。没有 AGENTS.md 时脚本会建一份骨架；超过 150 行先精简；`agents-check` 有失败项先修，再开工。高风险（动数据、动权限、对外接口）先停下来问。
 

@@ -1,6 +1,20 @@
 {
-  "description": "Kelin Stack runtime safety: block catastrophic shell commands before they run.",
+  "description": "Kelin Stack: activate the workflow at session start and block catastrophic commands before they run.",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/session-start.mjs"],
+            "timeoutMs": 3000,
+            "statusMessage": "kelin-stack: activating workflow"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash|Write|Edit|MultiEdit",

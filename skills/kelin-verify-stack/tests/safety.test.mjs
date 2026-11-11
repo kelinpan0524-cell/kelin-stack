@@ -20,7 +20,12 @@ test('decide blocks catastrophic deletes and force pushes to the default branch'
   assert.equal(decide('sudo rm -rf -- /').decision, 'deny');
   assert.equal(decide('rm -rf ~').decision, 'deny');
   assert.equal(decide('rm -rf $HOME').decision, 'deny');
+  assert.equal(decide('rm -rf "/"').decision, 'deny');
+  assert.equal(decide("rm -rf '/'").decision, 'deny');
+  assert.equal(decide('find / -delete').decision, 'deny');
   assert.equal(decide('git push --force origin main').decision, 'deny');
+  assert.equal(decide('git push origin +main').decision, 'deny');
+  assert.equal(decide('git push --mirror origin').decision, 'deny');
   assert.equal(decide('chmod -R 777 /').decision, 'deny');
 });
 
@@ -28,7 +33,10 @@ test('decide allows safe build deletes and asks for risky ones', () => {
   assert.equal(decide('rm -rf node_modules').decision, 'allow');
   assert.equal(decide('rm -rf .next dist coverage').decision, 'allow');
   assert.equal(decide('rm -rf src/build-output').decision, 'ask');
+  assert.equal(decide('find . -name "*.log" -delete').decision, 'ask');
+  assert.equal(decide('echo x | xargs rm -rf').decision, 'ask');
   assert.equal(decide('git push -f origin feature/x').decision, 'ask');
+  assert.equal(decide('git push origin +feature/x').decision, 'ask');
   assert.equal(decide('git reset --hard').decision, 'ask');
   assert.equal(decide('git clean -fdx').decision, 'ask');
   assert.equal(decide('echo "rm -rf /"').decision, 'allow');
@@ -77,4 +85,20 @@ test('a corrupt freeze file fails closed', async () => {
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(payload.hookSpecificOutput.permissionDecisionReason, /unreadable/);
+});
+
+test('freeze blocks bash redirection outside the allowed roots', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-freeze-bash-'));
+  await mkdir(path.join(dir, 'src'), { recursive: true });
+  await mkdir(path.join(dir, 'docs'), { recursive: true });
+  spawnSync(process.execPath, [freeze, 'set', 'src', '--root', dir], { encoding: 'utf8' });
+
+  const blocked = runHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo x > docs/b.md' } }, { ZCODE_PROJECT_DIR: dir });
+  assert.equal(JSON.parse(blocked.stdout).hookSpecificOutput.permissionDecision, 'deny');
+
+  const allowed = runHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo x > src/a.ts' } }, { ZCODE_PROJECT_DIR: dir });
+  assert.equal(allowed.stdout, '');
+
+  const devnull = runHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo x > /dev/null' } }, { ZCODE_PROJECT_DIR: dir });
+  assert.equal(devnull.stdout, '');
 });
