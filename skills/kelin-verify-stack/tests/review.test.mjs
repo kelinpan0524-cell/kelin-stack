@@ -34,6 +34,30 @@ test('gate-scan passes a non-gate change', async () => {
   assert.equal(JSON.parse(result.stdout).ok, true);
 });
 
+test('gate-scan default base compares against origin/main after a commit', async () => {
+  const dir = await repo();
+  git(dir, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+  await writeFile(path.join(dir, 'tests/app.test.mjs'), "test.skip('a', () => { assert.equal(1, 1); });\n");
+  git(dir, ['add', 'tests/app.test.mjs']);
+  git(dir, ['commit', '-qm', 'skip a test']);
+  const result = run(dir, gateScan);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.base, 'origin/main');
+  assert.ok(payload.findings.some((entry) => entry.tag === 'RH-1'), 'RH-1');
+});
+
+test('gate-scan ignores skip text inside string literals', async () => {
+  const dir = await repo();
+  await writeFile(
+    path.join(dir, 'tests/app.test.mjs'),
+    "const fixture = \"test.skip('x', () => {})\";\ntest('a', () => { assert.equal(1, 1); });\n",
+  );
+  const result = run(dir, gateScan);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(JSON.parse(result.stdout).ok, true);
+});
+
 test('gate-scan flags a skipped test and a relaxed timeout', async () => {
   const dir = await repo();
   await writeFile(

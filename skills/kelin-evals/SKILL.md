@@ -40,11 +40,21 @@ node skills/kelin-evals/scripts/skill-bill.mjs --root . --check
 node skills/kelin-evals/scripts/drift-check.mjs --root .
 ```
 
-- `skill-bill`：对比工作区和 `HEAD`，算每个 skill 的字节数、行数和涨幅；单次涨幅超过 10% 标 DUE，`--check` 时退出 1。新增 skill 没有基线，不算 DUE。
+- `skill-bill`：默认对比 `origin/main`（没有远端时回退本地 main/master 或 HEAD），算每个 skill 的字节数、行数和涨幅；单次涨幅超过 10% 标 DUE，`--check` 时退出 1。新增 skill 没有基线，不算 DUE；可用 `--base <ref>` 指定别的基准。
 - 整版本升级时 DUE 会很多，逐条人工确认“加的字换来了什么检查”；只改一个 skill 时用 `--check` 卡住自己。
 - `drift-check`：把 SKILL.md 里提到的 `skills/<名字>/...` 路径和 `node skills/...` 命令逐个查存在性；引用不存在的脚本直接失败。
 
 体量涨了不一定是坏事，但必须回答“加的这些字是否换来了可执行检查”。
+
+## 编辑阶梯（改 skill 时按顺序）
+
+1. **先改工具或错误信息**：能让命令自己说清的，不加文档；能手算的，不加规则。
+2. **证明值得加**：拿一个真实失败场景，不用“可能有用”或个人偏好。
+3. **改行不追加**：能改现有句子就不新增段落；能删旧句就不叠新句。
+4. **选对层级**：触发词放 `description`；判断规则放 `SKILL.md`；长细节放 `references/`；可执行行为放 `scripts/` 和 `--help`。
+5. **写规则不写故事**：写“什么条件下做什么”，不写背景和感想。
+
+改完跑 `skill-eval`、`skill-bill --check`、`drift-check`；涨超 10% 先解释再加。
 
 ## 触发 eval
 
@@ -80,7 +90,10 @@ node skills/kelin-evals/scripts/drift-check.mjs --root .
 - 你的机器内存紧张，少一层进程更稳；
 - 真要强制，用 CI 或 pre-commit，比 hook 更可验证。
 
-**本插件只加一个 `PreToolUse` 安全钩子**（`kelin-safety`）：`rm -rf /`、强推默认分支这类灾难命令没法用 CI 或 AGENTS.md 拦住，只能在执行前拦。它只匹配明确模式，JSON 解析失败放行，不做会话启动注入，故障面控制在一个脚本里。
+**本插件加两个 hook**：
+
+- `SessionStart`：每个会话注入一次激活上下文（版本、当前 mode/phase、本地 verify skill、冻结状态），让用户不需要每次点名 skill；只注入，不改文件，失败不阻塞会话。
+- `PreToolUse`：在执行前拦 `rm -rf /`、强推默认分支这类灾难命令；只匹配明确模式，JSON 解析失败放行。
 
 结论：**能用 AGENTS.md 说清的用 AGENTS.md，能用 CI 拦住的用 CI，两者都不行的才考虑 hook。**
 

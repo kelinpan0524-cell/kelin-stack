@@ -90,6 +90,16 @@ zcode plugins install kelin-stack@kelin-stack-market
 
 装完重启 ZCode，输入 `/kelin-plan` 就能看到。
 
+## 安装后怎么用（小白版）
+
+安装并重启 ZCode 后，每个新会话会自动注入 kelin-stack 的激活上下文，**你只需要记住一个命令：`/kelin-mode`**。
+
+1. 直接说你要做什么；非平凡任务（跨 2 个文件、多步、产品/交付/审计）会自动进入 `kelin-mode`，按阶段调用对应 skill，不需要你点名。
+2. 想手动开始，输入 `/kelin-mode`；它会读 `.kelin/state.json` 续跑，没有就初始化。
+3. 项目里有 `.zcode/skills/verify-*` 或 `.agents/skills/verify-*` 时，验证阶段会自动发现并使用；没有就用 `/kelin-verify-app` 生成。
+4. 危险命令和安全边界由 `PreToolUse` 钩子自动拦截；编辑冻结用 `kelin-safety` 开启。
+5. 不需要每次会话重复解释 kelin-stack；SessionStart 只注入一次简短上下文，不阻塞会话。
+
 ## 给 WorkBuddy 用
 
 WorkBuddy 支持标准 `SKILL.md`。分三种情况：

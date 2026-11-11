@@ -10,7 +10,9 @@ const script = path.resolve(import.meta.dirname, '..', '..', 'kelin-health', 'sc
 const project = async (exitCode) => {
   const dir = await mkdtemp(path.join(tmpdir(), 'kelin-health-'));
   await mkdir(path.join(dir, 'skills', 'kelin-verify-stack', 'scripts'), { recursive: true });
+  await mkdir(path.join(dir, 'skills', 'kelin-verify-stack', 'tests'), { recursive: true });
   await writeFile(path.join(dir, 'skills', 'kelin-verify-stack', 'scripts', 'offline-check.mjs'), `console.log(JSON.stringify({ ok: ${exitCode === 0} }));\nprocess.exit(${exitCode});\n`);
+  await writeFile(path.join(dir, 'skills', 'kelin-verify-stack', 'tests', 'sample.test.mjs'), "import test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('ok', () => assert.equal(1, 1));\n");
   return dir;
 };
 
@@ -23,6 +25,7 @@ test('runs available checks and reports a clean panel', async () => {
   const payload = JSON.parse(result.stdout);
   assert.deepEqual(payload.failed, []);
   assert.equal(payload.checks.find((check) => check.id === 'offline').ok, true);
+  assert.equal(payload.checks.find((check) => check.id === 'unit-tests').ok, true);
 });
 
 test('reports failed checks without fixing anything', async () => {
