@@ -10,22 +10,33 @@ pstack 是为 Claude Code / Codex 写的。ZCode 的 skill、斜杠命令和插�
 
 **24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
-## 一条链路，三十二个命令
+## 一条链路，三十八个命令
 
 按阶段分组；每个命令的用途、是否有脚本、是否有 live 检查，见生成索引 [docs/skills.md](docs/skills.md)。
 
 - **想清楚**：`kelin-mode`、`kelin-goal`、`kelin-product`、`kelin-plan`、`kelin-architect`、`kelin-blast-radius`、`kelin-map`、`kelin-legacy`、`kelin-multirepo`、`kelin-ci`
-- **做扎实**：`kelin-tdd`、`kelin-correctness`、`kelin-verify`、`kelin-loop`
-- **交出去**：`kelin-review`、`kelin-ui`、`kelin-audit`、`kelin-refine`、`kelin-unslop`、`kelin-decision-log`、`kelin-guard`、`kelin-ship`、`kelin-release`、`kelin-watch`
+- **做扎实**：`kelin-tdd`、`kelin-correctness`、`kelin-verify`、`kelin-loop`、`kelin-safety`、`kelin-test-audit`
+- **交出去**：`kelin-review`、`kelin-ui`、`kelin-audit`、`kelin-refine`、`kelin-unslop`、`kelin-brief`、`kelin-decision-log`、`kelin-guard`、`kelin-ship`、`kelin-release`、`kelin-watch`
 - **接得住**：`kelin-recall`、`kelin-agents`、`kelin-neat`、`kelin-reflect`、`kelin-principles`
-- **验证自己**：`kelin-verify-stack`、`kelin-evals`、`kelin-docs`
+- **验证自己**：`kelin-verify-stack`、`kelin-verify-app`、`kelin-benchmark`、`kelin-health`、`kelin-evals`、`kelin-docs`
 
 命令统一带 `kelin-` 前缀，避免和 ZCode 内置命令、已装 skill 冲突。
 
-## 两个子代理
+## 硬机制
+
+- **门禁完整性**：`kelin-review/scripts/gate-scan.mjs` 扫 diff 里被删的测试、被放宽的阈值、被关掉的检查；门禁类发现只问人不自动修。
+- **评审指纹**：`kelin-review/scripts/review-check.mjs` 把评审绑定到工作树；`STALE` 或 `UNVERIFIED` 不能当“审过了”。
+- **运行时安全**：`kelin-safety` 用 PreToolUse 钩子拦 `rm -rf /`、强推默认分支、冻结范围外写入；开发目录清理放行。
+- **性能取证**：`kelin-benchmark` 要求至少交替跑 5 次、报中位数和范围，结论只允许四选一。
+- **项目级验证**：`kelin-verify-app` 生成项目本地 `verify-<app>` skill，固定启动/体检/驱动/留证/清理五段。
+- **人话简报**：`kelin-brief` 先一句“现在等你什么”，再列决定、推荐、证据、风险。
+- **质量面板**：`kelin-health` 一次跑完测试、结构、文档、AGENTS、guards 检查，只报不改。
+
+## 三个子代理
 
 - `kelin-reviewer`：只报能证明的问题，每条带位置、触发条件、后果、改法；
-- `kelin-verifier`：只认命令输出和文件证据，不接受“理论上没问题”。
+- `kelin-verifier`：只认命令输出和文件证据，不接受“理论上没问题”；
+- `kelin-worker`：通用执行代理，先读 `kelin-mode` 和 `kelin-principles`，不自行扩大范围，不嵌套子代理。
 
 ## 验证器怎么工作
 
@@ -92,13 +103,17 @@ WorkBuddy 支持标准 `SKILL.md`。分三种情况：
 ## 开发
 
 ```sh
+node skills/kelin-health/scripts/health.mjs --root .
 node --test skills/kelin-verify-stack/tests/*.test.mjs
 node skills/kelin-verify-stack/scripts/offline-check.mjs
 node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
 node skills/kelin-guard/scripts/guard-check.mjs guards.json
 node skills/kelin-neat/scripts/neat-check.mjs neat.json
 node skills/kelin-evals/scripts/skill-eval.mjs --root .
+node skills/kelin-evals/scripts/skill-bill.mjs --root .
+node skills/kelin-evals/scripts/drift-check.mjs --root .
 node skills/kelin-docs/scripts/gen-docs.mjs --check
+node skills/kelin-docs/scripts/doc-coverage.mjs --root . --check
 node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
 ```
 

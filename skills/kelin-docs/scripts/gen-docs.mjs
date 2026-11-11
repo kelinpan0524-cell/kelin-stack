@@ -10,10 +10,10 @@ const skillsDir = path.join(root, 'skills');
 
 const GROUPS = [
   { title: '规划', names: ['kelin-mode', 'kelin-goal', 'kelin-product', 'kelin-plan', 'kelin-architect', 'kelin-blast-radius', 'kelin-map', 'kelin-legacy', 'kelin-multirepo', 'kelin-ci'] },
-  { title: '执行', names: ['kelin-tdd', 'kelin-correctness', 'kelin-verify', 'kelin-loop', 'kelin-refine', 'kelin-guard'] },
-  { title: '交付', names: ['kelin-review', 'kelin-audit', 'kelin-ui', 'kelin-unslop', 'kelin-ship', 'kelin-release', 'kelin-watch', 'kelin-decision-log'] },
+  { title: '执行', names: ['kelin-tdd', 'kelin-correctness', 'kelin-verify', 'kelin-loop', 'kelin-refine', 'kelin-guard', 'kelin-safety', 'kelin-test-audit'] },
+  { title: '交付', names: ['kelin-review', 'kelin-audit', 'kelin-ui', 'kelin-unslop', 'kelin-brief', 'kelin-ship', 'kelin-release', 'kelin-watch', 'kelin-decision-log'] },
   { title: '上下文', names: ['kelin-recall', 'kelin-agents', 'kelin-neat', 'kelin-reflect', 'kelin-principles'] },
-  { title: '验证', names: ['kelin-evals', 'kelin-docs', 'kelin-verify-stack'] },
+  { title: '验证', names: ['kelin-evals', 'kelin-docs', 'kelin-verify-stack', 'kelin-verify-app', 'kelin-benchmark', 'kelin-health'] },
 ];
 
 const parseFrontmatter = (text) => {

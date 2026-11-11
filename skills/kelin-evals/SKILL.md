@@ -32,6 +32,20 @@ node skills/kelin-evals/scripts/skill-eval.mjs --root .
 - 同一篇里没有重复标题；
 - 没有密钥特征。
 
+## 体量账单与引用漂移
+
+```sh
+node skills/kelin-evals/scripts/skill-bill.mjs --root .
+node skills/kelin-evals/scripts/skill-bill.mjs --root . --check
+node skills/kelin-evals/scripts/drift-check.mjs --root .
+```
+
+- `skill-bill`：对比工作区和 `HEAD`，算每个 skill 的字节数、行数和涨幅；单次涨幅超过 10% 标 DUE，`--check` 时退出 1。新增 skill 没有基线，不算 DUE。
+- 整版本升级时 DUE 会很多，逐条人工确认“加的字换来了什么检查”；只改一个 skill 时用 `--check` 卡住自己。
+- `drift-check`：把 SKILL.md 里提到的 `skills/<名字>/...` 路径和 `node skills/...` 命令逐个查存在性；引用不存在的脚本直接失败。
+
+体量涨了不一定是坏事，但必须回答“加的这些字是否换来了可执行检查”。
+
 ## 触发 eval
 
 `evals/trigger-evals.json` 存真实说法：
@@ -65,6 +79,8 @@ node skills/kelin-evals/scripts/skill-eval.mjs --root .
 - hook 每次会话都跑，增加上下文和故障面，失败还可能挡住正常会话；
 - 你的机器内存紧张，少一层进程更稳；
 - 真要强制，用 CI 或 pre-commit，比 hook 更可验证。
+
+**本插件只加一个 `PreToolUse` 安全钩子**（`kelin-safety`）：`rm -rf /`、强推默认分支这类灾难命令没法用 CI 或 AGENTS.md 拦住，只能在执行前拦。它只匹配明确模式，JSON 解析失败放行，不做会话启动注入，故障面控制在一个脚本里。
 
 结论：**能用 AGENTS.md 说清的用 AGENTS.md，能用 CI 拦住的用 CI，两者都不行的才考虑 hook。**
 

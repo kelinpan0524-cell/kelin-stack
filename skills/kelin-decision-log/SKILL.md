@@ -24,8 +24,16 @@ node skills/kelin-decision-log/scripts/log.mjs decisions.tsv \
 - 阶段：设计 / 实现 / 验证 / 发布 / 复盘；
 - 决策：一句话，动词开头；
 - 为什么：被放弃的方案是什么，为什么不选；
-- 证据：命令输出、链接、数据；
+- 证据：必须是可以回查的指针（commit、PR、`文件:行`、`bench.json` 等产物），不要写一段话；
 - 结果：待验证 / 有效 / 有害。
+
+写完校验：
+
+```sh
+node skills/kelin-decision-log/scripts/decision-check.mjs decisions.tsv
+```
+
+它检查表头、六列、阶段和结果取值，以及证据是不是可解析的指针。日志只追加，不改旧行；跨任务用 `start` 行分开。
 
 ## 为什么用 TSV
 
