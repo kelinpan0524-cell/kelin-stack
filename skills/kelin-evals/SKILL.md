@@ -66,6 +66,8 @@ node skills/kelin-evals/scripts/skill-eval.mjs --root .
 - 你的机器内存紧张，少一层进程更稳；
 - 真要强制，用 CI 或 pre-commit，比 hook 更可验证。
 
+**本插件只加一个 `PreToolUse` 安全钩子**（`kelin-safety`）：`rm -rf /`、强推默认分支这类灾难命令没法用 CI 或 AGENTS.md 拦住，只能在执行前拦。它只匹配明确模式，JSON 解析失败放行，不做会话启动注入，故障面控制在一个脚本里。
+
 结论：**能用 AGENTS.md 说清的用 AGENTS.md，能用 CI 拦住的用 CI，两者都不行的才考虑 hook。**
 
 ## 维护节奏

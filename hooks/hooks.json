@@ -1,0 +1,19 @@
+{
+  "description": "Kelin Stack runtime safety: block catastrophic shell commands before they run.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "process",
+            "command": "node",
+            "args": ["${ZCODE_PLUGIN_ROOT}/hooks/pre-tool-use.mjs"],
+            "timeoutMs": 3000,
+            "statusMessage": "kelin-safety: checking command"
+          }
+        ]
+      }
+    ]
+  }
+}
