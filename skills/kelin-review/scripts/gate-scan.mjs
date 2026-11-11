@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { stripSource } from '../../kelin-verify-stack/scripts/source-text.mjs';
 
 const args = process.argv.slice(2);
 const option = (name, fallback = '') => {
@@ -10,15 +11,31 @@ const option = (name, fallback = '') => {
 };
 
 if (args.includes('--help') || args.includes('-h')) {
-  console.error('Usage: node gate-scan.mjs [--root DIR] [--base REF] [--staged] [--file DIFF]');
+  console.error('Usage: node gate-scan.mjs [--root DIR] [--base REF, default origin/main] [--staged] [--file DIFF]');
   process.exit(2);
 }
 
 const root = path.resolve(option('--root', process.cwd()));
-const base = option('--base', 'HEAD');
+const explicitBase = option('--base', '');
+let base = explicitBase || 'HEAD';
 const staged = args.includes('--staged');
 const diffFile = option('--file', '');
 const git = (argv) => spawnSync('git', argv, { cwd: root, encoding: 'utf8' });
+
+const resolveBase = () => {
+  if (explicitBase) return explicitBase;
+  const rev = (ref) => git(['rev-parse', '--verify', '--quiet', ref]);
+  for (const ref of ['origin/main', 'origin/master']) {
+    if (rev(ref).status === 0) return ref;
+  }
+  const head = rev('HEAD');
+  const headSha = head.status === 0 ? head.stdout.trim() : '';
+  for (const ref of ['main', 'master']) {
+    const result = rev(ref);
+    if (result.status === 0 && result.stdout.trim() !== headSha) return ref;
+  }
+  return 'HEAD';
+};
 
 let diff = '';
 if (diffFile) {
@@ -33,6 +50,7 @@ if (diffFile) {
     console.error(`not a git repository: ${root}`);
     process.exit(2);
   }
+  base = staged ? base : resolveBase();
   const argv = ['diff', '--unified=0', '--no-color', '--no-ext-diff', '--binary'];
   if (staged) argv.push('--cached');
   else argv.push(base);
@@ -55,6 +73,7 @@ const isSnapshot = (file) => /(__snapshots__|\.snap$)/.test(file);
 const isConfig = (file) =>
   /(^|\/)(package\.json|pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|jest\.config\.[cm]?[jt]s|vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|\.eslintrc[^/]*|eslint\.config\.[cm]?[jt]s)$/.test(file);
 const isGatePath = (file) => isTest(file) || isCI(file) || isSnapshot(file) || isConfig(file);
+const stripForScan = (file, text) => (isTest(file) && /\.(?:[cm]?[jt]sx?|py|go)$/.test(file) ? stripSource(text) : text);
 
 const findings = [];
 const add = (tag, file, line, kind, evidence) => {
@@ -82,11 +101,11 @@ const flushHunk = () => {
   if (!current) return;
   const relaxed = new Map();
   for (const entry of current.removed) {
-    const match = /(timeout|timeoutMs|maxRetries|retries|max|threshold|tolerance|sleep|waitFor)["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i.exec(entry.text);
+    const match = /(timeout|timeoutMs|maxRetries|retries|max|threshold|tolerance|sleep|waitFor)["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i.exec(entry.code);
     if (match) relaxed.set(match[1].toLowerCase(), { value: Number(match[2]), text: entry.text, line: entry.line });
   }
   for (const entry of current.added) {
-    const match = /(timeout|timeoutMs|maxRetries|retries|max|threshold|tolerance|sleep|waitFor)["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i.exec(entry.text);
+    const match = /(timeout|timeoutMs|maxRetries|retries|max|threshold|tolerance|sleep|waitFor)["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i.exec(entry.code);
     if (!match) continue;
     const keyName = match[1].toLowerCase();
     const before = relaxed.get(keyName);
@@ -122,10 +141,12 @@ for (const line of diff.split('\n')) {
   }
   if (!file || !current) continue;
   if (line.startsWith('+') && !line.startsWith('+++')) {
-    current.added.push({ text: line.slice(1), line: newLine });
+    const text = line.slice(1);
+    current.added.push({ text, code: stripForScan(file, text), line: newLine });
     newLine += 1;
   } else if (line.startsWith('-') && !line.startsWith('---')) {
-    current.removed.push({ text: line.slice(1), line: oldLine });
+    const text = line.slice(1);
+    current.removed.push({ text, code: stripForScan(file, text), line: oldLine });
     oldLine += 1;
   }
 }
@@ -137,8 +158,8 @@ const snapshotFiles = [...changedFiles].filter(isSnapshot);
 for (const hunk of hunks) {
   const changedFile = hunk.file;
   if (!isGatePath(changedFile)) continue;
-  const removedTests = hunk.removed.filter((entry) => /\b(it|test|describe)\s*\(|\bdef test_|\bfunc Test|\b@Test\b/.test(entry.text));
-  const addedTests = hunk.added.filter((entry) => /\b(it|test|describe)\s*\(|\bdef test_|\bfunc Test|\b@Test\b/.test(entry.text));
+  const removedTests = hunk.removed.filter((entry) => /\b(it|test|describe)\s*\(|\bdef test_|\bfunc Test|\b@Test\b/.test(entry.code));
+  const addedTests = hunk.added.filter((entry) => /\b(it|test|describe)\s*\(|\bdef test_|\bfunc Test|\b@Test\b/.test(entry.code));
   if (removedTests.length > addedTests.length) {
     add('RH-1', changedFile, removedTests[0].line, 'removed', removedTests[0].text);
   }
@@ -146,22 +167,22 @@ for (const hunk of hunks) {
     add('RH-3', changedFile, hunk.added[0]?.line ?? 1, 'changed', 'snapshot changed without an owning test file');
   }
   for (const entry of hunk.added) {
-    if (/\bTODO\b|\bFIXME\b|not implemented|expect\(true\)\.toBe\(true\)|expect\(1\)\.toBe\(1\)|\bassert True\b|\bpass\s*(#.*)?$/.test(entry.text)) {
+    if (/\bTODO\b|\bFIXME\b|not implemented|expect\(true\)\.toBe\(true\)|expect\(1\)\.toBe\(1\)|\bassert True\b|\bpass\s*(#.*)?$/.test(entry.code)) {
       add('RH-4', changedFile, entry.line, 'added', entry.text);
     }
-    if (/(\.skip\s*\(|\bxit\s*\(|\bxdescribe\s*\(|@pytest\.mark\.skip|unittest\.skip|\bt\.Skip\(|@Ignore\b)/.test(entry.text)) {
+    if (/(\.skip\s*\(|\bxit\s*\(|\bxdescribe\s*\(|@pytest\.mark\.skip|unittest\.skip|\bt\.Skip\(|@Ignore\b)/.test(entry.code)) {
       add('RH-1', changedFile, entry.line, 'added', entry.text);
     }
-    if (/process\.env\.(CI|NODE_ENV|GITHUB_ACTIONS|GITLAB_CI|BUILDKITE|CIRCLECI)\b/.test(entry.text)) {
+    if (/process\.env\.(CI|NODE_ENV|GITHUB_ACTIONS|GITLAB_CI|BUILDKITE|CIRCLECI)\b/.test(entry.code)) {
       add('RH-12', changedFile, entry.line, 'added', entry.text);
     }
-    if (/eslint-disable|@ts-ignore|@ts-expect-error|# noqa|# type: ignore|pytest\.mark\.skip|@Ignore\b/.test(entry.text)) {
+    if (/eslint-disable|@ts-ignore|@ts-expect-error|# noqa|# type: ignore|pytest\.mark\.skip|@Ignore\b/.test(entry.code)) {
       add('RH-13', changedFile, entry.line, 'added', entry.text);
     }
-    if (/--force\b|--no-verify\b|continue-on-error:\s*true|allow_failure:\s*true|if:\s*always\(\)/.test(entry.text)) {
+    if (/--force\b|--no-verify\b|continue-on-error:\s*true|allow_failure:\s*true|if:\s*always\(\)/.test(entry.code)) {
       add('RH-14', changedFile, entry.line, 'added', entry.text);
     }
-    if (/catch\s*(\([^)]*\))?\s*\{\s*\}|except\s+[^:]+:\s*pass|\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/.test(entry.text)) {
+    if (/catch\s*(\([^)]*\))?\s*\{\s*\}|except\s+[^:]+:\s*pass|\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/.test(entry.code)) {
       add('RH-16', changedFile, entry.line, 'added', entry.text);
     }
   }

@@ -41,3 +41,10 @@ test('passes a suite with real assertions', async () => {
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(JSON.parse(result.stdout).candidates.length, 0);
 });
+
+test('ignores assertion text inside string fixtures', async () => {
+  const dir = await project("test('good', () => { const fixture = \"expect(x).toBe(x)\"; expect(add(1, 2)).toBe(3); });\n");
+  const result = run(dir);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(JSON.parse(result.stdout).candidates.length, 0);
+});

@@ -19,15 +19,19 @@ description: 运行时安全钩子：在命令和写入执行前拦下 rm -rf /�
 
 ## 直接拒绝
 
-- `rm -rf /`、`rm -rf /*`、`rm -rf ~`、`rm -rf $HOME`，含 `sudo` 和参数换序；
-- `git push --force` 到 `main` / `master`；
+- `rm -rf /`、`rm -rf /*`、`rm -rf ~`、`rm -rf $HOME`，含 `sudo`、引号和参数换序；
+- `find / -delete` 这类在根目录递归删除的写法；
+- `git push --force` / `--force-with-lease` 到 `main` / `master`，以及 `+main` refspec；
+- `git push --mirror`（可能覆盖远端所有引用）；
 - 对根目录 `chmod -R 777 /`；
-- 冻结范围外的写入/编辑。
+- 冻结范围外的写入/编辑，以及冻结状态下的 Bash 重定向写文件。
 
 ## 先问
 
 - 递归+强制删除开发目录以外的路径；
-- 强推非默认分支；
+- `find` 带 `-delete` 或 `-exec rm`，但目标不是根目录；
+- `echo ... | xargs rm` 这类动态路径删除；
+- 强推非默认分支、`+feature` refspec、`git push --delete`；
 - `git reset --hard`、`git clean -fd/-fdx`；
 - `docker system prune`、`kubectl delete`、`terraform destroy`。
 

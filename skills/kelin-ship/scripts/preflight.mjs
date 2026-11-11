@@ -1,6 +1,11 @@
 #!/usr/bin/env node
+import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 
+const args = process.argv.slice(2);
+const noReview = args.includes('--no-review');
+const requireReview = args.includes('--require-review');
 const git = (args) => spawnSync('git', args, { encoding: 'utf8' });
 const must = (args) => {
   const result = git(args);
@@ -20,6 +25,31 @@ const add = (code, severity, detail) => findings.push({ code, severity, detail }
 
 if (['main', 'master'].includes(branch)) {
   add('default-branch', 'P0', `on ${branch}; create a task branch`);
+}
+
+let review = null;
+const reviewFile = path.join(process.cwd(), '.kelin', 'review.json');
+if (!noReview) {
+  if (existsSync(reviewFile)) {
+    const script = path.resolve(import.meta.dirname, '..', '..', '..', 'skills', 'kelin-review', 'scripts', 'review-check.mjs');
+    if (!existsSync(script)) {
+      add('review-check-missing', 'P0', 'review stamp exists but review-check.mjs is unavailable');
+    } else {
+      const check = spawnSync(process.execPath, [script], { cwd: process.cwd(), encoding: 'utf8' });
+      let payload = null;
+      try {
+        payload = JSON.parse(check.stdout);
+      } catch {
+        payload = null;
+      }
+      review = payload ? { status: payload.status, fingerprint: payload.fingerprint } : { status: 'UNVERIFIED' };
+      if (!payload || payload.status !== 'CURRENT') {
+        add(`review-${(payload?.status || 'UNVERIFIED').toLowerCase()}`, 'P0', `review is ${payload?.status || 'UNVERIFIED'}; rerun kelin-review and stamp again`);
+      }
+    }
+  } else if (requireReview) {
+    add('review-missing', 'P0', 'no .kelin/review.json; run kelin-review and stamp it first');
+  }
 }
 
 for (const file of staged) {
@@ -49,6 +79,7 @@ const result = {
   ok: findings.length === 0,
   branch,
   staged: staged.length,
+  review,
   findings,
 };
 

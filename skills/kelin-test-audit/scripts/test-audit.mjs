@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripSource } from '../../kelin-verify-stack/scripts/source-text.mjs';
 
 const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.cache', 'out', 'tmp', 'vendor']);
 const TEST_FILE = /\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)test_[^/]+\.py$|_test\.go$/;
@@ -33,15 +34,20 @@ const SELF_COMPARE = [
 const SNAPSHOT = /toMatchSnapshot\s*\(/;
 
 const blocks = (lines) => {
+  const codeLines = lines.map(stripSource);
   const starts = [];
-  lines.forEach((line, index) => {
+  codeLines.forEach((line, index) => {
     if (TEST_START.test(line)) starts.push(index);
   });
-  return starts.map((start, index) => ({
-    start,
-    end: index + 1 < starts.length ? starts[index + 1] : lines.length,
-    body: lines.slice(start, index + 1 < starts.length ? starts[index + 1] : lines.length).join('\n'),
-  }));
+  return starts.map((start, index) => {
+    const end = index + 1 < starts.length ? starts[index + 1] : lines.length;
+    return {
+      start,
+      end,
+      body: lines.slice(start, end).join('\n'),
+      code: codeLines.slice(start, end).join('\n'),
+    };
+  });
 };
 
 export const auditTests = async (root) => {
@@ -60,19 +66,19 @@ export const auditTests = async (root) => {
     for (const block of blocks(lines)) {
       tests += 1;
       const line = block.start + 1;
-      if (SKIPPED.test(lines[block.start])) {
+      if (SKIPPED.test(block.code)) {
         candidates.push({ file, line, pattern: 'skipped', evidence: lines[block.start].trim().slice(0, 160), question: '这个跳过是临时的还是永久退役？' });
         continue;
       }
-      if (SELF_COMPARE.some((pattern) => pattern.test(block.body))) {
+      if (SELF_COMPARE.some((pattern) => pattern.test(block.code))) {
         candidates.push({ file, line, pattern: 'self-comparison', evidence: lines[block.start].trim().slice(0, 160), question: '这个断言是不是自己和自己比，永远通过？' });
         continue;
       }
-      if (SNAPSHOT.test(block.body) && !ASSERTION.test(block.body.replace(/expect\s*\([^)]*\)\.toMatchSnapshot\s*\([^)]*\)/g, ''))) {
+      if (SNAPSHOT.test(block.code) && !ASSERTION.test(block.code.replace(/expect\s*\([^)]*\)\.toMatchSnapshot\s*\([^)]*\)/g, ''))) {
         candidates.push({ file, line, pattern: 'snapshot-only', evidence: lines[block.start].trim().slice(0, 160), question: '快照之外有没有行为断言？' });
         continue;
       }
-      if (!ASSERTION.test(block.body)) {
+      if (!ASSERTION.test(block.code)) {
         candidates.push({ file, line, pattern: 'no-assertion', evidence: lines[block.start].trim().slice(0, 160), question: '这个测试失败时能抓到什么行为？' });
       }
     }
