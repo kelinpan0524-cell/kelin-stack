@@ -1,0 +1,10 @@
+{
+  "claim": "export is 30% faster at p50 on the 60k-row dataset",
+  "limiter": "JSON parsing on one core",
+  "runs": 7,
+  "median": { "before": 41, "after": 33 },
+  "range": { "before": [39, 44], "after": [32, 35] },
+  "errors": 0,
+  "workHappened": true,
+  "verdict": "faster"
+}

@@ -24,6 +24,20 @@ node skills/kelin-ci/scripts/install-ci.mjs <仓库目录> --test "npm test"
 
 已存在的文件默认不覆盖；确实要换用 `--force`。
 
+## 按改动裁剪检查
+
+每次都全量跑会慢，只跑受影响的又怕漏。用一个配置把“路径 → 检查”写死，再加一份“永不跳过”清单：
+
+```sh
+cp skills/kelin-ci/templates/kelin-checks.json kelin-checks.json
+node skills/kelin-ci/scripts/pregate.mjs --staged
+node skills/kelin-ci/scripts/pregate.mjs --changed src/a.ts,docs/b.md
+```
+
+输出：本次改动路径、命中的检查、被跳过的检查、最终要跑的命令列表。`alwaysRun` 里的命令无论改什么都跑；其余按 `paths` 的 glob 匹配。
+
+配置里的检查命令由项目自己维护，`kelin-ci` 不替它猜。
+
 ## 本地快检（pre-commit）
 
 CI 之前再加一道几秒钟的本地门：
