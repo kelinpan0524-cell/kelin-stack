@@ -29,6 +29,15 @@ node skills/kelin-docs/scripts/gen-docs.mjs --check
 
 digest 按阶段分组：规划、执行、交付、上下文、验证。新增 skill 时在生成器的 `GROUPS` 里加一条，否则 `--check` 会提示未分组。
 
+## 覆盖率检查
+
+```sh
+node skills/kelin-docs/scripts/doc-coverage.mjs --root .
+node skills/kelin-docs/scripts/doc-coverage.mjs --root . --check
+```
+
+它检查每个 skill 是否至少在一份人写文档里出现过：`README.md` 或 `docs/` 下除生成索引外的文件。只有生成索引、没有 README/专题文档的 skill 会进 `uncovered`；`--check` 时退出 1。新 skill 先补 README 一行，再谈专题文档。
+
 ## 不要做
 
 - 手改 `docs/skills.md` 或 `agents-digest/kelin-AGENTS.md`；

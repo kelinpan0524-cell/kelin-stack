@@ -1,0 +1,22 @@
+{
+  "alwaysRun": [
+    "node --test"
+  ],
+  "checks": [
+    {
+      "id": "tests",
+      "paths": ["src/**", "tests/**", "**/*.test.*"],
+      "command": "npm test"
+    },
+    {
+      "id": "docs",
+      "paths": ["docs/**", "README.md", "AGENTS.md"],
+      "command": "node .kelin/ci/agents-check.mjs"
+    },
+    {
+      "id": "ci",
+      "paths": [".github/workflows/**", "package.json"],
+      "command": "node .kelin/ci/guard-check.mjs"
+    }
+  ]
+}

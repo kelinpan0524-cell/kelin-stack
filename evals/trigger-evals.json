@@ -30,6 +30,13 @@
     { "query": "复盘一下，下次别再犯", "expect": "kelin-reflect", "cues": ["复盘"] },
     { "query": "按原则来，检查下有没有违反底线", "expect": "kelin-principles", "cues": ["操作底线"] },
     { "query": "skill 有没有测过，加个 eval", "expect": "kelin-evals", "cues": ["给 skill 自己做验收"] },
+    { "query": "更新一下 skill 索引和 agents digest", "expect": "kelin-docs", "cues": ["生成文档"] },
+    { "query": "这个接口改完快了多少，拿数据说话", "expect": "kelin-benchmark", "cues": ["性能数字"] },
+    { "query": "一句话说清现在要我决定什么", "expect": "kelin-brief", "cues": ["现在等你什么"] },
+    { "query": "防误删，危险命令先拦一下", "expect": "kelin-safety", "cues": ["运行时安全钩子"] },
+    { "query": "给这个项目做一套能重复跑的验收", "expect": "kelin-verify-app", "cues": ["本地验证 skill"] },
+    { "query": "测试太多太慢，哪些可以删", "expect": "kelin-test-audit", "cues": ["低价值测试"] },
+    { "query": "仓库整体检查一下，出个质量面板", "expect": "kelin-health", "cues": ["质量面板"] },
     { "query": "验证一下这个插件是不是真能用", "expect": "kelin-verify-stack", "cues": ["无头 ZCode 会话"] }
   ]
 }
