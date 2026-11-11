@@ -8,9 +8,10 @@ export const readFreeze = (projectDir) => {
   if (!existsSync(file)) return null;
   try {
     const data = JSON.parse(readFileSync(file, 'utf8'));
-    return Array.isArray(data.roots) && data.roots.length ? data : null;
+    if (!Array.isArray(data.roots) || !data.roots.length) return { roots: [], broken: true };
+    return data;
   } catch {
-    return null;
+    return { roots: [], broken: true };
   }
 };
 
@@ -35,6 +36,7 @@ export const resolvePath = (projectDir, filePath) => {
 export const decidePath = (projectDir, filePath) => {
   const freeze = readFreeze(projectDir);
   if (!freeze) return { decision: 'allow', reason: '' };
+  if (freeze.broken) return { decision: 'deny', reason: 'freeze is active but unreadable; fix or clear .kelin/freeze.json' };
   if (!filePath) return { decision: 'deny', reason: 'freeze is active but the target path cannot be determined' };
   const resolved = resolvePath(projectDir, filePath);
   if (!resolved) return { decision: 'deny', reason: 'freeze is active but the target path cannot be resolved' };

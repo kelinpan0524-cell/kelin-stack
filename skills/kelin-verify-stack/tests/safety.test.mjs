@@ -67,3 +67,14 @@ test('freeze blocks writes outside the allowed roots and clear lifts it', async 
   const after = runHook({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: path.join(dir, 'docs/b.md') } }, { ZCODE_PROJECT_DIR: dir });
   assert.equal(after.stdout, '');
 });
+
+test('a corrupt freeze file fails closed', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-freeze-broken-'));
+  await mkdir(path.join(dir, '.kelin'), { recursive: true });
+  await writeFile(path.join(dir, '.kelin', 'freeze.json'), '{broken');
+  const result = runHook({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: path.join(dir, 'a.ts') } }, { ZCODE_PROJECT_DIR: dir });
+  assert.equal(result.status, 0);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(payload.hookSpecificOutput.permissionDecisionReason, /unreadable/);
+});
