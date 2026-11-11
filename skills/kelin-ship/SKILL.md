@@ -19,7 +19,13 @@ description: 按纪律交付：一任务一分支、带前缀的提交、PR 说�
 
 ### 1. 交付前自审
 
-用 `kelin-review` skill 过一遍，P0/P1 清零。
+用 `kelin-review` skill 过一遍，P0/P1 清零。审完写评审回执：
+
+```sh
+node skills/kelin-review/scripts/review-check.mjs --write
+```
+
+提交前再跑一次不带 `--write` 的检查。只认 `CURRENT`；`STALE`、`UNVERIFIED`、`MISSING` 都不能当“审过了”。
 
 ### 2. 验证
 
