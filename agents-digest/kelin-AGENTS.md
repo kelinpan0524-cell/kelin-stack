@@ -5,7 +5,7 @@
 
 **规划**：`kelin-blast-radius`、`kelin-ci`、`kelin-goal`、`kelin-legacy`、`kelin-map`、`kelin-mode`、`kelin-multirepo`、`kelin-plan`、`kelin-product`
 **执行**：`kelin-correctness`、`kelin-guard`、`kelin-loop`、`kelin-refine`、`kelin-safety`、`kelin-tdd`、`kelin-test-audit`、`kelin-verify`
-**交付**：`kelin-audit`、`kelin-brief`、`kelin-decision-log`、`kelin-release`、`kelin-review`、`kelin-ship`、`kelin-ui`、`kelin-unslop`、`kelin-watch`
+**交付**：`kelin-audit`、`kelin-brief`、`kelin-decision-log`、`kelin-delegate`、`kelin-release`、`kelin-review`、`kelin-ship`、`kelin-ui`、`kelin-unslop`、`kelin-watch`
 **上下文**：`kelin-agents`、`kelin-branches`、`kelin-neat`、`kelin-principles`、`kelin-recall`、`kelin-reflect`
 **验证**：`kelin-benchmark`、`kelin-docs`、`kelin-evals`、`kelin-health`、`kelin-verify-app`、`kelin-verify-stack`
 
