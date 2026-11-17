@@ -5,6 +5,8 @@ description: 多仓库老项目统筹：先画仓库与数据所有权地图，�
 
 # 多仓库统筹
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 仓库一多，乱的不是代码，是**谁拥有什么数据、谁依赖谁、改一个要发几个仓**。先画图，再动手。
 
 ## 先画地图
@@ -38,7 +40,7 @@ description: 多仓库老项目统筹：先画仓库与数据所有权地图，�
 校验：
 
 ```sh
-node skills/kelin-multirepo/scripts/repo-check.mjs repo-map.json
+node "$SKILL_DIR"/scripts/repo-check.mjs repo-map.json
 ```
 
 它检查：名字唯一、必填字段齐全、依赖存在、没有循环依赖、契约文件存在、同一个数据实体没有两个 owner。

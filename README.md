@@ -74,12 +74,40 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --live --outpu
 
 ## 安装
 
-直接从 GitHub（推荐，安装的是仓库里的文件，不含 `.git`）：
+三个宿主都能装，同一份 `skills/` 内容源：
+
+**ZCode（插件市场，推荐）**：
 
 ```sh
 zcode plugins marketplace add kelinpan0524-cell/kelin-stack
 zcode plugins install kelin-stack@kelin-stack-market
 ```
+
+**Codex / Antigravity（用安装脚本）**：
+
+```sh
+git clone https://github.com/kelinpan0524-cell/kelin-stack.git && cd kelin-stack
+
+# 项目级（两宿主都认 .agents/skills/，推荐在目标项目里跑）
+./install.sh --host codex --scope project --path /path/to/your-project
+./install.sh --host antigravity --scope project --path /path/to/your-project
+
+# 用户级（全局）
+./install.sh --host codex --scope user
+./install.sh --host antigravity --scope user
+
+# 只装一部分（省上下文注入）
+./install.sh --host codex --scope user --subset "kelin-mode,kelin-plan,kelin-verify,kelin-review"
+
+# 可选：把 kelin 路由块写进全局 AGENTS.md（进入 kelin-mode 的入口）
+node skills/kelin-agents/scripts/ensure-workflow.mjs --global codex --dry-run
+node skills/kelin-agents/scripts/ensure-workflow.mjs --global antigravity --dry-run
+
+# 卸载（只删本安装器装的 kelin-* 条目）
+./install.sh --host codex --scope user --uninstall
+```
+
+安装器幂等、写入前显示目标、不覆盖非 kelin 内容、`--uninstall` 只删清单记录的条目。各宿主的能力边界与实测结论见 [docs/support-matrix.md](docs/support-matrix.md)。
 
 本地开发时可用目录安装；注意它会把整个目录（含 `.git`）拷进插件缓存：
 

@@ -5,6 +5,8 @@ description: 去掉文字里的 AI 味：套话、三段式、假对立、抽象
 
 # 去 AI 味
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 保留事实，改说法。目标不是“更像人”，是**让读者一眼知道你在说什么**。
 
 ## 中文常见 AI 味
@@ -32,8 +34,8 @@ description: 去掉文字里的 AI 味：套话、三段式、假对立、抽象
 ## 检查
 
 ```sh
-node skills/kelin-unslop/scripts/slop-check.mjs README.md
-node skills/kelin-unslop/scripts/slop-check.mjs README.md --strict
+node "$SKILL_DIR"/scripts/slop-check.mjs README.md
+node "$SKILL_DIR"/scripts/slop-check.mjs README.md --strict
 ```
 
 默认只报告，退出 0；`--strict` 有命中就退出 1，适合接进 CI。

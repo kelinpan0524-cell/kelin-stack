@@ -5,6 +5,8 @@ description: 非平凡任务开工前的规划：复述目标与验收标准、�
 
 # 规划
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 目标不是写一份漂亮的文档，是**在写代码之前把错误的方向挡掉**。
 
 ## 什么时候必须用
@@ -29,7 +31,7 @@ description: 非平凡任务开工前的规划：复述目标与验收标准、�
 先用轻量，不够再加。不要给单文件任务写十页计划——那是另一种浪费。
 
 ```sh
-node skills/kelin-plan/scripts/check-plan.mjs plan.md --level light
+node "$SKILL_DIR"/scripts/check-plan.mjs plan.md --level light
 ```
 
 ## 步骤
@@ -109,7 +111,7 @@ node skills/kelin-plan/scripts/check-plan.mjs plan.md --level light
 ## 配套脚本
 
 ```sh
-node skills/kelin-plan/scripts/check-plan.mjs plan.md
+node "$SKILL_DIR"/scripts/check-plan.mjs plan.md
 ```
 
 退出 0 表示结构完整：有目标、验收标准、方案/推荐、任务拆解、风险，且任务里写了怎么验证。退出 1 会列出缺哪节。放进 CI，计划就不会退化成愿望清单。
@@ -128,7 +130,7 @@ node skills/kelin-plan/scripts/check-plan.mjs plan.md
 - 结果写 `plan-gate.json`，开工前跑：
 
 ```sh
-node skills/kelin-plan/scripts/plan-gate.mjs plan-gate.json --require-resolved
+node "$SKILL_DIR"/scripts/plan-gate.mjs plan-gate.json --require-resolved
 ```
 
 有 `pending` 决策就退出 1，不要进 build。

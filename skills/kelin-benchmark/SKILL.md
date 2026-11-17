@@ -5,6 +5,8 @@ description: 报性能数字前先取证：瓶颈是什么、有没有调优、�
 
 # 性能数字取证
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 一个数字要能站住，必须回答七个问题。回答不了，结论就是 `inconclusive`，不是“差不多”。
 
 ## 七问
@@ -39,7 +41,7 @@ description: 报性能数字前先取证：瓶颈是什么、有没有调优、�
 校验：
 
 ```sh
-node skills/kelin-benchmark/scripts/bench-check.mjs bench.json
+node "$SKILL_DIR"/scripts/bench-check.mjs bench.json
 ```
 
 字段缺失、范围不包住中位数、`faster` 但中位数没变小，都会退出 1。范围重叠只给 warning，由人决定是否做统计检验。

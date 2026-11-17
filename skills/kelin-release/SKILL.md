@@ -5,6 +5,8 @@ description: 自动化发布：先过发布闸门（CI 绿、验证回执、CHAN
 
 # 发布
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 发布 = 把“已经验证过的版本”标成一个可回访的点。它不等于部署。
 
 ## 闸门
@@ -20,7 +22,7 @@ description: 自动化发布：先过发布闸门（CI 绿、验证回执、CHAN
 ## 流程
 
 ```sh
-node skills/kelin-release/scripts/release.mjs --bump patch
+node "$SKILL_DIR"/scripts/release.mjs --bump patch
 ```
 
 默认 **dry-run**：打印当前版本、上一个 tag、这次包含的提交、建议版本、将改的文件、将生成的 release notes。不改任何文件、不联网。
@@ -28,7 +30,7 @@ node skills/kelin-release/scripts/release.mjs --bump patch
 确认后再执行：
 
 ```sh
-node skills/kelin-release/scripts/release.mjs --bump patch --publish --confirm
+node "$SKILL_DIR"/scripts/release.mjs --bump patch --publish --confirm
 ```
 
 `--publish` 会：升 manifest 版本 → 写 CHANGELOG → 提交 → 打 `vX.Y.Z` → `gh release create`。失败时停在原地并报告已完成的步骤。

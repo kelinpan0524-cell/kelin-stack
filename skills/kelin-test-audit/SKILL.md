@@ -5,12 +5,14 @@ description: 清理低价值测试：找出永远通过、自己和自己比、�
 
 # 测试价值清扫
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 `kelin-tdd` 和 `kelin-guard` 负责**加**测试；这个 skill 负责**删**测试。24GB 的机器上，测试越积越慢，低价值测试会拖垮验证。
 
 ## 先扫一遍
 
 ```sh
-node skills/kelin-test-audit/scripts/test-audit.mjs --root .
+node "$SKILL_DIR"/scripts/test-audit.mjs --root .
 ```
 
 输出候选：文件、行号、模式、证据、问题。默认只报；要 CI 拦截加 `--fail`。

@@ -5,6 +5,8 @@ description: 运行时安全钩子：在命令和写入执行前拦下 rm -rf /�
 
 # 运行时安全
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 `kelin-guard` 管“bug 修完怎么防再犯”，这个 skill 管“命令敲下去之前拦一下”。两者互不替代。
 
 ## 装了什么
@@ -45,9 +47,9 @@ description: 运行时安全钩子：在命令和写入执行前拦下 rm -rf /�
 只允许改指定目录时：
 
 ```sh
-node skills/kelin-safety/scripts/freeze.mjs set src/ docs/
-node skills/kelin-safety/scripts/freeze.mjs status
-node skills/kelin-safety/scripts/freeze.mjs clear
+node "$SKILL_DIR"/scripts/freeze.mjs set src/ docs/
+node "$SKILL_DIR"/scripts/freeze.mjs status
+node "$SKILL_DIR"/scripts/freeze.mjs clear
 ```
 
 冻结状态写在项目 `.kelin/freeze.json`。写入或编辑目标不在范围内直接拒绝；路径无法解析也拒绝（fail-closed）。符号链接会先解析到真实路径再比较。

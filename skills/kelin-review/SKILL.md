@@ -5,6 +5,8 @@ description: 交付前的自审：按 P0-P3 分级找正确性、边界、测试
 
 # 自审
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 审查的目标是**在用户发现之前发现问题**，不是证明自己写得好。
 
 ## 只报能证明的
@@ -23,7 +25,7 @@ description: 交付前的自审：按 P0-P3 分级找正确性、边界、测试
 门禁是任何能让这次改动失败的检查：测试、断言、阈值、超时、lint、类型检查、CI job、快照。审查时先扫门禁改动，再谈其他。
 
 ```sh
-node skills/kelin-review/scripts/gate-scan.mjs --base origin/main
+node "$SKILL_DIR"/scripts/gate-scan.mjs --base origin/main
 ```
 
 脚本分三层，不能跳级：
@@ -52,13 +54,13 @@ node skills/kelin-review/scripts/gate-scan.mjs --base origin/main
 评审必须绑定当时的工作区。审完写回执：
 
 ```sh
-node skills/kelin-review/scripts/review-check.mjs --write
+node "$SKILL_DIR"/scripts/review-check.mjs --write
 ```
 
 交付前再跑一次：
 
 ```sh
-node skills/kelin-review/scripts/review-check.mjs
+node "$SKILL_DIR"/scripts/review-check.mjs
 ```
 
 `CURRENT` 才算评审有效；`STALE` 说明代码变了，评审作废；`UNVERIFIED` 或 `MISSING` 不能当通过。`kelin-ship` 只接受 `CURRENT`。

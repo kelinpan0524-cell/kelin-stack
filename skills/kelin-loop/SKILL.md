@@ -5,6 +5,8 @@ description: 有明确停止条件的循环执行：每轮跑验证、记录证�
 
 # 循环执行
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 循环不是“一直试”。循环是**每轮都有证据、随时能停**的重复。
 
 ## 什么时候可以用
@@ -49,7 +51,7 @@ description: 有明确停止条件的循环执行：每轮跑验证、记录证�
 ## 校验与执行
 
 ```sh
-node skills/kelin-loop/scripts/loop-check.mjs loop.json
+node "$SKILL_DIR"/scripts/loop-check.mjs loop.json
 ```
 
 检查契约是否完整。`loop-check` 通过之前不要开始循环。

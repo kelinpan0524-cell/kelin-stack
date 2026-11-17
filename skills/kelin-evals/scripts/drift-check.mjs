@@ -18,9 +18,19 @@ for (const name of readdirSync(skillsDir).sort()) {
     const target = path.join(root, 'skills', match[1], match[2]);
     if (!existsSync(target)) missing.push({ skill: name, reference: `skills/${match[1]}/${match[2]}` });
   }
-  for (const match of text.matchAll(/node\s+(skills\/[A-Za-z0-9._/-]+\.(?:mjs|js))/g)) {
+  for (const match of text.matchAll(/node\s+skills\/[A-Za-z0-9._/-]+\.(?:mjs|js)/g)) {
     references += 1;
-    if (!existsSync(path.join(root, match[1]))) missing.push({ skill: name, reference: match[1] });
+    missing.push({ skill: name, reference: `repo-relative invocation: ${match[0]} (use "$SKILL_DIR")` });
+  }
+  const ownDir = path.join(skillsDir, name);
+  const resolved = text.replaceAll('"$SKILL_DIR"', `"${ownDir}"`);
+  for (const match of resolved.matchAll(/node\s+"([^"]+\.(?:mjs|js))"/g)) {
+    references += 1;
+    if (!existsSync(match[1])) missing.push({ skill: name, reference: match[1] });
+  }
+  for (const match of resolved.matchAll(/node\s+"([^"]+)"(\/[A-Za-z0-9._/-]+\.(?:mjs|js))/g)) {
+    references += 1;
+    if (!existsSync(match[1] + match[2])) missing.push({ skill: name, reference: match[1] + match[2] });
   }
 }
 

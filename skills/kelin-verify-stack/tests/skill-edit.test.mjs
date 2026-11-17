@@ -14,15 +14,20 @@ test('drift-check verifies every referenced script exists', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'kelin-drift-'));
   await mkdir(path.join(dir, 'skills', 'a', 'scripts'), { recursive: true });
   await writeFile(path.join(dir, 'skills', 'a', 'scripts', 'x.mjs'), 'export {};\n');
-  await writeFile(path.join(dir, 'skills', 'a', 'SKILL.md'), 'Run `node skills/a/scripts/x.mjs`.\n');
+  await writeFile(path.join(dir, 'skills', 'a', 'SKILL.md'), 'Run `node "$SKILL_DIR"/scripts/x.mjs`.\n');
 
   const clean = run(drift, ['--root', dir]);
   assert.equal(clean.status, 0, clean.stdout + clean.stderr);
 
-  await writeFile(path.join(dir, 'skills', 'a', 'SKILL.md'), 'Run `node skills/a/scripts/missing.mjs`.\n');
+  await writeFile(path.join(dir, 'skills', 'a', 'SKILL.md'), 'Run `node "$SKILL_DIR"/scripts/missing.mjs`.\n');
   const broken = run(drift, ['--root', dir]);
   assert.equal(broken.status, 1);
   assert.match(broken.stdout, /missing\.mjs/);
+
+  await writeFile(path.join(dir, 'skills', 'a', 'SKILL.md'), 'Run `node skills/a/scripts/x.mjs`.\n');
+  const repoRelative = run(drift, ['--root', dir]);
+  assert.equal(repoRelative.status, 1);
+  assert.match(repoRelative.stdout, /repo-relative invocation/);
 });
 
 test('skill-bill flags a skill that grew more than 10 percent', async () => {

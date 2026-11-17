@@ -5,12 +5,14 @@ description: PR/CI 值守：轮询检查状态，把失败分成代码、环境�
 
 # 值守
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 值守的价值是**只报需要人动手的那部分**，不是把日志全刷一遍。
 
 ## 一次检查
 
 ```sh
-node skills/kelin-watch/scripts/watch.mjs --pr 123
+node "$SKILL_DIR"/scripts/watch.mjs --pr 123
 ```
 
 输出 JSON：每个 check 的名称、状态、链接；失败项分类；结论（`pass` / `pending` / `fail`）。

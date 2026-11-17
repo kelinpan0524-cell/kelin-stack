@@ -5,6 +5,8 @@ description: 验证一个 ZCode 插件是不是真的能用。先体检环境，
 
 # kelin-verify-stack
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 ## 这个 skill 干什么
 
 验证一个 ZCode 插件目录能不能真正工作。不是看文件在不在，而是：
@@ -27,9 +29,9 @@ description: 验证一个 ZCode 插件是不是真的能用。先体检环境，
 S=skills/kelin-verify-stack
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/verify-stack.XXXXXX")/run"
 
-node "$S/scripts/verify-stack.mjs" doctor --output "$OUT/doctor"
-node "$S/scripts/verify-stack.mjs" run --all --output "$OUT/static"
-node "$S/scripts/verify-stack.mjs" run --all --live --output "$OUT/live"
+node "$SKILL_DIR"/scripts/verify-stack.mjs doctor --output "$OUT/doctor"
+node "$SKILL_DIR"/scripts/verify-stack.mjs run --all --output "$OUT/static"
+node "$SKILL_DIR"/scripts/verify-stack.mjs run --all --live --output "$OUT/live"
 ```
 
 `--output` 必须是尚不存在或空的目录。每次验证用全新目录，不覆盖旧证据。不带 `--plugin` 时默认验证本插件（`kelin-stack`）。
