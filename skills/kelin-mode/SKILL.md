@@ -125,6 +125,8 @@ node "$SKILL_DIR"/scripts/policy-check.mjs kelin-policy.json
 
 没有这个文件时用默认边界，但不会因此扩大权限。
 
+个人偏好（跨宿主跟人走）：`node "$SKILL_DIR"/scripts/prefs.mjs get kelin-mode --host zcode`（宿主名按当前环境替换）。`~/.kelin/preferences.md` 按 skill 分节、`### 宿主名` 只对该宿主生效；优先级：当轮指令 > 项目规则 > host 覆盖 > 共享偏好，永不覆盖安全约束。用户说"以后在某宿主里怎样"时用 `set` 保存，不主动问。
+
 ## 每个阶段做什么
 
 每阶段默认调用的 skill 见 [references/routing.md](references/routing.md)；按任务信号自动选，不要等用户点名。下面是各阶段的退出条件。
