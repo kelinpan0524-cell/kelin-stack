@@ -8,7 +8,7 @@ SessionStart 会把这份路由注入会话。用户不需要点名 skill；按�
 | --- | --- | --- |
 | intake | `kelin-agents`（AGENTS.md 缺失或超长时）、`kelin-mode init` | 高风险/动数据先停 |
 | map | `kelin-map`；小改只写 `scope.md` | 单文件小修跳过 |
-| design | `kelin-goal`、`kelin-plan`；产品类加 `kelin-product`；设计加 `kelin-architect`（双候选）、`kelin-blast-radius`；有性能目标加 `kelin-benchmark` 预算 | 需求不清先回 goal |
+| design | `kelin-goal`、`kelin-plan`；产品类加 `kelin-product`；跨模块时 `kelin-plan` 的设计草图（双候选）、`kelin-blast-radius`；有性能目标加 `kelin-benchmark` 预算 | 需求不清先回 goal |
 | build | `kelin-tdd`；修 bug 加 `kelin-guard`；高风险改动先 `kelin-safety` 冻结范围；正确性存疑加 `kelin-correctness` | 不并行跑构建和测试 |
 | verify | `kelin-verify`；项目有 `.zcode/skills/verify-*` 或 `.agents/skills/verify-*` 时优先 `kelin-verify-app` 生成的本地 skill；有性能数字加 `kelin-benchmark`；收尾跑 `kelin-health` | 任何一条失败回 build |
 | review | `kelin-review`（门禁扫描 + 对抗审查）；必要时 `kelin-reviewer`；审完 `review-check --write` | P0/P1 清零才前进 |
