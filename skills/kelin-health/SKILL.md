@@ -5,12 +5,14 @@ description: 质量面板：一次跑完单元测试、结构检查、skill eval
 
 # 质量面板
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 只回答一个问题：**这个仓库现在能不能安全地继续改？** 不修、不部署、不展开。
 
 ## 跑
 
 ```sh
-node skills/kelin-health/scripts/health.mjs --root .
+node "$SKILL_DIR"/scripts/health.mjs --root .
 ```
 
 输出 JSON：每个检查项的 id、命令、退出码、耗时、摘要；`ok` 和 `failed` 给结论。任一失败退出 1。

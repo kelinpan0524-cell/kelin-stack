@@ -5,6 +5,8 @@ description: 发现一个 bug 后，选择最强且最便宜的防再犯手段�
 
 # 防再犯
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 修完 bug 不算完。**下一次同样的错误必须被机器拦住**，否则它一定会回来。
 
 ## Guard 阶梯
@@ -62,7 +64,7 @@ description: 发现一个 bug 后，选择最强且最便宜的防再犯手段�
 校验：
 
 ```sh
-node skills/kelin-guard/scripts/guard-check.mjs guards.json
+node "$SKILL_DIR"/scripts/guard-check.mjs guards.json
 ```
 
 它检查字段完整、类型合法、`location` 存在、`command` 非空。退出 1 表示有不合格的 guard。

@@ -5,6 +5,8 @@ description: 软件与产品设计的底线：先问清用户和环境；需求�
 
 # 产品设计底线
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 这套底线解决“做出来才发现不对”：给错的人、在错的设备上、权限没设计、数据入口没防错、性能预算没定。都在 plan 期问清楚，不上线前补。
 
 ## 第一件事：问清用户和环境
@@ -163,7 +165,7 @@ AI 输出**先预览**，高亮不确定项和置信度；每条可编辑、可�
 
 PRD 不是一次做对：先写确定的，标 `[待确认]`；新事实回写并记决策日志；旧 PRD 是历史不是现状，收尾用 `kelin-neat` 对齐。
 
-校验：`node skills/kelin-product/scripts/prd-check.mjs PRD.md`
+校验：`node "$SKILL_DIR"/scripts/prd-check.mjs PRD.md`
 
 ## 什么时候自动写 plan
 

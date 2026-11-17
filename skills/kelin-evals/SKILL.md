@@ -5,6 +5,8 @@ description: 给 skill 自己做验收：静态检查结构、描述触发词、
 
 # Skill 验收
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 skill 也是代码。没有验收，它就会慢慢变成一篇没人维护的文档。
 
 ## 两层 eval
@@ -19,7 +21,7 @@ skill 也是代码。没有验收，它就会慢慢变成一篇没人维护的�
 ## 静态检查
 
 ```sh
-node skills/kelin-evals/scripts/skill-eval.mjs --root .
+node "$SKILL_DIR"/scripts/skill-eval.mjs --root .
 ```
 
 它检查：
@@ -35,14 +37,14 @@ node skills/kelin-evals/scripts/skill-eval.mjs --root .
 ## 体量账单与引用漂移
 
 ```sh
-node skills/kelin-evals/scripts/skill-bill.mjs --root .
-node skills/kelin-evals/scripts/skill-bill.mjs --root . --check
-node skills/kelin-evals/scripts/drift-check.mjs --root .
+node "$SKILL_DIR"/scripts/skill-bill.mjs --root .
+node "$SKILL_DIR"/scripts/skill-bill.mjs --root . --check
+node "$SKILL_DIR"/scripts/drift-check.mjs --root .
 ```
 
 - `skill-bill`：默认对比 `origin/main`（没有远端时回退本地 main/master 或 HEAD），算每个 skill 的字节数、行数和涨幅；单次涨幅超过 10% 标 DUE，`--check` 时退出 1。新增 skill 没有基线，不算 DUE；可用 `--base <ref>` 指定别的基准。
 - 整版本升级时 DUE 会很多，逐条人工确认“加的字换来了什么检查”；只改一个 skill 时用 `--check` 卡住自己。
-- `drift-check`：把 SKILL.md 里提到的 `skills/<名字>/...` 路径和 `node skills/...` 命令逐个查存在性；引用不存在的脚本直接失败。
+- `drift-check`：把 SKILL.md 里提到的 `skills/<名字>/...` 路径与 `"$SKILL_DIR"/...` 脚本命令逐个查存在性，引用不存在的脚本直接失败；出现仓库根相对的 `node skills/...` 调用同样失败（跨宿主会断）。
 
 体量涨了不一定是坏事，但必须回答“加的这些字是否换来了可执行检查”。
 

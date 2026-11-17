@@ -5,6 +5,8 @@ description: 老仓库改造：先建立可重复的基线（能不能构建/测
 
 # 老仓库改造
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 老仓库最大的风险不是代码丑，是**你不知道改坏了什么**。所以顺序永远是：先能验证，再改。
 
 ## 第 -1 步：先对齐文档
@@ -83,7 +85,7 @@ git log --since="12 months ago" --name-only --pretty=format: | sort | uniq -c | 
 ## 第 4 步：每片的验收
 
 ```sh
-node skills/kelin-verify/scripts/run-acceptance.mjs verify.json
+node "$SKILL_DIR"/../kelin-verify/scripts/run-acceptance.mjs verify.json
 ```
 
 验收至少包含：特征测试全过、新测试全过、差分对照一致、启动正常。

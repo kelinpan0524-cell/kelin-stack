@@ -5,13 +5,15 @@ description: 从 skills 目录生成文档：skill 索引、命令速查、一�
 
 # 生成式文档
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 手写的索引一定会漂移：加了 skill 忘了改数量、改了口号忘了改说明。这里的原则是**从源头生成，CI 检查**。
 
 ## 生成什么
 
 ```sh
-node skills/kelin-docs/scripts/gen-docs.mjs
-node skills/kelin-docs/scripts/gen-docs.mjs --check
+node "$SKILL_DIR"/scripts/gen-docs.mjs
+node "$SKILL_DIR"/scripts/gen-docs.mjs --check
 ```
 
 - `docs/skills.md`：全部 skill 的索引，含命令、用途、是否有脚本、是否有 live recipe；
@@ -32,8 +34,8 @@ digest 按阶段分组：规划、执行、交付、上下文、验证。新增 
 ## 覆盖率检查
 
 ```sh
-node skills/kelin-docs/scripts/doc-coverage.mjs --root .
-node skills/kelin-docs/scripts/doc-coverage.mjs --root . --check
+node "$SKILL_DIR"/scripts/doc-coverage.mjs --root .
+node "$SKILL_DIR"/scripts/doc-coverage.mjs --root . --check
 ```
 
 它检查每个 skill 是否至少在一份人写文档里出现过：`README.md` 或 `docs/` 下除生成索引外的文件。只有生成索引、没有 README/专题文档的 skill 会进 `uncovered`；`--check` 时退出 1。新 skill 先补 README 一行，再谈专题文档。

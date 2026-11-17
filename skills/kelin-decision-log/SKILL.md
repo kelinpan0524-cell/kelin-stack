@@ -5,6 +5,8 @@ description: 记录关键决策：时间、阶段、做了什么决定、为什�
 
 # 决策日志
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 只记**会改变后续行为**的决定。日常小选择不记。
 
 ## 什么时候记
@@ -17,7 +19,7 @@ description: 记录关键决策：时间、阶段、做了什么决定、为什�
 ## 字段
 
 ```sh
-node skills/kelin-decision-log/scripts/log.mjs decisions.tsv \
+node "$SKILL_DIR"/scripts/log.mjs decisions.tsv \
   阶段 决策 为什么 证据 结果
 ```
 
@@ -30,7 +32,7 @@ node skills/kelin-decision-log/scripts/log.mjs decisions.tsv \
 写完校验：
 
 ```sh
-node skills/kelin-decision-log/scripts/decision-check.mjs decisions.tsv
+node "$SKILL_DIR"/scripts/decision-check.mjs decisions.tsv
 ```
 
 它检查表头、六列、阶段和结果取值，以及证据是不是可解析的指针。日志只追加，不改旧行；跨任务用 `start` 行分开。

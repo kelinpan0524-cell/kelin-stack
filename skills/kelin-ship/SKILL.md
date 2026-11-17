@@ -5,6 +5,8 @@ description: 按纪律交付：一任务一分支、带前缀的提交、PR 说�
 
 # 交付
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 交付不是“代码写完了”，是**别人能安全地接过去**。
 
 ## 硬规则
@@ -22,7 +24,7 @@ description: 按纪律交付：一任务一分支、带前缀的提交、PR 说�
 用 `kelin-review` skill 过一遍，P0/P1 清零。审完写评审回执：
 
 ```sh
-node skills/kelin-review/scripts/review-check.mjs --write
+node "$SKILL_DIR"/../kelin-review/scripts/review-check.mjs --write
 ```
 
 提交前再跑一次不带 `--write` 的检查。只认 `CURRENT`；`STALE`、`UNVERIFIED`、`MISSING` 都不能当“审过了”。
@@ -85,7 +87,7 @@ git commit -m "[ZCode] 一句话说结果" -m "为什么这么改，风险是什
 ## 提交前检查
 
 ```sh
-node skills/kelin-ship/scripts/preflight.mjs
+node "$SKILL_DIR"/scripts/preflight.mjs
 ```
 
 在暂存之后执行。它检查：是不是直接在 main/master、有没有暂存表格类真实数据、暂存内容里有没有密钥特征；存在 `.kelin/review.json` 时还要求评审指纹是 `CURRENT`，`STALE`/`UNVERIFIED` 直接退出 1。`--require-review` 要求必须有评审回执，`--no-review` 显式跳过评审检查。有问题退出 1，并列出文件；通过退出 0。

@@ -5,12 +5,14 @@ description: 把 kelin-stack 的检查装进任意仓库的 CI、PR 模板和本
 
 # 接 CI 和 PR 门禁
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 skill 靠自觉，CI 靠强制。**能自动拦住的规则，不要只写在文档里。**
 
 ## 装什么
 
 ```sh
-node skills/kelin-ci/scripts/install-ci.mjs <仓库目录> --test "npm test"
+node "$SKILL_DIR"/scripts/install-ci.mjs <仓库目录> --test "npm test"
 ```
 
 会写入：
@@ -30,8 +32,8 @@ node skills/kelin-ci/scripts/install-ci.mjs <仓库目录> --test "npm test"
 
 ```sh
 cp skills/kelin-ci/templates/kelin-checks.json kelin-checks.json
-node skills/kelin-ci/scripts/pregate.mjs --staged
-node skills/kelin-ci/scripts/pregate.mjs --changed src/a.ts,docs/b.md
+node "$SKILL_DIR"/scripts/pregate.mjs --staged
+node "$SKILL_DIR"/scripts/pregate.mjs --changed src/a.ts,docs/b.md
 ```
 
 输出：本次改动路径、命中的检查、被跳过的检查、最终要跑的命令列表。`alwaysRun` 里的命令无论改什么都跑；其余按 `paths` 的 glob 匹配。
@@ -43,7 +45,7 @@ node skills/kelin-ci/scripts/pregate.mjs --changed src/a.ts,docs/b.md
 CI 之前再加一道几秒钟的本地门：
 
 ```sh
-node skills/kelin-ci/scripts/install-precommit.mjs <仓库目录>
+node "$SKILL_DIR"/scripts/install-precommit.mjs <仓库目录>
 ```
 
 它只做三件事：拦 `.env`/私钥文件、拦表格文件（xlsx/xls/numbers）、扫新增行里的密钥特征。CSV/TSV 只警告不拦。完整测试和验收仍然在 CI 和 `kelin-verify`，不在提交钩子里跑。

@@ -5,6 +5,8 @@ description: 给项目生成一套本地验证 skill：启动、体检、驱动�
 
 # 项目级验证 skill
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 `kelin-verify-stack` 验证插件自己；这个 skill 验证**你的项目**。目标不是再写一份测试文档，是让下一个 agent 能照着命令真跑一遍并留下证据。
 
 ## 什么时候用
@@ -18,7 +20,7 @@ description: 给项目生成一套本地验证 skill：启动、体检、驱动�
 ### 1. 扫描
 
 ```sh
-node skills/kelin-verify-app/scripts/scan-app.mjs --root .
+node "$SKILL_DIR"/scripts/scan-app.mjs --root .
 ```
 
 输出：项目名、技术栈、启动命令、就绪判断、测试命令、端口、识别到的页面/接口/CLI 功能。
@@ -28,7 +30,7 @@ node skills/kelin-verify-app/scripts/scan-app.mjs --root .
 ### 2. 预览
 
 ```sh
-node skills/kelin-verify-app/scripts/generate.mjs --root .
+node "$SKILL_DIR"/scripts/generate.mjs --root .
 ```
 
 只打印将写入的文件，不落盘。确认功能列表和启动命令没问题再写。
@@ -36,7 +38,7 @@ node skills/kelin-verify-app/scripts/generate.mjs --root .
 ### 3. 写入
 
 ```sh
-node skills/kelin-verify-app/scripts/generate.mjs --root . --write
+node "$SKILL_DIR"/scripts/generate.mjs --root . --write
 ```
 
 默认写到 `.zcode/skills/verify-<app>/`；项目用 `.agents/skills/` 时加 `--out .agents/skills`。已存在时默认拒绝覆盖，确认后用 `--force`。

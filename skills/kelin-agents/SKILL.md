@@ -5,6 +5,8 @@ description: 初始化、审查和精简仓库的 AGENTS.md，并幂等补上 ke
 
 # AGENTS.md 维护
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 AGENTS.md 不是项目说明书，是**给 agent 的硬约束清单**。写长了会变差，不是变好。
 
 ## 为什么必须短
@@ -71,7 +73,7 @@ AGENTS.md 不是项目说明书，是**给 agent 的硬约束清单**。写长�
 ## 审查（已有文件时）
 
 ```sh
-node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
+node "$SKILL_DIR"/scripts/agents-check.mjs AGENTS.md
 ```
 
 它检查：
@@ -119,7 +121,7 @@ node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
 已有 AGENTS.md 时，用脚本补一段带标记的工作流规则：
 
 ```sh
-node skills/kelin-agents/scripts/ensure-workflow.mjs AGENTS.md
+node "$SKILL_DIR"/scripts/ensure-workflow.mjs AGENTS.md
 ```
 
 - 只追加 `<!-- kelin:workflow:start -->` 到 `<!-- kelin:workflow:end -->` 之间的块，不动其他内容；

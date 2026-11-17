@@ -5,6 +5,8 @@ description: 把一句模糊的“做成 X”变成可判定的目标契约：�
 
 # 目标契约
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 目标不是愿望。目标必须能被判定为“到了”或“没到”。
 
 ## 想跑 goal 但说不清
@@ -78,7 +80,7 @@ Arono
 ## 校验
 
 ```sh
-node skills/kelin-goal/scripts/goal-check.mjs goal.md
+node "$SKILL_DIR"/scripts/goal-check.mjs goal.md
 ```
 
 它检查：目标非空、至少一条完成条件、约束非空、检查点非空。缺哪项报哪项。

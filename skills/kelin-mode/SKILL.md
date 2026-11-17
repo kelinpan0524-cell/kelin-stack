@@ -5,6 +5,8 @@ description: 自动编排整套 kelin-stack：安装后 SessionStart 自动启�
 
 # kelin-mode
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 目标：**你说一句要什么，agent 自己知道下一步做什么、调哪个 skill、什么时候停。**
 
 如果仓库的 `AGENTS.md` 写了“跨文件/多步/产品类任务先 `/kelin-mode`”，就不用每次说命令，agent 会自己进来。
@@ -100,9 +102,9 @@ intake → map → design → build → verify → review → refine → ship �
 用脚本推进，不靠记忆：
 
 ```sh
-node skills/kelin-mode/scripts/mode.mjs init --mode feature
-node skills/kelin-mode/scripts/mode.mjs status
-node skills/kelin-mode/scripts/mode.mjs advance
+node "$SKILL_DIR"/scripts/mode.mjs init --mode feature
+node "$SKILL_DIR"/scripts/mode.mjs status
+node "$SKILL_DIR"/scripts/mode.mjs advance
 ```
 
 `advance` 只检查产物文件是否存在；内容质量要用对应脚本校验（`goal-check`、`check-plan`、`map-check`、`run-acceptance`），校验不过不要 `advance`。**不要手改 `state.json` 绕过它。**
@@ -118,7 +120,7 @@ node skills/kelin-mode/scripts/mode.mjs advance
 - `budget.maxAgents/maxLiveEvals`：并发和 live 验证上限。
 
 ```sh
-node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
+node "$SKILL_DIR"/scripts/policy-check.mjs kelin-policy.json
 ```
 
 没有这个文件时用默认边界，但不会因此扩大权限。
@@ -127,7 +129,7 @@ node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
 
 每阶段默认调用的 skill 见 [references/routing.md](references/routing.md)；按任务信号自动选，不要等用户点名。下面是各阶段的退出条件。
 
-**intake**：先跑 `node skills/kelin-agents/scripts/ensure-workflow.mjs AGENTS.md`（缺文件就建，缺工作流块就补，有就跳过；只追加标记块，不重写文件），再读 `AGENTS.md`、`kelin-policy.json`（如果有）、`git status`、最近提交；判断模式和风险级别。策略里的 `allow` 可以直接做，`ask` 必须先问，写文件只落在 `paths.writable`，`forbidden` 不碰，子代理和 live 验证不超过 `budget`。没有 AGENTS.md 时脚本会建一份骨架；超过 150 行先精简；`agents-check` 有失败项先修，再开工。高风险（动数据、动权限、对外接口）先停下来问。
+**intake**：先跑 `node "$SKILL_DIR"/../kelin-agents/scripts/ensure-workflow.mjs AGENTS.md`（缺文件就建，缺工作流块就补，有就跳过；只追加标记块，不重写文件），再读 `AGENTS.md`、`kelin-policy.json`（如果有）、`git status`、最近提交；判断模式和风险级别。策略里的 `allow` 可以直接做，`ask` 必须先问，写文件只落在 `paths.writable`，`forbidden` 不碰，子代理和 live 验证不超过 `budget`。没有 AGENTS.md 时脚本会建一份骨架；超过 150 行先精简；`agents-check` 有失败项先修，再开工。高风险（动数据、动权限、对外接口）先停下来问。
 
 **map**：用 `kelin-map` 建或更新功能地图。只改一小块时写 `scope.md`：影响哪些文件、哪些调用方、哪些测试。
 
@@ -150,7 +152,7 @@ node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
 先跑一次预算检查，按它的建议决定并发：
 
 ```sh
-node skills/kelin-mode/scripts/budget.mjs
+node "$SKILL_DIR"/scripts/budget.mjs
 ```
 
 输出里的 `maxAgents` 是硬上限：0 就单干，1 最多一个子代理，2 才是“一写一读”。

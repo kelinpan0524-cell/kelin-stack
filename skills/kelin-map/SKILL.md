@@ -5,6 +5,8 @@ description: 给代码库建立“功能地图”：哪些路径归哪个功能�
 
 # 功能地图
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 没有地图时，“这次改动该测什么”靠猜；有地图时，它是一道计算题。
 
 ## 产出两样
@@ -43,7 +45,7 @@ description: 给代码库建立“功能地图”：哪些路径归哪个功能�
 ## 校验
 
 ```sh
-node skills/kelin-map/scripts/map-check.mjs feature-map.json
+node "$SKILL_DIR"/scripts/map-check.mjs feature-map.json
 ```
 
 退出 0 表示全覆盖；退出 1 会列出未覆盖（unmapped）和归属不清（ambiguous）的文件。

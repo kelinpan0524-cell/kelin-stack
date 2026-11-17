@@ -5,6 +5,8 @@ description: 全仓或整包审查：正确性、安全、负载、测试缺口�
 
 # 全仓审查
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 像刚接手这个仓库、并且会为它半夜被叫醒的人那样审。
 
 ## 先画地图
@@ -52,7 +54,7 @@ description: 全仓或整包审查：正确性、安全、负载、测试缺口�
 审完用脚本校验：
 
 ```sh
-node skills/kelin-audit/scripts/audit-check.mjs audit.md
+node "$SKILL_DIR"/scripts/audit-check.mjs audit.md
 ```
 
 缺覆盖表、状态不在三档、或“未审”却写“没问题”，直接退出 1。

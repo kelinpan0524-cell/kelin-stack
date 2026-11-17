@@ -5,6 +5,8 @@ description: 把“做完了”变成可执行的证明：先写验收断言，�
 
 # 验证
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 “完成”不是一句判断，是一组能重复执行的断言。
 
 ## 核心规则
@@ -76,7 +78,7 @@ UI 改动不能只跑命令。用 `kelin-ui` 的清单，至少留三样证据�
 ```
 
 ```sh
-node skills/kelin-verify/scripts/run-acceptance.mjs verify.json
+node "$SKILL_DIR"/scripts/run-acceptance.mjs verify.json
 ```
 
 逐条打印 PASS/FAIL 和耗时，最后输出 JSON 汇总；任何一条失败，退出码为 1。

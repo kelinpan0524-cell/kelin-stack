@@ -5,6 +5,8 @@ description: 收尾时把仓库里所有说法对齐一次：README、AGENTS.md�
 
 # 收尾对齐
 
+> 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
+
 仓库里的文本越多，模型越容易被某份旧文档带偏。目标不是多写，是**让所有说法指向同一个现役事实**。
 
 ## 五个事实面
@@ -44,7 +46,7 @@ description: 收尾时把仓库里所有说法对齐一次：README、AGENTS.md�
 ### 1. 盘点
 
 ```sh
-node skills/kelin-neat/scripts/neat-check.mjs neat.json
+node "$SKILL_DIR"/scripts/neat-check.mjs neat.json
 ```
 
 没有配置时默认扫 `README.md`、`AGENTS.md`、`docs/**/*.md`。脚本会列出：断链、同标签端口冲突、版本漂移、跨文档重复段落、旧计划残留。
