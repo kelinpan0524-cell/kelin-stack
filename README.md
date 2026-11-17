@@ -10,14 +10,14 @@ pstack 是为 Claude Code / Codex 写的。ZCode 的 skill、斜杠命令和插�
 
 **24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
-## 一条链路，三十八个命令
+## 一条链路，三十九个命令
 
 按阶段分组；每个命令的用途、是否有脚本、是否有 live 检查，见生成索引 [docs/skills.md](docs/skills.md)。
 
 - **想清楚**：`kelin-mode`、`kelin-goal`、`kelin-product`、`kelin-plan`（含设计草图）、`kelin-blast-radius`、`kelin-map`、`kelin-legacy`、`kelin-multirepo`、`kelin-ci`
 - **做扎实**：`kelin-tdd`、`kelin-correctness`、`kelin-verify`、`kelin-loop`、`kelin-safety`、`kelin-test-audit`
 - **交出去**：`kelin-review`、`kelin-delegate`、`kelin-ui`、`kelin-audit`、`kelin-refine`、`kelin-unslop`、`kelin-brief`、`kelin-decision-log`、`kelin-guard`、`kelin-ship`、`kelin-release`、`kelin-watch`
-- **接得住**：`kelin-recall`、`kelin-agents`、`kelin-neat`、`kelin-reflect`、`kelin-principles`
+- **接得住**：`kelin-recall`、`kelin-branches`（分支看板）、`kelin-agents`、`kelin-neat`、`kelin-reflect`、`kelin-principles`
 - **验证自己**：`kelin-verify-stack`、`kelin-verify-app`、`kelin-benchmark`、`kelin-health`、`kelin-evals`、`kelin-docs`
 
 命令统一带 `kelin-` 前缀，避免和 ZCode 内置命令、已装 skill 冲突。
@@ -176,23 +176,24 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 38 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 39 个 | 每个都对应一个会真实发生的错误，不凑数 |
 | poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
-| SessionStart hook、多 provider runner、T3 | 不做 | 会改全局会话行为或与 ZCode 自身的模型调度冲突 |
+| T3、宿主外编排平台 | 不做 | 会与 ZCode 自身的模型调度冲突；SessionStart 自动激活与跨 CLI 委托（kelin-delegate）已实现 |
 | 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
 | 20+ 条 principle-* | 合并成一页 `kelin-principles` | 原则多了没人读，十条能记住 |
 
-明确没做：跨 provider 编排、自动开 PR、自动合并、自动部署。这些不是“还没写”，是刻意不做——它们需要人拍板。
+明确没做：自动开 PR、自动合并、自动部署（跨 CLI 委托已由 kelin-delegate 提供）。这些不是“还没写”，是刻意不做——它们需要人拍板。
 
 ## 目录
 
 ```
 kelin-stack/
-├── skills/            # 38 个 skill，完整索引见 docs/skills.md
-├── agents/            # 2 个子代理：审查、验证
-├── evals/             # 触发 eval
+├── skills/            # 39 个 skill，完整索引见 docs/skills.md
+├── agents/            # 3 个子代理：审查、验证、worker
+├── evals/             # 触发 eval + fixture 行为 eval
+├── install.sh         # codex / antigravity 跨宿主安装器
 ├── agents-digest/     # 一页速查，给不装插件的 agent
-├── docs/              # 生成的 skill 索引
+├── docs/              # 生成的 skill 索引 + 跨宿主支持矩阵
 ├── kelin-policy.json  # 自动化边界与预算
 ├── guards.json        # bug → 防再犯记录
 ├── neat.json          # 文档一致性配置
