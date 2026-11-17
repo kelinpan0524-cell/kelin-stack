@@ -111,3 +111,26 @@ test('review-check writes CURRENT, detects STALE, and honors explicit review fil
   assert.equal(missing.status, 1);
   assert.equal(JSON.parse(missing.stdout).status, 'UNVERIFIED');
 });
+
+test('gate-scan recognizes more CI platforms', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-ci-'));
+  const git = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+  git(['init', '-q']);
+  git(['-c', 'user.name=t', '-c', 'user.email=t@t.invalid', 'commit', '-q', '--allow-empty', '-m', 'base']);
+  const cases = [
+    ['.circleci/config.yml', 'jobs:'],
+    ['.buildkite/pipeline.yml', 'steps:'],
+    ['azure-pipelines.yml', 'trigger:'],
+    ['bitbucket-pipelines.yml', 'pipelines:'],
+  ];
+  for (const [rel, body] of cases) {
+    await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await writeFile(path.join(dir, rel), body + '\n- run: make test\n');
+  }
+  git(['add', '-A']);
+  const result = spawnSync(process.execPath, [gateScan, '--base', 'HEAD'], { cwd: dir, encoding: 'utf8' });
+  const scanned = JSON.parse(result.stdout);
+  for (const [rel] of cases) {
+    assert.ok((scanned.gateFiles ?? []).includes(rel), `should scan ${rel}`);
+  }
+});

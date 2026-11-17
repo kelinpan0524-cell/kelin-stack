@@ -68,7 +68,13 @@ const isTest = (file) =>
   /(^|\/)test_[^/]+\.py$/.test(file) ||
   /_test\.go$/.test(file) ||
   /Test\.java$/.test(file);
-const isCI = (file) => /^\.github\/workflows\//.test(file) || /^\.gitlab-ci\.ya?ml$/.test(file) || /(^|\/)Jenkinsfile$/.test(file);
+const isCI = (file) =>
+  /^\.github\/workflows\//.test(file) ||
+  /^\.gitlab-ci\.ya?ml$/.test(file) ||
+  /(^|\/)Jenkinsfile$/.test(file) ||
+  /^\.circleci\/config\.ya?ml$/.test(file) ||
+  /^\.buildkite\//.test(file) ||
+  /^(azure-pipelines|bitbucket-pipelines)\.ya?ml$/.test(file);
 const isSnapshot = (file) => /(__snapshots__|\.snap$)/.test(file);
 const isConfig = (file) =>
   /(^|\/)(package\.json|pyproject\.toml|setup\.cfg|tox\.ini|pytest\.ini|jest\.config\.[cm]?[jt]s|vitest\.config\.[cm]?[jt]s|tsconfig[^/]*\.json|\.eslintrc[^/]*|eslint\.config\.[cm]?[jt]s)$/.test(file);

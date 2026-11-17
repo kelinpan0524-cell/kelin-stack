@@ -18,6 +18,6 @@ node evals/run-fixture.mjs --case <fix-infinity|review-gate|plan-todo> --runner 
 
 ## 维护纪律
 
-- 判分器改动要双向验证：正确修法必须过、手工构造的作弊 diff 必须挂；
+- 判分器改动要双向验证：正确修法必须过、手工构造的作弊 diff 必须挂；plan-todo 判分器带 `--selftest`（好方案过 + 关键词堆砌挂），改它之后先跑自检；
 - 反向正则只是线索，判分前先读真实报告，误报就修正则（2026-11-17 两起：`.agents/` 自身脚本的 console.log、"原因是"措辞）；
 - 结果记录模型/CLI 版本与日期。

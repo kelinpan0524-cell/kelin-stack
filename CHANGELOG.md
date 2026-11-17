@@ -13,6 +13,7 @@
 - **个人偏好**：`~/.kelin/preferences.md`（四层优先级，host 覆盖回退共享）。
 - **安全钩子改为 opt-in**：`KELIN_SAFETY` off（默认）/relaxed/strict 三档；修复 `sh -c` 引号与 `git -C` 包装绕过（附回归测试）。
 - CI 补 drift-check 与全量测试文件。
+- **遗留清理（同日）**：gate-scan 新增 CircleCI/Buildkite/Azure/Bitbucket 识别（含测试）；委托审查输出契约强制逐条 `file:line`（review+delegate 双侧）；fixture 判分器结构化断言 + `--selftest` 关键词堆砌负例；run-fixture 退出码纳入 delegate 成败；吸收 oil-explore 快速探索档进 kelin-map、审查风险分层档进 kelin-review；明确与 oil-delegate 共装分工规则。
 
 
 ## v0.17.0 - 2026-11-11
