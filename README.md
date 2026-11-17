@@ -171,6 +171,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 - 唯一会对外写入的是 `verify-stack publish`（PR 评论 + commit status），必须显式 `--confirm`，且 `run` 不会自动调用它。
 - 报告里的字段经过净化：只允许可打印 ASCII、≤160 字符、不含反引号和尖括号。
 - `preflight.mjs` 在提交前拦截表格类真实数据、`.env`/私钥文件和常见密钥特征。
+- 通过 `kelin-delegate` 委托的任务描述与相关文件会发送给对应 CLI 的模型服务商，可能产生费用；**不要把密钥、凭据或客户数据写进委托提示词**。
 
 ## 和 pstack 的差异
 
