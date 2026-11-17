@@ -12,7 +12,7 @@ const freeze = path.resolve(import.meta.dirname, '..', '..', 'kelin-safety', 'sc
 const runHook = (payload, env = {}) => spawnSync(process.execPath, [hook], {
   encoding: 'utf8',
   input: JSON.stringify(payload),
-  env: { ...process.env, ...env },
+  env: { ...process.env, KELIN_SAFETY: 'strict', ...env },
 });
 
 test('decide blocks catastrophic deletes and force pushes to the default branch', () => {
@@ -101,4 +101,10 @@ test('freeze blocks bash redirection outside the allowed roots', async () => {
 
   const devnull = runHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo x > /dev/null' } }, { ZCODE_PROJECT_DIR: dir });
   assert.equal(devnull.stdout, '');
+});
+
+test('wrappers do not bypass safety decisions', () => {
+  assert.equal(decide('sh -c "rm -rf /"').decision, 'deny');
+  assert.equal(decide('git -C /some/dir push --force origin main').decision, 'deny');
+  assert.equal(decide('rm -rf /tmp/build-cache').decision, 'allow');
 });

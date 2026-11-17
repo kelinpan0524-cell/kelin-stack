@@ -141,7 +141,7 @@ const details = data.branches
     if (!b.upstream) flags.push('local_only');
     else if (git(root, ['rev-list', '--count', `${b.upstream}..${b.name}`]) !== '0') flags.push('unpushed_commits');
     if (d.daysIdle > 14) flags.push('stale');
-    if (d.worktree && git(root, ['status', '--porcelain', d.worktree])) flags.push('uncommitted_changes');
+    if (d.worktree && git(d.worktree, ['status', '--porcelain'])) flags.push('uncommitted_changes');
     d.flags = flags;
     return d;
   });

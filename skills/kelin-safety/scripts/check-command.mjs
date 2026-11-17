@@ -22,7 +22,9 @@ export const decide = (command) => {
   for (const segment of text.split(/[;&|]+/)) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
     const args = (start) => tokens.slice(start).filter((token) => token !== '--').map(unquote);
-    const rmIndex = tokens.findIndex((token) => token === 'rm' || token.endsWith('/rm'));
+    const bare = (token) => unquote(token.replace(/^["']|["']$/g, ''));
+    if (['echo', 'printf'].includes(bare(tokens[0]))) continue;
+    const rmIndex = tokens.findIndex((token) => bare(token) === 'rm' || bare(token).endsWith('/rm'));
     if (rmIndex >= 0) {
       const rmArgs = args(rmIndex + 1);
       const flags = rmArgs.filter((token) => token.startsWith('-'));
@@ -56,7 +58,7 @@ export const decide = (command) => {
     }
   }
 
-  if (/git\s+push\b/i.test(text)) {
+  if (/\bgit(?:\s+-C\s+\S+)?\s+push\b/i.test(text)) {
     const defaultBranch = /(^|[\s:+])(main|master)(\s|$|:)/i.test(text);
     const forced = /(--force\b|--force-with-lease\b|(^|\s)-f(\s|$))/i.test(text);
     const plusRef = /(^|\s)\+(?:refs\/heads\/)?[^\s]+/i.test(text);

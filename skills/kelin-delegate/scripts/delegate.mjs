@@ -3,8 +3,8 @@
 // 契约对标 oil-delegate：status SUCCESS|ERROR|NEEDS_ROLE_CHOICE(12)|USE_HOST(13)|DRY_RUN；
 // 角色记忆存 ~/.kelin/delegate.json；读类角色强制只读沙箱；调用方负责验收。
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -25,8 +25,8 @@ export function resolveRole(role, config, explicitRunner) {
 
 export function sandboxFor(role, runner) {
   const mode = ROLES[role] ?? 'read';
-  if (runner === 'codex') return mode === 'read' ? ['-s', 'read-only'] : ['-s', 'workspace-write'];
-  if (runner === 'antigravity') return mode === 'read' ? [] : ['--mode', 'accept-edits'];
+  if (runner === 'codex') return mode === 'read' ? ['-s', 'read-only', '-c', 'model_reasoning_effort="high"'] : ['-s', 'workspace-write'];
+  if (runner === 'antigravity') return mode === 'read' ? ['--mode', 'plan'] : ['--mode', 'accept-edits'];
   return [];
 }
 
@@ -36,12 +36,13 @@ function which(bin) {
 
 function runCodex({ workspace, prompt, session, role, timeoutSec, bin }) {
   const args = ['exec', '--skip-git-repo-check', ...sandboxFor(role, 'codex'), '-C', workspace];
-  const outFile = path.join(workspace, '.kelin-delegate-last.md');
+  const outFile = path.join(tmpdir(), `kelin-delegate-${process.pid}-${Date.now()}.md`);
   if (session) args.push('resume', session);
   args.push('-o', outFile, '--json', prompt ?? '');
   const proc = spawnSync(bin, args, { cwd: workspace, encoding: 'utf8', timeout: timeoutSec * 1000, maxBuffer: 64 * 1024 * 1024 });
   const sessionMatch = proc.stdout.match(/"(?:session_id|thread_id|conversation_id)"\s*:\s*"([^"]+)"/);
   const text = existsSync(outFile) ? readFileSync(outFile, 'utf8').trim() : '';
+  try { rmSync(outFile, { force: true }); } catch {}
   return { code: proc.status, session: sessionMatch?.[1] ?? null, text, stderr: (proc.stderr ?? '').slice(0, 2000) };
 }
 
@@ -110,6 +111,8 @@ function main() {
   if (!existsSync(workspace)) print({ ok: false, error: `workspace not found: ${workspace}` });
   if (!prompt && !session) print({ ok: false, error: 'need --prompt or --session' });
 
+  if (runner === 'zcode' && ROLES[role] === 'read') print({ ok: false, status: 'ERROR', error: 'zcode 无头模式无法强制只读，拒绝执行读类角色；请配 codex 或 antigravity（config --set-role）' });
+
   const resolved = resolveRole(role, loadConfig(), runner);
   if (resolved.status) print({ ok: false, status: resolved.status, role, candidates: [...Object.keys(RUNNERS), 'host'], hint: `保存偏好: delegate.mjs config --set-role ${role}=<runner|host|a,b>` });
   const pick = Array.isArray(resolved.runner) ? resolved.runner[0] : resolved.runner;
@@ -120,7 +123,6 @@ function main() {
   if (!which(bin)) print({ ok: false, error: `runner not installed: ${bin} (${pick})` });
 
   const notes = [];
-  if (pick === 'zcode' && ROLES[role] === 'read') notes.push('zcode 无头模式无法强制只读；读类角色建议 codex 或 antigravity');
   if (pick === 'antigravity' && ROLES[role] === 'write') notes.push('agy 写模式用 --mode accept-edits：自动接受文件编辑，命令执行仍可能被无头权限拒绝');
   if (rest.length) notes.push(`本角色还配置了其他 runner：${rest.join(',')}；本次用第一个，会诊请分别 --runner 调用`);
 

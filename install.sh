@@ -54,12 +54,16 @@ for e in m.get("entries", []):
 PY
   [[ $DRY -eq 1 ]] && { echo "(dry-run，未删除)"; exit 0; }
   python3 - "$DEST/$MANIFEST_NAME" <<'PY'
-import json, sys, shutil, pathlib, os
+import json, sys, shutil, pathlib, os, re
 m = json.load(open(sys.argv[1]))
-base = pathlib.Path(sys.argv[1]).parent
+base = pathlib.Path(sys.argv[1]).parent.resolve()
 for e in m.get("entries", []):
-    p = base / e
-    if p.is_symlink() or (base / e).exists():
+    if not re.fullmatch(r"kelin-[a-z0-9-]+", e):
+        print("skip suspicious entry:", e); continue
+    p = (base / e).resolve()
+    if base not in p.parents:
+        print("skip outside entry:", e); continue
+    if p.is_symlink() or p.exists():
         shutil.rmtree(p) if p.is_dir() and not p.is_symlink() else os.remove(p)
         print("removed", e)
 os.remove(sys.argv[1])
@@ -92,17 +96,23 @@ echo "方式: $([[ $LINK -eq 1 ]] && echo symlink || echo copy)"
 [[ $DRY -eq 1 ]] && { echo "(dry-run，未写入)"; exit 0; }
 
 mkdir -p "$DEST"
+OWNED=()
+if [[ -f "$DEST/$MANIFEST_NAME" ]]; then
+  OWNED=$(python3 -c "import json;print('\n'.join(json.load(open('$DEST/$MANIFEST_NAME')).get('entries',[])))")
+fi
+INSTALLED=()
 for name in "${SELECTED[@]}"; do
   dst="$DEST/$name"
-  if [[ -e "$dst" && ! -f "$DEST/$MANIFEST_NAME" ]]; then
-    echo "跳过 $name：目标已存在且不是本安装器装的（不覆盖他人内容）"
+  if [[ -e "$dst" ]] && ! printf '%s\n' "$OWNED" | grep -qx "$name"; then
+    echo "跳过 ${name}：目标已存在且不在本安装器清单里（不覆盖他人内容）"
     continue
   fi
   rm -rf "$dst"
   if [[ $LINK -eq 1 ]]; then ln -s "$SRC/$name" "$dst"; else cp -R "$SRC/$name" "$dst"; fi
+  INSTALLED+=("$name")
 done
 
-python3 - "$DEST/$MANIFEST_NAME" "${SELECTED[@]}" <<'PY'
+python3 - "$DEST/$MANIFEST_NAME" ${INSTALLED[@]+"${INSTALLED[@]}"} <<'PY'
 import json, sys, pathlib, datetime
 mf = pathlib.Path(sys.argv[1])
 m = {"installed_at": datetime.date.today().isoformat(), "entries": sys.argv[2:]}

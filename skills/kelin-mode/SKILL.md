@@ -1,6 +1,6 @@
 ---
 name: kelin-mode
-description: 自动编排整套 kelin-stack：安装后 SessionStart 自动启用；非平凡任务自动进入，按阶段调用 goal、plan、architect、map、tdd、verify、review、refine、ship，每一步有产物和退出条件。多代理最多 2 个，适配 24GB 内存。用户输入 /kelin-mode，或说“全自动做完这个需求”时使用。
+description: 自动编排整套 kelin-stack：安装后 SessionStart 自动启用；非平凡任务自动进入，按阶段调用 goal、plan（含设计草图）、map、tdd、verify、review、refine、ship，每一步有产物和退出条件。多代理最多 2 个，适配 24GB 内存。用户输入 /kelin-mode，或说“全自动做完这个需求”时使用。
 ---
 
 # kelin-mode
@@ -69,7 +69,7 @@ description: 自动编排整套 kelin-stack：安装后 SessionStart 自动启�
 | 模式 | 适用 | 主链路 |
 | --- | --- | --- |
 | `light` | 单文件、文案、小修 | goal（三行）→ build → verify（快速）→ ship → reflect |
-| `feature` | 加功能、改行为 | goal → plan → architect → map → tdd → verify → review → refine → ship |
+| `feature` | 加功能、改行为 | goal → plan（跨模块含设计草图）→ map → tdd → verify → review → refine → ship |
 | `fix` | 修 bug、回归 | correctness（复现测试）→ tdd → guard → verify → review → ship |
 | `legacy` | 老仓库改造、迁移 | legacy（基线+地图+热点）→ plan → tdd（切片）→ verify → review → refine → ship |
 | `audit` | 只审不改 | 按状态机走；build 记录发现，refine 阶段才改 |
