@@ -12,10 +12,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test skills/kelin-verify-stack/tests/core.test.mjs
-      - run: node --test skills/kelin-verify-stack/tests/mode.test.mjs
-      - run: node --test skills/kelin-verify-stack/tests/test-audit.test.mjs
-      - run: node --test skills/kelin-verify-stack/tests/verify-app.test.mjs
+      - run: node --test $(find skills -name '*.test.mjs' | sort | tr '\n' ' ')
       - run: node skills/kelin-verify-stack/scripts/offline-check.mjs
       - run: node skills/kelin-evals/scripts/drift-check.mjs --root .
       - run: node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md

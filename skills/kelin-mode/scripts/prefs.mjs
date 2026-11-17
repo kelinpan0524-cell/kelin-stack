@@ -89,7 +89,8 @@ if (cmd === 'show') {
   const parsed = load();
   const s = parsed.sections[skillArg];
   if (!s) { console.log(JSON.stringify({ ok: true, skill: skillArg, found: false })); process.exit(0); }
-  const value = (host ? s.hosts[host] ?? [] : s.shared).join('\n').trim();
+  const picked = host ? (s.hosts[host]?.length ? s.hosts[host] : s.shared) : s.shared;
+  const value = picked.join('\n').trim();
   console.log(JSON.stringify({ ok: true, skill: skillArg, host, found: true, value }));
 } else if (cmd === 'set') {
   if (!skillArg || text == null || (allHosts && host)) die(usage);

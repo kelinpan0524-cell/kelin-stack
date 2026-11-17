@@ -1,5 +1,20 @@
 # Changelog
 
+# 0.18.0（2026-11-18）
+
+跨宿主大版本：ZCode / Codex / Antigravity 三宿主可用（能力边界见 docs/support-matrix.md）。
+
+- **安装**：`install.sh` 支持 codex/antigravity 项目级（共用 `.agents/skills/`）与用户级、`--subset` 子集、幂等与安全卸载（只删清单内自有条目）。
+- **自定位**：全部 SKILL.md 脚本调用改 `$SKILL_DIR` 占位符；drift-check 升级为查 66 处引用并拦截仓库根相对调用。
+- **新 skill**：`kelin-delegate`（三 runner 委托、四角色记忆、读类强制只读沙箱、codex/agy 会话续接）；`kelin-branches`（分支看板：合入五分类、三分组、只报不动）。
+- **方法论吸收（oil-dev-skills）**：根因排查手册进 correctness；执行快规则（测试控频）进 tdd/verify；plan 增加"本期不做"+好差对照（check-plan 强制）；guard/agents 严进常删；review 回读剔除；worker 禁自行提交；AGENTS 骨架加开发约定节；全部 skill 补下游衔接表。
+- **精简**：kelin-architect 并入 kelin-plan 设计草图节（触发词重叠修复）；触发词全量审计零重叠。
+- **行为 eval**：evals/fixtures 三 case（generate→install→delegate→grade 全链路），首轮实测两过一 3/4。
+- **个人偏好**：`~/.kelin/preferences.md`（四层优先级，host 覆盖回退共享）。
+- **安全钩子改为 opt-in**：`KELIN_SAFETY` off（默认）/relaxed/strict 三档；修复 `sh -c` 引号与 `git -C` 包装绕过（附回归测试）。
+- CI 补 drift-check 与全量测试文件。
+
+
 ## v0.17.0 - 2026-11-11
 
 - SessionStart 自动激活：每个会话注入 kelin-mode 入口、当前 mode/phase、本地 verify-* skill 和安全钩子状态，用户不需要每次点名 skill。

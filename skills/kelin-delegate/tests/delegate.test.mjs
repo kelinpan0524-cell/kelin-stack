@@ -17,9 +17,9 @@ test('resolveRole keeps multi-runner lists for diagnose', () => {
 });
 
 test('sandboxFor enforces read-only per runner', () => {
-  assert.deepEqual(sandboxFor('review', 'codex'), ['-s', 'read-only']);
+  assert.deepEqual(sandboxFor('review', 'codex'), ['-s', 'read-only', '-c', 'model_reasoning_effort="high"']);
   assert.deepEqual(sandboxFor('implement', 'codex'), ['-s', 'workspace-write']);
-  assert.deepEqual(sandboxFor('review', 'antigravity'), []);
+  assert.deepEqual(sandboxFor('review', 'antigravity'), ['--mode', 'plan']);
   assert.deepEqual(sandboxFor('implement', 'antigravity'), ['--mode', 'accept-edits']);
 });
 

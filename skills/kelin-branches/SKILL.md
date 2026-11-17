@@ -21,7 +21,7 @@ description: 分支看板：讲清每条本地分支在哪、推没推、进没�
 node "$SKILL_DIR"/scripts/branches.mjs --workspace "<项目路径>" [--fetch] [--json]
 ```
 
-`--fetch` 只更新本机记录的云端状态，不改任何分支；没网络时去掉它并说明云端状态可能过期。`--json` 给机器消费。
+`--fetch` 会执行 `git fetch --prune`（更新并清理本地的远端跟踪引用），不改任何分支本身；没网络时去掉它并说明云端状态可能过期。`--json` 给机器消费。
 
 ## 合入状态五分类
 
