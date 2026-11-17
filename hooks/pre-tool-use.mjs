@@ -1,7 +1,21 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import { decide, redirectTargets } from '../skills/kelin-safety/scripts/check-command.mjs';
 import { decidePath } from '../skills/kelin-safety/scripts/freeze-lib.mjs';
+
+const safetyMode = () => {
+  const env = process.env.KELIN_SAFETY;
+  if (env) return env;
+  try {
+    return readFileSync(path.join(homedir(), '.kelin', 'safety.mode'), 'utf8').trim() || 'off';
+  } catch {
+    return 'off';
+  }
+};
+const MODE = safetyMode();
+if (MODE === 'off') process.exit(0);
 
 let raw = '';
 process.stdin.setEncoding('utf8');
@@ -35,7 +49,7 @@ if (tool === 'Bash') {
   result = decidePath(projectDir, filePath);
 }
 
-if (result.decision === 'ask' && process.env.KELIN_SAFETY === 'relaxed') result = { decision: 'allow', reason: '' };
+if (result.decision === 'ask' && MODE === 'relaxed') result = { decision: 'allow', reason: '' };
 
 if (result.decision === 'allow') process.exit(0);
 

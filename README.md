@@ -26,7 +26,7 @@ pstack 是为 Claude Code / Codex 写的。ZCode 的 skill、斜杠命令和插�
 
 - **门禁完整性**：`kelin-review/scripts/gate-scan.mjs` 扫 diff 里被删的测试、被放宽的阈值、被关掉的检查；门禁类发现只问人不自动修。
 - **评审指纹**：`kelin-review/scripts/review-check.mjs` 把评审绑定到工作树；`STALE` 或 `UNVERIFIED` 不能当“审过了”。
-- **运行时安全**：`kelin-safety` 用 PreToolUse 钩子拦 `rm -rf /`、强推默认分支、冻结范围外写入；开发目录清理放行。
+- **运行时安全（默认关闭，要求才开启）**：`kelin-safety` 三档——off 默认完全不启动；relaxed 只挡灾难级；strict 全量拦 `rm -rf /`、强推默认分支、冻结范围外写入。开关：`KELIN_SAFETY` 环境变量或 `echo strict > ~/.kelin/safety.mode`。
 - **性能取证**：`kelin-benchmark` 要求至少交替跑 5 次、报中位数和范围，结论只允许四选一。
 - **项目级验证**：`kelin-verify-app` 生成项目本地 `verify-<app>` skill，固定启动/体检/驱动/留证/清理五段。
 - **人话简报**：`kelin-brief` 先一句“现在等你什么”，再列决定、推荐、证据、风险。

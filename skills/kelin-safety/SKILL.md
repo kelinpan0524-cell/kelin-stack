@@ -5,7 +5,7 @@ description: 运行时安全钩子：在命令和写入执行前拦下 rm -rf /�
 
 # 运行时安全
 
-**放松模式**：会话里 `export KELIN_SAFETY=relaxed` 可把"问人"级（reset --hard、push --delete、非白名单 rm -rf、git clean）降为放行；"拒绝"级（rm -rf /、强推默认分支）任何模式下都保留。
+**三档模式（默认关闭）**：`KELIN_SAFETY` 环境变量或 `~/.kelin/safety.mode` 文件（echo strict > ~/.kelin/safety.mode）。`off`（默认）＝钩子完全不启动；`relaxed`＝只挡灾难级（根目录递归删除、强推默认分支）；`strict`＝全量（灾难拒绝 + 高危问人）。要求才开启。
 
 > 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
 
