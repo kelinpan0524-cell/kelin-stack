@@ -114,3 +114,10 @@ node skills/kelin-verify/scripts/run-acceptance.mjs verify.json
 - 一边重构一边加新功能；
 - 拿“代码覆盖率”当安全网，却没断言行为；
 - 一次改十个文件，出事不知道回滚哪。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 基线与热点有了 | `kelin-plan` 按切片拆 |
+| 特征测试要验收 | `kelin-verify` |

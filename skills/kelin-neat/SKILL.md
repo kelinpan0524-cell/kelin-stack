@@ -109,3 +109,10 @@ node skills/kelin-neat/scripts/neat-check.mjs neat.json
 - 旧计划永远留着，谁都不知道哪份有效；
 - 删除前不问，或者问完不改；
 - 只跑 `git status` 干净就宣布“全部同步”。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 对齐完成 | `kelin-reflect` 复盘 |
+| 生成文件变化 | 跑 gen-docs，CI 查 drift |

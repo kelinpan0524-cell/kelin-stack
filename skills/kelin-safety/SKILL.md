@@ -75,3 +75,10 @@ node --test skills/kelin-verify-stack/tests/safety.test.mjs
 ```
 
 本 skill 有脚本和单元测试，没有 live recipe。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 钩子误拦正常操作 | 调 guard 配置后放行一次，不改代码绕过 |
+| 拦下灾难操作 | 人决定，不自动重试 |

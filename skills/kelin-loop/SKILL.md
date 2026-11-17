@@ -61,3 +61,10 @@ node skills/kelin-loop/scripts/loop-check.mjs loop.json
 - 失败了自动重跑，不分析；
 - 预算无上限，烧到没 token 才停；
 - 把“外部接口挂了”当成“再试一次就好”。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 达到停止条件/预算 | `kelin-verify` 收尾 |
+| 连续两轮无进展 | 止损，升级给人或换 `kelin-review --adversarial` |

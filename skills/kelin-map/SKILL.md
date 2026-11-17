@@ -59,3 +59,10 @@ node skills/kelin-map/scripts/map-check.mjs feature-map.json
 - 按文件名列一遍，没有功能视角；
 - `verify` 写“跑测试”，没说跑哪个；
 - 地图写完不接 CI，三个月后完全过期。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 地图建好要动手 | `kelin-plan` |
+| 地图与代码脱节 | `kelin-neat` 对齐 |

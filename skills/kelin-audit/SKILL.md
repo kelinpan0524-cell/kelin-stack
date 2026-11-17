@@ -94,3 +94,10 @@ node skills/kelin-audit/scripts/audit-check.mjs audit.md
 - 列 50 条风格问题淹没真问题；
 - 说“可能有性能问题”但给不出场景；
 - 不写假设负载，拿单机标准审高并发系统。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 报告出了 | 人挑整改项；要修的走 `kelin-plan` |
+| 审的是老仓库 | `kelin-mode legacy` |

@@ -91,3 +91,9 @@ node --test skills/kelin-verify-stack/tests/verify-app.test.mjs
 ```
 
 本 skill 有脚本和单元测试，没有 live recipe。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 项目 verify 生成完 | 交给 `kelin-verify` 消费 |

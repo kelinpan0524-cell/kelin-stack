@@ -44,3 +44,10 @@ node --test skills/kelin-verify-stack/tests/health.test.mjs
 ```
 
 本 skill 有脚本和单元测试，没有 live recipe。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 面板全绿 | 可交付 |
+| 有红项 | 按项修：测试/结构/文档/agents/guards 对应 skill |
