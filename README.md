@@ -14,7 +14,7 @@ pstack 是为 Claude Code / Codex 写的。ZCode 的 skill、斜杠命令和插�
 
 按阶段分组；每个命令的用途、是否有脚本、是否有 live 检查，见生成索引 [docs/skills.md](docs/skills.md)。
 
-- **想清楚**：`kelin-mode`、`kelin-goal`、`kelin-product`、`kelin-plan`、`kelin-architect`、`kelin-blast-radius`、`kelin-map`、`kelin-legacy`、`kelin-multirepo`、`kelin-ci`
+- **想清楚**：`kelin-mode`、`kelin-goal`、`kelin-product`、`kelin-plan`（含设计草图）、`kelin-blast-radius`、`kelin-map`、`kelin-legacy`、`kelin-multirepo`、`kelin-ci`
 - **做扎实**：`kelin-tdd`、`kelin-correctness`、`kelin-verify`、`kelin-loop`、`kelin-safety`、`kelin-test-audit`
 - **交出去**：`kelin-review`、`kelin-ui`、`kelin-audit`、`kelin-refine`、`kelin-unslop`、`kelin-brief`、`kelin-decision-log`、`kelin-guard`、`kelin-ship`、`kelin-release`、`kelin-watch`
 - **接得住**：`kelin-recall`、`kelin-agents`、`kelin-neat`、`kelin-reflect`、`kelin-principles`
