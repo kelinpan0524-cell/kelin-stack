@@ -56,4 +56,4 @@ console.log(JSON.stringify({
   verdict,
   work: keep || !verdict.ok ? work : (rmSync(work, { recursive: true, force: true }), undefined),
 }, null, 2));
-process.exit(verdict.ok ? 0 : 1);
+process.exit(del.status === 0 && verdict.ok ? 0 : 1);
