@@ -148,7 +148,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 32 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 38 个 | 每个都对应一个会真实发生的错误，不凑数 |
 | poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
 | SessionStart hook、多 provider runner、T3 | 不做 | 会改全局会话行为或与 ZCode 自身的模型调度冲突 |
 | 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
@@ -160,7 +160,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 ```
 kelin-stack/
-├── skills/            # 32 个 skill，完整索引见 docs/skills.md
+├── skills/            # 38 个 skill，完整索引见 docs/skills.md
 ├── agents/            # 2 个子代理：审查、验证
 ├── evals/             # 触发 eval
 ├── agents-digest/     # 一页速查，给不装插件的 agent
