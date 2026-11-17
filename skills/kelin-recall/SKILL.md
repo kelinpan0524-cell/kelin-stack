@@ -72,3 +72,4 @@ description: 接手或续做一件事之前，从仓库状态、提交历史、�
 | --- | --- |
 | 上下文重建完 | 按"下一步"继续对应 skill |
 | 发现文档过期 | `kelin-agents` / `kelin-neat` |
+| 要看分支/工作树状态 | `kelin-branches` 分支看板 |
