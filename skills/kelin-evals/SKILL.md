@@ -110,3 +110,10 @@ node skills/kelin-evals/scripts/drift-check.mjs --root .
 - 给每条规则都做 hook，启动越来越慢；
 - 触发 eval 只写“应该触发”，不写用户真实会说的话；
 - 用模型自述“测试通过”代替断言。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| eval 全过 | 可发版 |
+| 触发不准 | 改 description 触发词后重跑 |

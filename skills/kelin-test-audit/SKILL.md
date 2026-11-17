@@ -70,3 +70,10 @@ node --test skills/kelin-verify-stack/tests/test-audit.test.mjs
 ```
 
 本 skill 有脚本和单元测试，没有 live recipe。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 退役卡批完要删 | 按批确认后删，跑全套；决定记 `kelin-decision-log` |
+| 要接进 CI 拦截 | `kelin-ci` |

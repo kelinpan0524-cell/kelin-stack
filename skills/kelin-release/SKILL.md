@@ -44,3 +44,9 @@ node skills/kelin-release/scripts/release.mjs --bump patch --publish --confirm
 - CI 红着打 tag；
 - 把发布和部署合并成一步；
 - 用 `--force` 覆盖已有 tag。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 计划获确认 | 执行发布；未确认只出计划 |

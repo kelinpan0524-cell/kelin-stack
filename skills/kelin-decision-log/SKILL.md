@@ -44,3 +44,9 @@ node skills/kelin-decision-log/scripts/decision-check.mjs decisions.tsv
 - 事后补记，理由已经想不起来；
 - 只记结果不记放弃的方案；
 - 把所有小事都记进来，日志失去信号。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 记完 | 继续任务；复盘时被 `kelin-reflect` 消费 |

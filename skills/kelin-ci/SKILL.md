@@ -96,3 +96,10 @@ node skills/kelin-ci/scripts/install-precommit.mjs <仓库目录>
 - 装了 workflow 但没设 required check，等于没装；
 - 为每个仓库复制一份检查脚本再各自改，最后不一致；用 `--force` 重装统一版本；
 - 把 live 验证塞进 CI，结果每次都花钱还经常因登录失败而红。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| CI 挂了看失败 | `kelin-watch` 四分类 |
+| 检查集变化 | 同步 kelin-policy.json checks |

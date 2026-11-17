@@ -75,6 +75,12 @@ node skills/kelin-guard/scripts/guard-check.mjs guards.json
 
 不加也要写一行理由，免得下次又从头讨论。
 
+## 严进常删（guard 与规则的新陈代谢）
+
+**严进三条全满足才加**：同类问题重复出现 ≥2-3 次；跨模块通用（不是单个历史文件的特例）；无法用更便宜的机器手段拦住。
+
+**常删四种果断删**：经常误报、逼出过度防御代码；已被测试/脚本/CI 自动接管；涉及模块已重构下线；数月没在别处发生第二次。guard 只进不出，`guards.json` 迟早发胖成噪声源——定期（每次 `kelin-reflect` 时）对照这四条清一遍。
+
 ## 和别的 skill 的关系
 
 - `kelin-tdd`：复现测试就是第 1 级 guard；
@@ -88,3 +94,10 @@ node skills/kelin-guard/scripts/guard-check.mjs guards.json
 - 写了测试但没验证它在旧代码上会失败；
 - 什么都往 AGENTS.md 里写；
 - 为一条偶发问题加一堆误报规则。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| guard 落地 | `kelin-ci` 接成合并门禁 |
+| 确实无法 guard | 写一行理由留档，不硬凑 |

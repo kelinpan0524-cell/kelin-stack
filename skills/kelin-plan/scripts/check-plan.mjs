@@ -37,7 +37,7 @@ if (!acceptance.length) problems.push('验收标准 has no checkbox');
 if (level === 'light') {
   if (heading('下一步') < 0 || !bullets(heading('下一步')).length) problems.push('missing section: 下一步');
 } else {
-  for (const name of ['任务拆解', '风险']) {
+  for (const name of ['任务拆解', '风险', '本期不做']) {
     if (heading(name) < 0) problems.push(`missing section: ${name}`);
   }
   if (heading('方案') < 0 && heading('推荐') < 0) problems.push('missing section: 方案与取舍 / 推荐');

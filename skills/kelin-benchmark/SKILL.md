@@ -76,3 +76,9 @@ node skills/kelin-benchmark/scripts/bench-check.mjs bench.json
 ## 验证
 
 本 skill 带脚本和单元测试；没有 live recipe。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 结论四选一 | 连中位数/范围写进 PR，不写"快多了" |

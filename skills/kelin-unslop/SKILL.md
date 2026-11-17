@@ -58,3 +58,9 @@ node skills/kelin-unslop/scripts/slop-check.mjs README.md --strict
 - `kelin-refine` 管代码精简，这里管文字；
 - `kelin-neat` 对齐事实，这里只改表达；
 - `kelin-ship` 的 PR 正文、`kelin-principles` 的“说人话”都可以先过一遍。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 文字定稿 | 交付；不再套另一套模板 |

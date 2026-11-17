@@ -43,3 +43,9 @@ node skills/kelin-docs/scripts/doc-coverage.mjs --root . --check
 - 手改 `docs/skills.md` 或 `agents-digest/kelin-AGENTS.md`；
 - 在生成文件里加只有本机才有的路径；
 - 把长说明塞进 digest，它只放“什么时候用哪条”。
+
+## 下游衔接
+
+| 下一步 | 去哪 |
+| --- | --- |
+| 索引生成完 | 提交；手改生成文件会被 CI 拦 |
