@@ -42,7 +42,7 @@ node "$SKILL_DIR"/scripts/gate-scan.mjs --base origin/main
 
 - 只接受跑得出证据的发现：失败测试、复现脚本、命令输出；
 - 风格、命名、未来风险、个人偏好一律丢弃；
-- 每条发现交给 `kelin-verifier` 重跑确认；
+- 每条发现交给 `kelin-verifier` 重跑确认；需要独立模型视角时用 `kelin-delegate --role review`（codex/agy 只读沙箱），返回结果同样走回读剔除；
 - 只报告，不修；修不修由人决定。
 
 ## 子代理发现的回读剔除

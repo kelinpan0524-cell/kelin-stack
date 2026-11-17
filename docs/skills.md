@@ -2,7 +2,7 @@
 
 > 生成文件，勿手改。更新：`node skills/kelin-docs/scripts/gen-docs.mjs`
 
-共 38 个 skill。
+共 39 个 skill。
 
 | 命令 | 用途 | 脚本 | live recipe |
 | --- | --- | --- | --- |
@@ -15,6 +15,7 @@
 | `/kelin-ci` | 把 kelin-stack 的检查装进任意仓库的 CI、PR 模板和本地 pre-commi… | 有 | 有 |
 | `/kelin-correctness` | 回答“怎么知道 AI 写的代码是对的” | 无 | 有 |
 | `/kelin-decision-log` | 记录关键决策：时间、阶段、做了什么决定、为什么、证据、结果 | 有 | 无 |
+| `/kelin-delegate` | 把边界清楚的单次任务委托给外部 CLI（codex、antigravity、zcode 无头… | 有 | 无 |
 | `/kelin-docs` | 从 skills 目录生成文档：skill 索引、命令速查、一页 agent digest，… | 有 | 有 |
 | `/kelin-evals` | 给 skill 自己做验收：静态检查结构、描述触发词、引用文件和长度 | 有 | 有 |
 | `/kelin-goal` | 把一句模糊的“做成 X”变成可判定的目标契约：完成条件、约束、检查点、谁拍板 | 有 | 有 |
