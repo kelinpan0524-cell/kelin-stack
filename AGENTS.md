@@ -2,7 +2,7 @@
 
 ## 怎么跑
 
-- 单元测试：`node --test skills/kelin-verify-stack/tests/*.test.mjs`
+- 单元测试：`node --test $(find skills -name "*.test.mjs" | sort | tr "\n" " ")`（CI 同款全量）
 - 结构检查：`node skills/kelin-verify-stack/scripts/offline-check.mjs`
 - 全量验证：`node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --output /tmp/ks-verify`
 
