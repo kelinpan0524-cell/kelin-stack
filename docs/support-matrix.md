@@ -5,7 +5,7 @@
 | 能力 | ZCode | Codex | Antigravity |
 | --- | --- | --- | --- |
 | skill 发现 | marketplace 插件安装（`.zcode-plugin/`） | 项目 `.agents/skills/` ✓ 实测 | 项目 `.agents/skills/` ✓ 实测 |
-| 用户级安装目录 | —（走插件市场） | `~/.agents/skills/`（官方文档，未实测） | `~/.gemini/antigravity-cli/skills/`（官方文档，未实测） |
+| 用户级安装目录 | —（走插件市场） | `~/.agents/skills/` ✓ 实测（2026-11-17 codex 会话确认发现 kelin skills） | `~/.gemini/antigravity-cli/skills/`（官方文档，未实测） |
 | 全局路由文件 | SessionStart hook 自动注入 | `~/.codex/AGENTS.md`（本机存在） | `~/.gemini/AGENTS.md`（本机存在） |
 | SKILL_DIR 占位符解析 | 插件环境按 skill 目录执行 | ✓ 实测（模型正确替换为绝对路径） | ✓ 实测（模型正确替换为绝对路径） |
 | 项目外 cwd 调脚本 | — | ✓ 实测（脚本内 `import.meta.url` 自定位成立） | ✓ 实测（同左） |

@@ -5,6 +5,8 @@ description: 运行时安全钩子：在命令和写入执行前拦下 rm -rf /�
 
 # 运行时安全
 
+**放松模式**：会话里 `export KELIN_SAFETY=relaxed` 可把"问人"级（reset --hard、push --delete、非白名单 rm -rf、git clean）降为放行；"拒绝"级（rm -rf /、强推默认分支）任何模式下都保留。
+
 > 命令里的 `$SKILL_DIR` 指本 Skill 所在目录的绝对路径，执行前先替换成实际路径。
 
 `kelin-guard` 管“bug 修完怎么防再犯”，这个 skill 管“命令敲下去之前拦一下”。两者互不替代。
