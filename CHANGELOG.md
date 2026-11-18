@@ -1,5 +1,10 @@
 # Changelog
 
+# 0.19.0（2026-11-18）
+
+- **新 skill**：`kelin-grill`（拷问）——移植 Matt Pocock 的 grilling（`mattpocock/skills`，MIT，32.7 万 star，2026-11-18 版）。设计树 + 轮次：每轮问完整个前沿、每题给推荐答案、事实自己查、决定交给人，前沿问空才算收。定位在 `kelin-plan` 之前，专治“还没想清楚就开写”。补了它与 plan/product/goal/architect/review 的分工、反模式与下游衔接。
+- gen-docs 分组加入 `kelin-grill`；README 命令数 39 → 40。
+
 # 0.18.0（2026-11-18）
 
 跨宿主大版本：ZCode / Codex / Antigravity 三宿主可用（能力边界见 docs/support-matrix.md）。
