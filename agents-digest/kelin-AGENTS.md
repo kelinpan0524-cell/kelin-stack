@@ -3,7 +3,7 @@
 开工：跨文件、多步、产品类任务先 `kelin-mode`；单文件小修直接改 + `kelin-verify`。
 收尾：`kelin-neat` 对齐文档，`kelin-reflect` 沉淀。
 
-**规划**：`kelin-blast-radius`、`kelin-ci`、`kelin-goal`、`kelin-legacy`、`kelin-map`、`kelin-mode`、`kelin-multirepo`、`kelin-plan`、`kelin-product`
+**规划**：`kelin-blast-radius`、`kelin-ci`、`kelin-goal`、`kelin-grill`、`kelin-legacy`、`kelin-map`、`kelin-mode`、`kelin-multirepo`、`kelin-plan`、`kelin-product`
 **执行**：`kelin-correctness`、`kelin-guard`、`kelin-loop`、`kelin-refine`、`kelin-safety`、`kelin-tdd`、`kelin-test-audit`、`kelin-verify`
 **交付**：`kelin-audit`、`kelin-brief`、`kelin-decision-log`、`kelin-delegate`、`kelin-release`、`kelin-review`、`kelin-ship`、`kelin-ui`、`kelin-unslop`、`kelin-watch`
 **上下文**：`kelin-agents`、`kelin-branches`、`kelin-neat`、`kelin-principles`、`kelin-recall`、`kelin-reflect`

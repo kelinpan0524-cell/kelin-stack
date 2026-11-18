@@ -10,11 +10,11 @@ pstack 是为 Claude Code / Codex 写的。ZCode 的 skill、斜杠命令和插�
 
 **24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
 
-## 一条链路，三十九个命令
+## 一条链路，四十个命令
 
 按阶段分组；每个命令的用途、是否有脚本、是否有 live 检查，见生成索引 [docs/skills.md](docs/skills.md)。
 
-- **想清楚**：`kelin-mode`、`kelin-goal`、`kelin-product`、`kelin-plan`（含设计草图）、`kelin-blast-radius`、`kelin-map`、`kelin-legacy`、`kelin-multirepo`、`kelin-ci`
+- **想清楚**：`kelin-mode`、`kelin-goal`、`kelin-product`、`kelin-grill`（拷问）、`kelin-plan`（含设计草图）、`kelin-blast-radius`、`kelin-map`、`kelin-legacy`、`kelin-multirepo`、`kelin-ci`
 - **做扎实**：`kelin-tdd`、`kelin-correctness`、`kelin-verify`、`kelin-loop`、`kelin-safety`、`kelin-test-audit`
 - **交出去**：`kelin-review`、`kelin-delegate`、`kelin-ui`、`kelin-audit`、`kelin-refine`、`kelin-unslop`、`kelin-brief`、`kelin-decision-log`、`kelin-guard`、`kelin-ship`、`kelin-release`、`kelin-watch`
 - **接得住**：`kelin-recall`、`kelin-branches`（分支看板）、`kelin-agents`、`kelin-neat`、`kelin-reflect`、`kelin-principles`
@@ -177,7 +177,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 | pstack | kelin-stack | 原因 |
 | --- | --- | --- |
-| 46 个 skill | 39 个 | 每个都对应一个会真实发生的错误，不凑数 |
+| 46 个 skill | 40 个 | 每个都对应一个会真实发生的错误，不凑数 |
 | poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
 | T3、宿主外编排平台 | 不做 | 会与 ZCode 自身的模型调度冲突；SessionStart 自动激活与跨 CLI 委托（kelin-delegate）已实现 |
 | 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
@@ -189,7 +189,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 ```
 kelin-stack/
-├── skills/            # 39 个 skill，完整索引见 docs/skills.md
+├── skills/            # 40 个 skill，完整索引见 docs/skills.md
 ├── agents/            # 3 个子代理：审查、验证、worker
 ├── evals/             # 触发 eval + fixture 行为 eval
 ├── install.sh         # codex / antigravity 跨宿主安装器
