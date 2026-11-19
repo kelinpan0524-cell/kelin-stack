@@ -2,10 +2,15 @@ Kelin Stack
 
 Copyright (c) 2026 Arono
 
-This project is an independent ZCode implementation inspired by:
+This project is an independent ZCode & Antigravity implementation inspired by:
 
 - pstack, https://github.com/cursor/plugins/tree/main/pstack
-  Copyright Cursor, MIT License. Original skill set and workflow design by Lauren Tan.
+  Copyright Cursor, MIT License. Original skill set, verification maintenance
+  model, and code-as-comments ("no-comments") discipline by Lauren Tan.
+- cursor-team-kit & cli-for-agent, https://github.com/cursor/plugins
+  Copyright Cursor, MIT License. CLI/TUI verification harnesses (control-cli),
+  three-way claim verdicts (verify-this), agent-friendly CLI conventions
+  (cli-for-agents), and redundant-code cleanup (deslop).
 - open-pstack, https://github.com/ericlitman/open-pstack
   Copyright Eric Litman, MIT License. Verification-skill architecture and the
   exact-head evidence model.
@@ -18,7 +23,7 @@ This project is an independent ZCode implementation inspired by:
   No impeccable code or text is copied into this repository.
 
 No upstream source file is copied verbatim. The skill text, scripts, tests and
-verification harness in this repository were written for ZCode and translated
-into Chinese. Shared ideas: the plan/verify/review/ship workflow split, the
+verification harness in this repository were written for ZCode and Antigravity
+in Chinese. Shared ideas: the plan/verify/review/ship workflow split, the
 "proof over claims" verification stance, the feature-map plus recipe structure
 used by the verifier, and the minimal-code ladder adapted for kelin-refine.

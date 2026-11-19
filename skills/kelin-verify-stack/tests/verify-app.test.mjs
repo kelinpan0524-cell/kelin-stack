@@ -59,3 +59,21 @@ test('generate previews without writing, then writes the five sections and featu
   const forced = run(generate, ['--root', dir, '--write', '--force']);
   assert.equal(forced.status, 0, forced.stderr);
 });
+
+test('generate --help exits 0 with usage examples and creates no files', async () => {
+  const dir = await project();
+  const result = run(generate, ['--help']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage:/);
+  assert.match(result.stdout, /--write/);
+  assert.equal(existsSync(path.join(dir, '.zcode')), false);
+
+  const badFlag = run(generate, ['--root', dir, '--bogus']);
+  assert.equal(badFlag.status, 2);
+  assert.match(badFlag.stderr, /--bogus/);
+  assert.equal(existsSync(path.join(dir, '.zcode')), false);
+
+  const missingVal = run(generate, ['--root', '--write']);
+  assert.equal(missingVal.status, 2);
+  assert.match(missingVal.stderr, /requires a value/);
+});

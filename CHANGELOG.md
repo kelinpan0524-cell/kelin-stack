@@ -1,5 +1,11 @@
 # Changelog
 
+# 0.21.0（2026-11-20）
+
+- **验收 CLI 升级（吸收 `cli-for-agent` / `verify-this`）**：`skills/kelin-verify/scripts/run-acceptance.mjs` 新增 `--help`/`-h`（带示例）、纯 stdout `--json`（可直接重定向给 `kelin-mode` 的 `acceptance.json`）、执行前整份规格校验（缺参/重复 id/非法 `timeoutMs`/`cwd` 或未知参数立即退出 2 且零副作用）、以及显式超时状态（`timedOut`/`signal`/`error`）；新增单元测试 `verify-acceptance.test.mjs`。
+- **验证方法论与项目验证维护（吸收 `pstack` / `control-cli`）**：`kelin-verify` 补齐最小可重跑验证脚本、预声明三值裁决（`VERIFIED`/`NOT VERIFIED`/`INCONCLUSIVE`）与 dry-run 副作用核查；`kelin-verify-app` 修正不再用 `--force` 覆盖手工旅程，加入三类失败分流（地图漂移/驱动缺口/产品真坏）、旅程失败后重跑体检/重置状态、新断言“先见其失败”与 `references/cli-harness.md`（`tmux`/PTY 确定性等待与清理隔离）；`generate.mjs` 补 `--help` 与严格参数校验。
+- **代码即注释与工程底线升级（吸收 `no-comments` / `deslop` / `correct`）**：`kelin-refine` 合并重复注释段落为「代码即注释」（五类严格白名单、自家怪行为=重构目标、`shortcut:` 临时债务、约束注释溯源编码后删、抑制注解 diff 核定、清理内部信任边界多余 `try/catch`）；`kelin-guard` 新增 0 级「架构消除」并强调结构防住后删文档规则；`kelin-correctness` 补行为测试第二刀与修复须有运行时证据；`kelin-principles` 与 `kelin-plan` 精炼补入先减后加、边界纪律与低成本实测原型；更新 `NOTICE` 与 `registry.json`。
+
 # 0.20.0（2026-11-20）
 
 - **Antigravity 原生插件**：新增 `.antigravity-plugin/plugin.json`、根目录 `hooks.json`、`rules/AGENTS.md`、`assets/logo.svg`，三份插件清单统一升至 `0.20.0`，ZCode / Antigravity 共用全部 40 skills、3 agents 与 2 个钩子脚本。
