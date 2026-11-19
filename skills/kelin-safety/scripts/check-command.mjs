@@ -34,7 +34,7 @@ const readShellWord = (text, start) => {
         i += 2;
         continue;
       }
-      if (ch === '\\' && quote === '"' && i + 1 < text.length) {
+      if (ch === '\\' && quote === '"' && i + 1 < text.length && '$`"\\'.includes(text[i + 1])) {
         value += text[i + 1];
         i += 2;
         continue;

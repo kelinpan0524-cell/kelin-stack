@@ -445,6 +445,13 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
   );
   assert.equal(JSON.parse(heredocUnquotedBodyCont.stdout).decision, 'deny');
 
+  // Double-quoted heredoc delimiter preserves literal backslash before non-special chars (POSIX 2.2.3)
+  const heredocDquoteBackslash = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'cat <<"\\EOF"\nhi\n\\EOF\necho x > docs/nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(heredocDquoteBackslash.stdout).decision, 'deny');
+
   // Leading redirection before cd still invalidates cwd under freeze
   for (const cmd of [
     '2>/dev/null cd ../docs && echo x > nope.md',
