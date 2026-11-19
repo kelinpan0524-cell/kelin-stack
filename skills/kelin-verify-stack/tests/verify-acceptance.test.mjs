@@ -89,6 +89,10 @@ test('spec validation runs before any check executes (no partial side effects)',
     { checks: [{ id: 'first', cmd: writeCmd }, { id: 'missing-cmd' }] },
     { checks: [{ id: 'dup', cmd: writeCmd }, { id: 'dup', cmd: 'node -e "process.exit(0)"' }] },
     { checks: [{ id: 'first', cmd: writeCmd }, { id: 'bad-timeout', cmd: 'true', timeoutMs: -5 }] },
+    { checks: [{ id: 'first', cmd: writeCmd }, { id: 'decimal-timeout', cmd: 'true', timeoutMs: 1.5 }] },
+    { checks: [{ id: 'first', cmd: writeCmd }, { id: 'overflow-timeout', cmd: 'true', timeoutMs: 2_147_483_648 }] },
+    { checks: [{ id: 'first', cmd: writeCmd }, { id: 'nul-cmd', cmd: 'true\0' }] },
+    { checks: [{ id: 'first', cmd: writeCmd }, { id: 'nul-cwd', cmd: 'true', cwd: '.\0' }] },
     { checks: [{ id: 'first', cmd: writeCmd }, { id: 'bad-cwd', cmd: 'true', cwd: 123 }] },
   ];
   for (const [index, spec] of badSpecs.entries()) {
@@ -100,20 +104,52 @@ test('spec validation runs before any check executes (no partial side effects)',
   }
 });
 
-test('timed out check reports timedOut=true and timeout reason in both JSON and default output', async () => {
+test('legacy timeoutMs values ("5000" and 0) remain accepted', async () => {
   const { dir, file } = await makeSpec({
-    checks: [{ id: 'slow', cmd: 'node -e "setTimeout(() => {}, 5000)"', timeoutMs: 80 }],
+    checks: [
+      { id: 'str-timeout', cmd: 'node -e "process.exit(0)"', timeoutMs: '5000' },
+      { id: 'zero-timeout', cmd: 'node -e "process.exit(0)"', timeoutMs: 0 },
+    ],
   });
+  const result = run([file, '--json'], dir);
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.total, 2);
+});
+
+test('timed out check reports timedOut=true and terminates SIGTERM-ignoring trees promptly', async () => {
+  const { dir, file } = await makeSpec({
+    checks: [{ id: 'slow', cmd: "trap '' TERM; sleep 5", timeoutMs: 80 }],
+  });
+  const started = Date.now();
   const jsonRun = run([file, '--json'], dir);
+  const elapsed = Date.now() - started;
   assert.equal(jsonRun.status, 1);
+  assert.ok(elapsed < 2000, `timeout escalated too slowly: ${elapsed}ms`);
   const payload = JSON.parse(jsonRun.stdout);
   assert.equal(payload.ok, false);
   assert.equal(payload.failed, 1);
   assert.equal(payload.rows[0].timedOut, true);
-  assert.match(payload.rows[0].error || '', /ETIMEDOUT|timed out/i);
+  assert.match(payload.rows[0].error || '', /timed out/i);
 
   const textRun = run([file], dir);
   assert.equal(textRun.status, 1);
   assert.match(textRun.stdout, /FAIL slow/);
-  assert.match(textRun.stdout, /TIMEOUT|ETIMEDOUT|timed out/i);
+  assert.match(textRun.stdout, /TIMEOUT|timed out/i);
+});
+
+test('large piped --json output (>65536 bytes) flushes without truncation', async () => {
+  const checks = Array.from({ length: 200 }, (_, i) => ({
+    id: `check-${String(i + 1).padStart(3, '0')}`,
+    cmd: `printf 'payload-${'x'.repeat(220)}-${i}'`,
+  }));
+  const { dir, file } = await makeSpec({ checks });
+  const result = run([file, '--json'], dir);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(Buffer.byteLength(result.stdout) > 65_536, `expected >65536 bytes, got ${Buffer.byteLength(result.stdout)}`);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ok, true);
+  assert.equal(payload.total, 200);
+  assert.equal(payload.rows.length, 200);
 });

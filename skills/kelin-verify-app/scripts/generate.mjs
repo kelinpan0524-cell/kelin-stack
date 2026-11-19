@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { scanApp } from './scan-app.mjs';
@@ -31,6 +31,10 @@ const options = new Map();
 for (let i = 0; i < args.length; i += 1) {
   const arg = args[i];
   if (VALUE_FLAGS.has(arg)) {
+    if (options.has(arg)) {
+      console.error(`Duplicate option: ${arg}\n\n${USAGE}`);
+      process.exit(2);
+    }
     const value = args[i + 1];
     if (!value || value.startsWith('-')) {
       console.error(`${arg} requires a value\n\n${USAGE}`);
@@ -48,6 +52,10 @@ for (let i = 0; i < args.length; i += 1) {
 const option = (name, fallback = '') => options.get(name) || fallback;
 
 const root = path.resolve(option('--root', process.cwd()));
+if (!existsSync(root) || !statSync(root).isDirectory()) {
+  console.error(`--root must be an existing directory: ${root}`);
+  process.exit(2);
+}
 const scan = await scanApp(root);
 const appName = option('--name', scan.name);
 const slug = appName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
