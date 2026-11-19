@@ -299,11 +299,24 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
   );
   assert.equal(JSON.parse(cdDynamic.stdout).decision, 'deny');
 
-  const cdInside = runAgyHook(
+  // Under freeze, relative redirects after cd fail closed; absolute paths inside frozen root stay allowed
+  const cdRelativeDenied = runAgyHook(
     { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'cd src && echo x > ok.js' } } },
     { KELIN_SAFETY: 'strict' },
   );
-  assert.deepEqual(JSON.parse(cdInside.stdout), { decision: 'ask' });
+  assert.equal(JSON.parse(cdRelativeDenied.stdout).decision, 'deny');
+
+  const cdPhysicalDenied = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'cd -P src/.. && echo x > ok.js' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(cdPhysicalDenied.stdout).decision, 'deny');
+
+  const cdAbsoluteInside = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: `cd src && echo x > "${path.join(dir, 'src', 'ok.js')}"` } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.deepEqual(JSON.parse(cdAbsoluteInside.stdout), { decision: 'ask' });
 
   // Heredoc body containing > does not trigger false freeze deny, while redirect on heredoc command line still does
   const heredocSafe = runAgyHook(
@@ -382,12 +395,24 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
   );
   assert.equal(JSON.parse(cmdSubCd.stdout).decision, 'deny');
 
-  // Escaped space before # is part of the word, NOT a comment
+  // Escaped space or backslash-newline continuation before # is part of the word, NOT a comment
   const escapedSpaceHash = runAgyHook(
     { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo a\\ #b > docs/nope.md' } } },
     { KELIN_SAFETY: 'strict' },
   );
   assert.equal(JSON.parse(escapedSpaceHash.stdout).decision, 'deny');
+
+  const lineContinuationHash = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo a\\\n#b > docs/nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(lineContinuationHash.stdout).decision, 'deny');
+
+  const multilineQuoteHash = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo "a\n#b" > docs/nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(multilineQuoteHash.stdout).decision, 'deny');
 
   // Predicted cd directory does not leak past && into a subsequent ; or || branch
   for (const cmd of [

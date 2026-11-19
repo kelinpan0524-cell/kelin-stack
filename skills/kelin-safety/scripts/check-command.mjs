@@ -53,86 +53,115 @@ const readShellWord = (text, start) => {
   return { value, end: i, dynamic };
 };
 
-const stripHeredocs = (text) => {
-  const lines = String(text || '').split(/\r?\n/);
-  const kept = [];
+// Single-pass POSIX-aware preprocessor: removes line continuations (\+newline),
+// strips unquoted word-start # comments, and skips << / <<- heredoc bodies.
+const preprocessShell = (input) => {
+  const text = String(input || '').replace(/\r\n/g, '\n');
+  let out = '';
+  let quote = '';
+  let atWordStart = true;
   const pending = [];
-  for (const line of lines) {
-    if (pending.length) {
+  let i = 0;
+
+  const consumeHeredocs = () => {
+    while (pending.length && i < text.length) {
       const current = pending[0];
+      const nl = text.indexOf('\n', i);
+      const line = nl < 0 ? text.slice(i) : text.slice(i, nl);
+      i = nl < 0 ? text.length : nl + 1;
       const check = current.stripTabs ? line.replace(/^\t+/, '') : line;
       if (check === current.delim) pending.shift();
+    }
+  };
+
+  while (i < text.length) {
+    const ch = text[i];
+    if (quote === "'") {
+      out += ch;
+      if (ch === "'") quote = '';
+      i += 1;
       continue;
     }
-    let out = '';
-    let quote = '';
-    let atWordStart = true;
-    for (let i = 0; i < line.length; i += 1) {
-      const ch = line[i];
-      if (quote) {
-        out += ch;
-        if (ch === '\\' && quote === '"' && i + 1 < line.length) {
-          out += line[i + 1];
-          i += 1;
-        } else if (ch === quote) {
-          quote = '';
-        }
-        continue;
-      }
-      if (ch === '\\' && i + 1 < line.length) {
-        out += ch + line[i + 1];
-        i += 1;
-        atWordStart = false;
-        continue;
-      }
-      if (ch === "'" || ch === '"') {
-        quote = ch;
-        out += ch;
-        atWordStart = false;
-        continue;
-      }
-      if (ch === '#' && atWordStart) {
-        break;
-      }
-      if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') {
-        out += '<<<';
+    if (quote === '"') {
+      if (ch === '\\' && text[i + 1] === '\n') {
         i += 2;
-        atWordStart = true;
         continue;
       }
-      if (ch === '<' && line[i + 1] === '<') {
-        let pos = i + 2;
-        const stripTabs = line[pos] === '-';
-        if (stripTabs) pos += 1;
-        const word = readShellWord(line, pos);
-        if (word.value) {
-          pending.push({ delim: word.value, stripTabs });
-          out += ' ';
-          i = Math.max(i + 1, word.end - 1);
-          atWordStart = true;
-          continue;
-        }
+      if (ch === '\\' && i + 1 < text.length) {
+        out += ch + text[i + 1];
+        i += 2;
+        continue;
       }
       out += ch;
-      atWordStart = isShellSep(ch);
+      if (ch === '"') quote = '';
+      i += 1;
+      continue;
     }
-    kept.push(out);
+    if (ch === '\\' && text[i + 1] === '\n') {
+      i += 2;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < text.length) {
+      out += ch + text[i + 1];
+      i += 2;
+      atWordStart = false;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      out += ch;
+      atWordStart = false;
+      i += 1;
+      continue;
+    }
+    if (ch === '#' && atWordStart) {
+      const nl = text.indexOf('\n', i);
+      i = nl < 0 ? text.length : nl;
+      continue;
+    }
+    if (ch === '\n') {
+      out += '\n';
+      atWordStart = true;
+      i += 1;
+      if (pending.length) consumeHeredocs();
+      continue;
+    }
+    if (ch === '<' && text[i + 1] === '<' && text[i + 2] === '<') {
+      out += '<<<';
+      atWordStart = true;
+      i += 3;
+      continue;
+    }
+    if (ch === '<' && text[i + 1] === '<') {
+      let pos = i + 2;
+      const stripTabs = text[pos] === '-';
+      if (stripTabs) pos += 1;
+      const word = readShellWord(text, pos);
+      if (word.value) {
+        pending.push({ delim: word.value, stripTabs });
+        out += ' ';
+        atWordStart = true;
+        i = word.end;
+        continue;
+      }
+    }
+    out += ch;
+    atWordStart = isShellSep(ch);
+    i += 1;
   }
-  return kept.join('\n');
+  return out;
 };
 
-const splitEntries = (text) => {
-  const entries = [];
+const splitSegments = (text) => {
+  const segments = [];
   let cur = '';
-  let prevOp = '';
   let quote = '';
   const parenStack = [];
-  const flush = (nextOp) => {
+  const flush = () => {
     if (cur.trim()) {
-      entries.push({ text: cur.trim(), prevOp, nextOp });
+      segments.push(cur.trim());
       cur = '';
     }
-    prevOp = nextOp;
   };
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
@@ -162,11 +191,9 @@ const splitEntries = (text) => {
         cur += ch;
         continue;
       }
-      if (!cur.trim()) {
+      if (!parenStack.includes('cmdsub') && !cur.trim()) {
         parenStack.push('subshell');
-        entries.push({ text: '(', prevOp, nextOp: '(' });
-        prevOp = '(';
-        cur = '';
+        segments.push('(');
         continue;
       }
       parenStack.push('other');
@@ -176,9 +203,8 @@ const splitEntries = (text) => {
     if (ch === ')') {
       const kind = parenStack.pop();
       if (kind === 'subshell') {
-        flush(')');
-        entries.push({ text: ')', prevOp: ')', nextOp: '' });
-        prevOp = ')';
+        flush();
+        segments.push(')');
         continue;
       }
       cur += ch;
@@ -192,22 +218,15 @@ const splitEntries = (text) => {
       cur += ch;
       continue;
     }
-    if (!parenStack.includes('cmdsub') && ((ch === '&' && text[i + 1] === '&') || (ch === '|' && text[i + 1] === '|'))) {
-      flush(ch + ch);
-      i += 1;
-      continue;
-    }
     if (!parenStack.includes('cmdsub') && (ch === ';' || ch === '&' || ch === '|' || ch === '\n' || ch === '\r')) {
-      flush(ch);
+      flush();
       continue;
     }
     cur += ch;
   }
-  flush('');
-  return entries;
+  flush();
+  return segments;
 };
-
-const splitSegments = (text) => splitEntries(text).map((entry) => entry.text);
 
 const extractRedirectsFromSegment = (text) => {
   const targets = [];
@@ -289,31 +308,16 @@ const resolvePathFrom = (baseDir, target, home) => {
   return baseDir ? path.resolve(baseDir, target) : '';
 };
 
-const nextDirForSegment = (segment, curDir, home) => {
+const segmentHasDirChange = (segment) => {
   const words = parseSegmentWords(segment);
-  if (!words.length) return curDir;
   let idx = 0;
-  if (!words[0].dynamic && words[0].value === 'builtin') idx = 1;
-  if (idx >= words.length || words[idx].dynamic) return curDir;
-  const cmd = words[idx].value;
-  if (cmd === 'pushd' || cmd === 'popd') return null;
-  if (cmd !== 'cd') return curDir;
-
-  let argIndex = idx + 1;
-  while (argIndex < words.length && !words[argIndex].dynamic && /^-[LP]+$/.test(words[argIndex].value)) {
-    argIndex += 1;
-  }
-  if (argIndex < words.length && !words[argIndex].dynamic && words[argIndex].value === '--') {
-    argIndex += 1;
-  }
-  if (argIndex >= words.length) return home;
-  const target = words[argIndex];
-  if (target.dynamic || !target.value || target.value === '-') return null;
-  return resolvePathFrom(curDir, target.value, home) || null;
+  if (words.length && !words[0].dynamic && words[0].value === 'builtin') idx = 1;
+  const cmd = idx < words.length && !words[idx].dynamic ? words[idx].value : '';
+  return cmd === 'cd' || cmd === 'pushd' || cmd === 'popd';
 };
 
 export const redirectTargets = (command) => {
-  const cleaned = stripHeredocs(command);
+  const cleaned = preprocessShell(command);
   const targets = [];
   for (const segment of splitSegments(cleaned)) {
     if (segment === '(' || segment === ')') continue;
@@ -322,68 +326,28 @@ export const redirectTargets = (command) => {
   return targets;
 };
 
+// Fail-closed under freeze: never predict a cd/pushd/popd target to allow relative writes.
+// Absolute redirects remain allowed if inside the frozen root; relative redirects after cd deny.
 export const resolveRedirectTargets = (command, initialDir, home = homedir()) => {
-  const cleaned = stripHeredocs(command);
+  const cleaned = preprocessShell(command);
   const resolved = [];
   const dirStack = [];
   let curDir = initialDir || '';
-  let cdChain = true;
-  let cdPredicted = false;
-  for (const entry of splitEntries(cleaned)) {
-    const segment = entry.text;
+  for (const segment of splitSegments(cleaned)) {
     if (segment === '(') {
-      if (cdPredicted && entry.prevOp !== '&&') {
-        curDir = null;
-        cdPredicted = false;
-        cdChain = false;
-      }
-      dirStack.push({ curDir, cdChain, cdPredicted });
-      cdChain = true;
-      cdPredicted = false;
+      dirStack.push(curDir);
       continue;
     }
     if (segment === ')') {
-      if (dirStack.length) {
-        const restored = dirStack.pop();
-        curDir = restored.curDir;
-        cdChain = false;
-        cdPredicted = restored.cdPredicted;
-      } else {
-        curDir = null;
-        cdChain = false;
-        cdPredicted = false;
-      }
+      curDir = dirStack.length ? dirStack.pop() : null;
       continue;
     }
-    if (cdPredicted && entry.prevOp !== '&&') {
-      curDir = null;
-      cdPredicted = false;
-      cdChain = false;
-    }
     const rawTargets = extractRedirectsFromSegment(segment);
-    const hasEmbeddedDirCmd = /(?:\$\(|`).*\b(?:cd|pushd|popd)\b/.test(segment);
+    const embeddedDir = /(?:\$\(|`).*\b(?:cd|pushd|popd)\b/.test(segment);
     for (const target of rawTargets) {
-      resolved.push(resolvePathFrom(hasEmbeddedDirCmd ? null : curDir, target, home));
+      resolved.push(resolvePathFrom(embeddedDir ? null : curDir, target, home));
     }
-    const words = parseSegmentWords(segment);
-    let idx = 0;
-    if (words.length && !words[0].dynamic && words[0].value === 'builtin') idx = 1;
-    const cmd = idx < words.length && !words[idx].dynamic ? words[idx].value : '';
-    const isDirCmd = cmd === 'cd' || cmd === 'pushd' || cmd === 'popd';
-    if (isDirCmd) {
-      const guaranteedReach = cdChain && (entry.prevOp === '' || entry.prevOp === '(' || entry.prevOp === '&&');
-      const guaranteedSucceed = entry.nextOp === '&&';
-      if (guaranteedReach && guaranteedSucceed && cmd === 'cd') {
-        curDir = nextDirForSegment(segment, curDir, home);
-        cdPredicted = curDir !== null;
-      } else {
-        curDir = null;
-        cdChain = false;
-        cdPredicted = false;
-      }
-    } else {
-      cdChain = false;
-    }
+    if (segmentHasDirChange(segment)) curDir = null;
   }
   return resolved;
 };
@@ -450,7 +414,7 @@ const evaluateSegment = (segment, noteAsk) => {
 };
 
 export const decide = (command) => {
-  const text = stripHeredocs(command).trim();
+  const text = preprocessShell(command).trim();
   if (!text) return { decision: 'allow', reason: '' };
 
   let firstAsk = null;
