@@ -437,4 +437,35 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
     { KELIN_SAFETY: 'strict' },
   );
   assert.equal(JSON.parse(heredocLineContDelim.stdout).decision, 'deny');
+
+  // Unquoted heredoc body terminator split by backslash-newline terminates in bash; quoted heredoc does not
+  const heredocUnquotedBodyCont = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: "cat <<EOF\nhi\nEO\\\nF\necho x > docs/nope.md" } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(heredocUnquotedBodyCont.stdout).decision, 'deny');
+
+  // Leading redirection before cd still invalidates cwd under freeze
+  for (const cmd of [
+    '2>/dev/null cd ../docs && echo x > nope.md',
+    '</dev/null cd ../docs && echo x > nope.md',
+  ]) {
+    const res = runAgyHook(
+      { hookEventName: 'PreToolUse', cwd: path.join(dir, 'src'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: cmd } } },
+      { KELIN_SAFETY: 'strict' },
+    );
+    assert.equal(JSON.parse(res.stdout).decision, 'deny', `expected deny for: ${cmd}`);
+  }
+
+  // command -v / -V only inspects cd without changing directory
+  for (const cmd of [
+    'command -v cd >/dev/null && echo x > ok.js',
+    'command -V cd >/dev/null && echo x > ok.js',
+  ]) {
+    const res = runAgyHook(
+      { hookEventName: 'PreToolUse', cwd: path.join(dir, 'src'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: cmd } } },
+      { KELIN_SAFETY: 'strict' },
+    );
+    assert.deepEqual(JSON.parse(res.stdout), { decision: 'ask' }, `expected defer for: ${cmd}`);
+  }
 });

@@ -22,10 +22,11 @@ const readShellWord = (text, start) => {
     }
     break;
   }
-  if (i >= text.length || isShellSep(text[i])) return { value: '', end: i, dynamic: true };
+  if (i >= text.length || isShellSep(text[i])) return { value: '', end: i, dynamic: true, quoted: false };
   let value = '';
   let quote = '';
   let dynamic = false;
+  let quoted = false;
   while (i < text.length) {
     const ch = text[i];
     if (quote) {
@@ -54,11 +55,13 @@ const readShellWord = (text, start) => {
     }
     if (isShellSep(ch)) break;
     if (ch === '\\' && i + 1 < text.length) {
+      quoted = true;
       value += text[i + 1];
       i += 2;
       continue;
     }
     if (ch === "'" || ch === '"') {
+      quoted = true;
       quote = ch;
       i += 1;
       continue;
@@ -67,8 +70,8 @@ const readShellWord = (text, start) => {
     value += ch;
     i += 1;
   }
-  if (quote) return { value: '', end: i, dynamic: true };
-  return { value, end: i, dynamic };
+  if (quote) return { value: '', end: i, dynamic: true, quoted };
+  return { value, end: i, dynamic, quoted };
 };
 
 // Single-pass POSIX-aware preprocessor: removes line continuations (\+newline),
@@ -81,12 +84,26 @@ const preprocessShell = (input) => {
   const pending = [];
   let i = 0;
 
+  const hasOddTrailingBackslash = (str) => {
+    let count = 0;
+    for (let k = str.length - 1; k >= 0 && str[k] === '\\'; k -= 1) count += 1;
+    return count % 2 === 1;
+  };
+
   const consumeHeredocs = () => {
     while (pending.length && i < text.length) {
       const current = pending[0];
       const nl = text.indexOf('\n', i);
-      const line = nl < 0 ? text.slice(i) : text.slice(i, nl);
+      let line = nl < 0 ? text.slice(i) : text.slice(i, nl);
       i = nl < 0 ? text.length : nl + 1;
+      if (!current.quoted) {
+        while (hasOddTrailingBackslash(line) && i < text.length) {
+          const nextNl = text.indexOf('\n', i);
+          const nextPart = nextNl < 0 ? text.slice(i) : text.slice(i, nextNl);
+          i = nextNl < 0 ? text.length : nextNl + 1;
+          line = line.slice(0, -1) + nextPart;
+        }
+      }
       const check = current.stripTabs ? line.replace(/^\t+/, '') : line;
       if (check === current.delim) pending.shift();
     }
@@ -156,7 +173,7 @@ const preprocessShell = (input) => {
       if (stripTabs) pos += 1;
       const word = readShellWord(text, pos);
       if (word.value) {
-        pending.push({ delim: word.value, stripTabs });
+        pending.push({ delim: word.value, stripTabs, quoted: word.quoted });
         out += ' ';
         atWordStart = true;
         i = word.end;
@@ -304,13 +321,34 @@ const extractRedirectsFromSegment = (text) => {
   return targets;
 };
 
+const skipRedirectOp = (segment, pos) => {
+  let i = pos;
+  while (i < segment.length && segment[i] >= '0' && segment[i] <= '9') i += 1;
+  if (segment[i] === '&' && segment[i + 1] === '>') {
+    i += segment[i + 2] === '>' ? 3 : 2;
+    return readShellWord(segment, i).end;
+  }
+  if (segment[i] !== '<' && segment[i] !== '>') return -1;
+  if (segment[i] === '<' && segment[i + 1] === '<' && segment[i + 2] === '<') i += 3;
+  else if (segment[i] === '<' && segment[i + 1] === '<') i += segment[i + 2] === '-' ? 3 : 2;
+  else if ((segment[i] === '>' && (segment[i + 1] === '>' || segment[i + 1] === '|' || segment[i + 1] === '&')) || (segment[i] === '<' && (segment[i + 1] === '&' || segment[i + 1] === '>'))) i += 2;
+  else i += 1;
+  return readShellWord(segment, i).end;
+};
+
 const parseSegmentWords = (segment) => {
   const words = [];
   let pos = 0;
   while (pos < segment.length && (isBlank(segment[pos]) || segment[pos] === '(' || segment[pos] === '{')) pos += 1;
   while (pos < segment.length) {
     while (pos < segment.length && isBlank(segment[pos])) pos += 1;
-    if (pos >= segment.length || isShellSep(segment[pos])) break;
+    if (pos >= segment.length) break;
+    const afterRedir = skipRedirectOp(segment, pos);
+    if (afterRedir > pos) {
+      pos = afterRedir;
+      continue;
+    }
+    if (isShellSep(segment[pos])) break;
     const word = readShellWord(segment, pos);
     if (word.end <= pos) break;
     words.push(word);
@@ -347,6 +385,7 @@ const segmentHasDirChange = (segment) => {
           const flag = words[idx].value;
           idx += 1;
           if (flag === '--') break;
+          if (val === 'command' && /[vV]/.test(flag.slice(1))) return false;
         }
       }
       continue;
