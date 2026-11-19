@@ -11,7 +11,17 @@ const isShellSep = (ch) => isBlank(ch) || ch === ';' || ch === '&' || ch === '|'
 
 const readShellWord = (text, start) => {
   let i = start;
-  while (i < text.length && isBlank(text[i])) i += 1;
+  while (i < text.length) {
+    if (isBlank(text[i])) {
+      i += 1;
+      continue;
+    }
+    if (text[i] === '\\' && text[i + 1] === '\n') {
+      i += 2;
+      continue;
+    }
+    break;
+  }
   if (i >= text.length || isShellSep(text[i])) return { value: '', end: i, dynamic: true };
   let value = '';
   let quote = '';
@@ -19,6 +29,10 @@ const readShellWord = (text, start) => {
   while (i < text.length) {
     const ch = text[i];
     if (quote) {
+      if (ch === '\\' && quote === '"' && text[i + 1] === '\n') {
+        i += 2;
+        continue;
+      }
       if (ch === '\\' && quote === '"' && i + 1 < text.length) {
         value += text[i + 1];
         i += 2;
@@ -32,6 +46,10 @@ const readShellWord = (text, start) => {
       if (quote === '"' && (ch === '$' || ch === '`')) dynamic = true;
       value += ch;
       i += 1;
+      continue;
+    }
+    if (ch === '\\' && text[i + 1] === '\n') {
+      i += 2;
       continue;
     }
     if (isShellSep(ch)) break;
@@ -308,12 +326,34 @@ const resolvePathFrom = (baseDir, target, home) => {
   return baseDir ? path.resolve(baseDir, target) : '';
 };
 
+const SHELL_PREFIX_KEYWORDS = new Set(['if', 'then', 'else', 'elif', 'while', 'until', 'do', '!', 'time', 'builtin', 'command', 'exec', '{']);
+const DIR_CHANGING_CMDS = new Set(['cd', 'pushd', 'popd', 'eval', 'source', '.']);
+
 const segmentHasDirChange = (segment) => {
   const words = parseSegmentWords(segment);
   let idx = 0;
-  if (words.length && !words[0].dynamic && words[0].value === 'builtin') idx = 1;
-  const cmd = idx < words.length && !words[idx].dynamic ? words[idx].value : '';
-  return cmd === 'cd' || cmd === 'pushd' || cmd === 'popd';
+  while (idx < words.length) {
+    const word = words[idx];
+    if (word.dynamic) return true;
+    const val = word.value;
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(val)) {
+      idx += 1;
+      continue;
+    }
+    if (SHELL_PREFIX_KEYWORDS.has(val)) {
+      idx += 1;
+      if (val === 'command' || val === 'builtin' || val === 'time' || val === 'exec') {
+        while (idx < words.length && !words[idx].dynamic && words[idx].value.startsWith('-')) {
+          const flag = words[idx].value;
+          idx += 1;
+          if (flag === '--') break;
+        }
+      }
+      continue;
+    }
+    return DIR_CHANGING_CMDS.has(val);
+  }
+  return false;
 };
 
 export const redirectTargets = (command) => {

@@ -418,11 +418,23 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
   for (const cmd of [
     'cd ../src && echo a; echo b > nope.md',
     'cd ../src && echo a || echo b > nope.md',
+    'command cd ../docs && echo x > nope.md',
+    'command -p -- cd ../docs && echo x > nope.md',
+    'if cd ../docs; then echo x > nope.md; fi',
+    'FOO=1 cd ../docs && echo x > nope.md',
+    'eval "cd ../docs" && echo x > nope.md',
   ]) {
     const res = runAgyHook(
-      { hookEventName: 'PreToolUse', cwd: path.join(dir, 'docs'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: cmd } } },
+      { hookEventName: 'PreToolUse', cwd: path.join(dir, 'src'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: cmd } } },
       { KELIN_SAFETY: 'strict' },
     );
     assert.equal(JSON.parse(res.stdout).decision, 'deny', `expected deny for: ${cmd}`);
   }
+
+  // Heredoc delimiter split across backslash-newline still terminates cleanly and scans following commands
+  const heredocLineContDelim = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: "cat <<EO\\\nF\nhi\nEOF\necho x > docs/nope.md" } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(heredocLineContDelim.stdout).decision, 'deny');
 });
