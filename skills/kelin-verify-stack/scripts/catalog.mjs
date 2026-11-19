@@ -564,6 +564,18 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-policy:rejects', badPolicy.code === 1 && badPolicy.stdout.includes('release-bump') && badPolicy.stdout.includes('budget-agents'), `exit ${badPolicy.code}`));
     rows.push({ tool: 'kelin-mode/scripts/policy-check.mjs', goodExit: goodPolicy.code, badExit: badPolicy.code });
   }
+  const rulesAgents = path.join(ctx.pluginRoot, 'rules/AGENTS.md');
+  if (existsSync(rulesAgents)) {
+    const body = (await readFile(rulesAgents, 'utf8')).trim();
+    assertions.push(assertion('agy-rules:non-empty', body.length > 0 && !body.startsWith('---'), `${body.length} chars`));
+    rows.push({ tool: 'rules/AGENTS.md', bytes: Buffer.byteLength(body) });
+  }
+  const installScript = path.join(ctx.pluginRoot, 'install.sh');
+  if (existsSync(installScript)) {
+    const dry = await run('bash', [installScript, '--host', 'antigravity', '--scope', 'user', '--dry-run'], { timeoutMs: 30_000 });
+    assertions.push(assertion('install-sh:agy-dry-run', dry.code === 0 && dry.stdout.includes('kelin-stack'), `exit ${dry.code}`));
+    rows.push({ tool: 'install.sh', dryRunExit: dry.code });
+  }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
   }

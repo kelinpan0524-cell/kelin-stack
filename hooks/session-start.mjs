@@ -5,19 +5,31 @@ import path from 'node:path';
 
 const hostIndex = process.argv.indexOf('--host');
 const hostArg = hostIndex >= 0 ? process.argv[hostIndex + 1] || '' : '';
+const explicitAgy = hostArg === 'antigravity';
+
+const VALID_MODES = new Set(['feature', 'fix', 'legacy', 'audit', 'light']);
+const VALID_PHASES = new Set(['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done']);
+const VALID_SKILL = /^verify-[a-z0-9][a-z0-9-]{0,62}$/;
+const VALID_SAFETY = new Set(['off', 'relaxed', 'strict']);
 
 let raw = '';
 process.stdin.setEncoding('utf8');
 for await (const chunk of process.stdin) raw += chunk;
 
-const explicitAgy = hostArg === 'antigravity';
+const invalidExit = () => {
+  if (explicitAgy || (Boolean(process.env.PLUGIN_ROOT) && !process.env.ZCODE_PLUGIN_ROOT && !process.env.CLAUDE_PLUGIN_ROOT)) {
+    process.stdout.write('{}');
+  }
+  process.exit(0);
+};
+
 let input = {};
 try {
   input = raw.trim() ? JSON.parse(raw) : {};
 } catch {
-  if (explicitAgy) process.stdout.write('{}');
-  process.exit(0);
+  invalidExit();
 }
+if (!input || typeof input !== 'object' || Array.isArray(input)) invalidExit();
 
 const isAgy =
   explicitAgy ||
@@ -31,8 +43,10 @@ const pluginRoot =
   process.env.CLAUDE_PLUGIN_ROOT ||
   path.resolve(import.meta.dirname, '..');
 
+const firstWorkspace = Array.isArray(input.workspacePaths) && typeof input.workspacePaths[0] === 'string' ? input.workspacePaths[0] : '';
+const eventCwd = typeof input.cwd === 'string' ? input.cwd : '';
 const projectDir = isAgy
-  ? input.cwd || (Array.isArray(input.workspacePaths) && input.workspacePaths[0]) || ''
+  ? eventCwd || firstWorkspace || ''
   : process.env.ZCODE_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
 const readVersion = () => {
@@ -50,10 +64,11 @@ const readVersion = () => {
 
 const readSafetyMode = () => {
   const env = (process.env.KELIN_SAFETY || '').trim().toLowerCase();
-  if (['off', 'relaxed', 'strict'].includes(env)) return env;
+  if (env) return VALID_SAFETY.has(env) ? env : 'strict';
   try {
     const val = readFileSync(path.join(homedir(), '.kelin', 'safety.mode'), 'utf8').trim().toLowerCase();
-    return ['off', 'relaxed', 'strict'].includes(val) ? val : 'off';
+    if (!val) return 'off';
+    return VALID_SAFETY.has(val) ? val : 'strict';
   } catch {
     return 'off';
   }
@@ -65,7 +80,9 @@ const readState = () => {
   if (!existsSync(file)) return null;
   try {
     const data = JSON.parse(readFileSync(file, 'utf8'));
-    return data.mode && data.phase ? data : null;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+    if (typeof data.mode !== 'string' || typeof data.phase !== 'string') return null;
+    return VALID_MODES.has(data.mode) && VALID_PHASES.has(data.phase) ? { mode: data.mode, phase: data.phase } : null;
   } catch {
     return null;
   }
@@ -84,11 +101,11 @@ const findVerifySkills = () => {
       continue;
     }
     for (const name of entries) {
-      if (!name.startsWith('verify-')) continue;
+      if (!VALID_SKILL.test(name)) continue;
       if (existsSync(path.join(dir, name, 'SKILL.md'))) found.push(name);
     }
   }
-  return [...new Set(found)];
+  return [...new Set(found)].sort().slice(0, 10);
 };
 
 const version = readVersion();
@@ -123,9 +140,15 @@ if (isAgy) {
     ],
   }));
 } else {
+  const eventName =
+    typeof input.hook_event_name === 'string'
+      ? input.hook_event_name
+      : typeof input.hookEventName === 'string'
+        ? input.hookEventName
+        : 'SessionStart';
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: input.hook_event_name || input.hookEventName || 'SessionStart',
+      hookEventName: eventName,
       additionalContext: lines.join('\n'),
     },
   }));

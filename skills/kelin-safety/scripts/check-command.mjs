@@ -19,8 +19,14 @@ export const decide = (command) => {
   const text = String(command || '').trim();
   if (!text) return { decision: 'allow', reason: '' };
 
+  let firstAsk = null;
+  const noteAsk = (reason) => {
+    if (!firstAsk) firstAsk = { decision: 'ask', reason };
+  };
+
   for (const segment of text.split(/[;&|]+/)) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) continue;
     const args = (start) => tokens.slice(start).filter((token) => token !== '--').map(unquote);
     const bare = (token) => unquote(token.replace(/^["']|["']$/g, ''));
     if (['echo', 'printf'].includes(bare(tokens[0]))) continue;
@@ -35,7 +41,7 @@ export const decide = (command) => {
         const root = targets.find((target) => rootTargets.has(target));
         if (root) return { decision: 'deny', reason: `recursive delete of ${root}; use an explicit project subdirectory` };
         if (force && !targets.some((target) => safeDeleteDirs.test(target))) {
-          return { decision: 'ask', reason: `recursive delete of ${targets.join(' ') || 'unknown target'}; confirm the path` };
+          noteAsk(`recursive delete of ${targets.join(' ') || 'unknown target'}; confirm the path`);
         }
       }
     }
@@ -48,13 +54,13 @@ export const decide = (command) => {
         const targets = findArgs.filter((token) => !token.startsWith('-') && token !== 'rm');
         const root = targets.find((target) => rootTargets.has(target));
         if (root) return { decision: 'deny', reason: `find deletes under ${root}; use an explicit project subdirectory` };
-        return { decision: 'ask', reason: `find -delete on ${targets.join(' ') || 'unknown path'}; confirm the scope` };
+        noteAsk(`find -delete on ${targets.join(' ') || 'unknown path'}; confirm the scope`);
       }
     }
 
     const xargsIndex = tokens.findIndex((token) => token === 'xargs' || token.endsWith('/xargs'));
     if (xargsIndex >= 0 && tokens.slice(xargsIndex + 1).some((token) => token === 'rm' || token.endsWith('/rm'))) {
-      return { decision: 'ask', reason: 'xargs rm uses dynamic paths; confirm the input source' };
+      noteAsk('xargs rm uses dynamic paths; confirm the input source');
     }
   }
 
@@ -67,17 +73,17 @@ export const decide = (command) => {
       return { decision: 'deny', reason: 'force push to the default branch via +refspec; use a task branch and open a PR' };
     }
     if (forced && defaultBranch) return { decision: 'deny', reason: 'force push to the default branch; use a task branch and open a PR' };
-    if (forced) return { decision: 'ask', reason: 'force push rewrites remote history; confirm the branch' };
-    if (plusRef) return { decision: 'ask', reason: 'force refspec rewrites remote history; confirm the branch' };
-    if (/--delete\b/i.test(text)) return { decision: 'ask', reason: 'git push --delete removes a remote branch; confirm the branch' };
+    if (forced) noteAsk('force push rewrites remote history; confirm the branch');
+    else if (plusRef) noteAsk('force refspec rewrites remote history; confirm the branch');
+    else if (/--delete\b/i.test(text)) noteAsk('git push --delete removes a remote branch; confirm the branch');
   }
 
-  if (/\bgit\s+reset\s+--hard\b/i.test(text)) return { decision: 'ask', reason: 'git reset --hard discards uncommitted work; confirm' };
-  if (/\bgit\s+clean\s+-[a-z]*[fd]/i.test(text)) return { decision: 'ask', reason: 'git clean removes untracked files; confirm' };
-  if (/\b(docker\s+system\s+prune|kubectl\s+delete|terraform\s+destroy)\b/i.test(text)) return { decision: 'ask', reason: 'destructive infrastructure command; confirm the target' };
   if (/\bchmod\s+-R\s+777\s+\//i.test(text)) return { decision: 'deny', reason: 'world-writable recursive chmod on root' };
+  if (/\bgit\s+reset\s+--hard\b/i.test(text)) noteAsk('git reset --hard discards uncommitted work; confirm');
+  if (/\bgit\s+clean\s+-[a-z]*[fd]/i.test(text)) noteAsk('git clean removes untracked files; confirm');
+  if (/\b(docker\s+system\s+prune|kubectl\s+delete|terraform\s+destroy)\b/i.test(text)) noteAsk('destructive infrastructure command; confirm the target');
 
-  return { decision: 'allow', reason: '' };
+  return firstAsk || { decision: 'allow', reason: '' };
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

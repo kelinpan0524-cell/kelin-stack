@@ -20,7 +20,7 @@
 
 ## 完成标准
 
-- 上面三条命令都通过。
+- 上面四项命令都通过。
 - `verify-stack run --all` 的 receipt 里 `ok: true`，失败断言为 0。
 - 新增 skill 必须同时有 recipe 或明确标注为 static-only。
 

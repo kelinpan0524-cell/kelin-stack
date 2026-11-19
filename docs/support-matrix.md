@@ -14,7 +14,7 @@
 | 只读强制 | 子代理只读工具 | `-s read-only` ✓ 实测 | 无头默认拒绝未授权命令权限 ✓ 实测（写文件被自动拦） |
 | 会话续接 | 宿主自带会话 | `codex exec resume <id>` / `--last` ✓ 实测 | `--conversation <id>` ✓ 实测（2 轮记忆保持） |
 | 结构化输出 | — | `--json`（JSONL 事件流）+ `-o`（最终消息） | `--output-format json`（含 `conversation_id`、`usage`） |
-| verify-stack live | ✓ 原生支持 | 不支持（静态检查可用） | 不支持（静态检查 + `agy plugin validate --strict` 可用） |
+| 验证命令 | `verify-stack run --all`（含静态与 `--live`）✓ 原生支持 | 无 ZCode 时用 `offline-check.mjs` + `node --test`（`verify-stack run --all` 仍需本机 ZCode CLI） | 无 ZCode 时用 `offline-check.mjs` + `node --test` + `agy plugin validate --strict`（`verify-stack run --all` 仍需本机 ZCode CLI） |
 | symlink 安装 | — | 官方文档声明支持（未实测） | 完整插件用干净复制（避开 `.git` 与 ZCode `hooks/hooks.json`）；子集默认 copy |
 
 实测环境：2026-11-17（macOS，codex-cli 0.169.0-alpha.11.1、agy 1.5.10，探针项目验证发现/脚本/续接/只读）；2026-11-20（macOS，agy 1.5.10，实测 `.antigravity-plugin/plugin.json`、`agy plugin validate --strict`、`GetAllPlugins` 热发现、以及 `agy -p` 下 `SessionStart` 注入与 `PreToolUse` `deny`/`ask` 行为）。

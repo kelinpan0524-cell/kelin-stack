@@ -41,6 +41,47 @@ for (const hookRel of ['hooks/hooks.json', 'hooks.json']) {
   }
 }
 
+if (manifests.includes('.antigravity-plugin/plugin.json')) {
+  const agyHooksFile = path.join(root, 'hooks.json');
+  if (!existsSync(agyHooksFile)) {
+    fail('hooks.json: required for Antigravity native plugin');
+  } else {
+    try {
+      const parsed = JSON.parse(await readFile(agyHooksFile, 'utf8'));
+      let sessionHandlers = 0;
+      let preToolHandlers = 0;
+      for (const spec of Object.values(parsed || {})) {
+        if (!spec || typeof spec !== 'object' || spec.enabled === false) continue;
+        if (Array.isArray(spec.SessionStart)) {
+          for (const h of spec.SessionStart) {
+            if (typeof h?.command === 'string' && h.command.trim()) sessionHandlers += 1;
+          }
+        }
+        if (Array.isArray(spec.PreToolUse)) {
+          for (const g of spec.PreToolUse) {
+            if (typeof g?.matcher !== 'string' || !Array.isArray(g?.hooks)) continue;
+            for (const h of g.hooks) {
+              if (typeof h?.command === 'string' && h.command.trim()) preToolHandlers += 1;
+            }
+          }
+        }
+      }
+      if (!sessionHandlers) fail('hooks.json: missing active SessionStart handler');
+      if (!preToolHandlers) fail('hooks.json: missing active PreToolUse handler');
+    } catch {
+    }
+  }
+  const rulesFile = path.join(root, 'rules', 'AGENTS.md');
+  if (existsSync(path.join(root, 'rules'))) {
+    if (!existsSync(rulesFile)) fail('rules/AGENTS.md: missing');
+    else {
+      const body = (await readFile(rulesFile, 'utf8')).trim();
+      if (!body) fail('rules/AGENTS.md: empty');
+      if (body.startsWith('---')) fail('rules/AGENTS.md: must not contain frontmatter');
+    }
+  }
+}
+
 const skillsDir = path.join(root, 'skills');
 const skills = await readdir(skillsDir);
 for (const name of skills) {

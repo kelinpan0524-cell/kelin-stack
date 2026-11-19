@@ -154,7 +154,7 @@ WorkBuddy 支持标准 `SKILL.md`。分三种情况：
 - **带脚本的 skill**（map、verify、agents、guard、ci 等）：脚本是 Node，无外部依赖；脚本调用使用 `$SKILL_DIR` 占位符自定位；
 - **插件安装**：WorkBuddy 支持插件 ZIP / 自定义 marketplace，但清单格式不同；本仓库目前有 `.zcode-plugin` / `.claude-plugin` / `.cursor-plugin` / `.antigravity-plugin` 四份清单。需要的话可以补一份 WorkBuddy 清单，告诉我它的 manifest 路径和字段即可。
 
-注意：`kelin-verify-stack` 的 live 检查依赖 ZCode 的 `zcode` CLI，WorkBuddy / Antigravity 里跑静态检查即可；斜杠命令名也可能随运行时不同。
+注意：`kelin-verify-stack`（含 `verify-stack run --all`）依赖本机 ZCode CLI；在只有 Antigravity / Codex / WorkBuddy 的环境里跑 `offline-check.mjs`、`node --test` 与 `agy plugin validate` 即可；斜杠命令名也可能随运行时不同。
 
 ## 开发
 
@@ -209,7 +209,9 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 ```
 kelin-stack/
 ├── .antigravity-plugin/ # Antigravity 原生插件清单
-├── .zcode-plugin/       # ZCode 插件清单（另含 .claude-plugin / .cursor-plugin）
+├── .zcode-plugin/       # ZCode 插件清单
+├── .claude-plugin/      # Claude Code 插件与市场清单
+├── .cursor-plugin/      # Cursor 市场清单（marketplace.json）
 ├── hooks.json           # Antigravity 根目录钩子声明（SessionStart + PreToolUse）
 ├── hooks/               # 双宿主钩子脚本 + ZCode hooks/hooks.json
 ├── rules/               # Antigravity 常驻规则（AGENTS.md）

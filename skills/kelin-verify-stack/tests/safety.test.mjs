@@ -109,6 +109,12 @@ test('wrappers do not bypass safety decisions', () => {
   assert.equal(decide('rm -rf /tmp/build-cache').decision, 'allow');
 });
 
+test('deny always takes precedence over an earlier ask in compound commands', () => {
+  assert.equal(decide('rm -rf src/build-output && rm -rf /').decision, 'deny');
+  assert.equal(decide('git reset --hard && chmod -R 777 /').decision, 'deny');
+  assert.equal(decide('rm -rf src/build-output && git push --force origin main').decision, 'deny');
+});
+
 const runAgyHook = (payload, env = {}) => {
   const clean = { ...process.env, ...env };
   delete clean.ZCODE_PLUGIN_ROOT;
@@ -159,6 +165,22 @@ test('antigravity PreToolUse maps off/allow to ask (defer), risky to force_ask, 
   const invalid = runAgyHook('not json', { KELIN_SAFETY: 'strict' });
   assert.equal(invalid.status, 0);
   assert.deepEqual(JSON.parse(invalid.stdout), { decision: 'ask' });
+
+  const jsonNull = runAgyHook('null', { KELIN_SAFETY: 'strict' });
+  assert.equal(jsonNull.status, 0);
+  assert.deepEqual(JSON.parse(jsonNull.stdout), { decision: 'ask' });
+
+  const zcodeNull = runHook('null');
+  assert.equal(zcodeNull.status, 0);
+  assert.equal(zcodeNull.stdout, '');
+
+  const invalidMode = runAgyHook(
+    { hookEventName: 'PreToolUse', toolCall: { name: 'run_command', args: { CommandLine: 'rm -rf /' } } },
+    { KELIN_SAFETY: 'typo-mode' },
+  );
+  assert.equal(invalidMode.status, 0);
+  assert.equal(JSON.parse(invalidMode.stdout).decision, 'deny');
+  assert.match(invalidMode.stderr, /invalid KELIN_SAFETY/);
 });
 
 test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and run_command redirection', async () => {
@@ -190,4 +212,28 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
     { KELIN_SAFETY: 'strict' },
   );
   assert.equal(JSON.parse(outsideRedirect.stdout).decision, 'deny');
+
+  const explicitCwdOutside = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo hi > nope.md', Cwd: path.join(dir, 'docs') } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(explicitCwdOutside.stdout).decision, 'deny');
+
+  const explicitCwdInside = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo hi > ok.js', Cwd: path.join(dir, 'src') } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.deepEqual(JSON.parse(explicitCwdInside.stdout), { decision: 'ask' });
+
+  const askPlusFreezeStrict = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'git reset --hard && echo hi > docs/nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(askPlusFreezeStrict.stdout).decision, 'deny');
+
+  const askPlusFreezeRelaxed = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'git reset --hard && echo hi > docs/nope.md' } } },
+    { KELIN_SAFETY: 'relaxed' },
+  );
+  assert.equal(JSON.parse(askPlusFreezeRelaxed.stdout).decision, 'deny');
 });

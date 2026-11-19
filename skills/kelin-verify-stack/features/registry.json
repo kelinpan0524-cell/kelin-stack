@@ -10,10 +10,9 @@
   "assets": ["assets/**"],
   "hooks": ["hooks/**", "hooks.json"],
   "setup": ["skills/setup-pstack/**"],
-  "tools": ["skills/*/scripts/**"],
+  "tools": ["skills/*/scripts/**", "rules/**", "install.sh"],
   "nonRuntime": [
     "docs/**",
-    "rules/**",
     "automations/**",
     "README.md",
     "LICENSE",

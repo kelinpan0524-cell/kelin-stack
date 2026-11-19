@@ -33,41 +33,113 @@ if [[ "$HOST" == "zcode" ]]; then
   exit 0
 fi
 
+uninstall_skills_dir() {
+  local dir="$1"
+  if [[ ! -f "$dir/$MANIFEST_NAME" ]]; then
+    return 1
+  fi
+  echo "将删除以下条目（只删清单记录的 kelin-* 条目，位置: ${dir}）:"
+  python3 - "$dir/$MANIFEST_NAME" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+for e in m.get("entries", []):
+    print("  -", e)
+PY
+  [[ $DRY -eq 1 ]] && { echo "(dry-run，未删除)"; return 0; }
+  python3 - "$dir/$MANIFEST_NAME" <<'PY'
+import json, os, pathlib, re, shutil, sys
+mf = pathlib.Path(sys.argv[1])
+base = mf.parent.resolve()
+m = json.loads(mf.read_text(encoding="utf-8"))
+for e in m.get("entries", []):
+    if not isinstance(e, str) or not re.fullmatch(r"kelin-[a-z0-9-]+", e):
+        print("skip suspicious entry:", e)
+        continue
+    p = base / e
+    if p.is_symlink():
+        p.unlink()
+        print("removed symlink", e)
+        continue
+    if p.exists():
+        resolved = p.resolve()
+        if resolved.parent != base:
+            print("skip outside entry:", e)
+            continue
+        shutil.rmtree(resolved) if resolved.is_dir() else os.remove(resolved)
+        print("removed", e)
+mf.unlink()
+PY
+  return 0
+}
+
+verify_plugin_ownership() {
+  local plugins_root="$1" dest="$2"
+  python3 - "$plugins_root" "$dest" "$MANIFEST_NAME" <<'PY'
+import json, os, pathlib, sys
+root = pathlib.Path(sys.argv[1]).resolve()
+dest = pathlib.Path(sys.argv[2])
+mf_name = sys.argv[3]
+if not os.path.lexists(dest):
+    sys.exit(0)
+if dest.is_symlink() or not dest.is_dir():
+    sys.exit(f"refuse non-directory or symlink target: {dest}")
+if dest.resolve().parent != root or dest.name != "kelin-stack":
+    sys.exit(f"refuse unexpected target: {dest}")
+mf = dest / mf_name
+if not os.path.lexists(mf) or mf.is_symlink() or not mf.is_file():
+    sys.exit(f"missing or unsafe manifest: {mf}")
+try:
+    data = json.loads(mf.read_text(encoding="utf-8"))
+except Exception as err:
+    sys.exit(f"unreadable manifest {mf}: {err}")
+if not isinstance(data, dict) or data.get("mode") != "antigravity-plugin":
+    sys.exit(f"refuse non-plugin manifest: {mf}")
+PY
+}
+
 # Antigravity 用户级默认安装完整原生插件；指定 --subset 时装进全局 skills 目录
 PLUGIN_MODE=0
 if [[ "$HOST" == "antigravity" && "$SCOPE" == "user" && -z "$SUBSET" ]]; then
-  if [[ $UNINSTALL -eq 1 && ! -f "$HOME/.gemini/config/plugins/$PLUGIN_NAME/$MANIFEST_NAME" && -f "$HOME/.gemini/config/skills/$MANIFEST_NAME" ]]; then
-    PLUGIN_MODE=0
-  else
-    PLUGIN_MODE=1
-  fi
+  PLUGIN_MODE=1
 fi
 
 if [[ $PLUGIN_MODE -eq 1 ]]; then
   PLUGINS_ROOT="$HOME/.gemini/config/plugins"
   DEST="$PLUGINS_ROOT/$PLUGIN_NAME"
+  LOCK_DIR="$PLUGINS_ROOT/.kelin-stack.lock"
 
   if [[ $UNINSTALL -eq 1 ]]; then
-    if [[ ! -f "$DEST/$MANIFEST_NAME" ]]; then
-      echo "未找到安装清单 ${DEST}/${MANIFEST_NAME}，本安装器没装过插件，不动。"
-      exit 0
+    REMOVED_ANY=0
+    if [[ -e "$DEST" || -L "$DEST" ]]; then
+      if ! verify_plugin_ownership "$PLUGINS_ROOT" "$DEST"; then
+        echo "跳过插件目录 ${DEST}（非本安装器所有或清单损坏，未删除）。"
+        exit 1
+      fi
+      echo "将卸载 Antigravity 插件目录: ${DEST}"
+      if [[ $DRY -eq 1 ]]; then
+        echo "(dry-run，未删除)"
+      else
+        mkdir -p "$PLUGINS_ROOT"
+        mkdir "$LOCK_DIR" 2>/dev/null || { echo "另一个 kelin-stack 安装/卸载正在进行（锁: ${LOCK_DIR}），请稍后重试。"; exit 1; }
+        trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+        verify_plugin_ownership "$PLUGINS_ROOT" "$DEST"
+        rm -rf "$DEST"
+        echo "removed ${DEST}"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        trap - EXIT
+      fi
+      REMOVED_ANY=1
     fi
-    echo "将卸载 Antigravity 插件目录: ${DEST}"
-    [[ $DRY -eq 1 ]] && { echo "(dry-run，未删除)"; exit 0; }
-    python3 - "$PLUGINS_ROOT" "$DEST" "$MANIFEST_NAME" <<'PY'
-import json, pathlib, shutil, sys
-root = pathlib.Path(sys.argv[1]).resolve()
-dest = pathlib.Path(sys.argv[2]).resolve()
-mf = dest / sys.argv[3]
-if dest.parent != root or dest.name != "kelin-stack":
-    sys.exit(f"refuse unexpected target: {dest}")
-data = json.loads(mf.read_text(encoding="utf-8"))
-if data.get("mode") != "antigravity-plugin":
-    sys.exit(f"refuse non-plugin manifest: {mf}")
-shutil.rmtree(dest)
-print("removed", dest)
-PY
-    echo "卸载完成。"
+    for skill_dir in "$HOME/.gemini/config/skills" "$HOME/.gemini/antigravity-cli/skills"; do
+      if uninstall_skills_dir "$skill_dir"; then
+        REMOVED_ANY=1
+      fi
+    done
+    if [[ $REMOVED_ANY -eq 0 ]]; then
+      echo "未找到可卸载的 Antigravity 插件或安装清单，不动。"
+    else
+      echo "卸载完成。"
+    fi
     exit 0
   fi
 
@@ -82,20 +154,34 @@ PY
   SKILL_COUNT=$(find "$SRC" -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l | xargs)
   echo "宿主: ${HOST}  范围: ${SCOPE}（原生插件模式）"
   echo "目标目录: ${DEST}"
-  echo "包含组件: manifest(.antigravity-plugin) + ${SKILL_COUNT} skills + agents + rules/AGENTS.md + hooks.json + assets/logo.svg"
+  echo "包含组件: manifest(.antigravity-plugin) + ${SKILL_COUNT} skills + agents + rules/AGENTS.md + hooks.json + assets/logo.svg + docs"
   echo "排除项: .git、.kelin、.github、evals、hooks/hooks.json（ZCode 专用）"
+  if [[ -f "$HOME/.gemini/antigravity-cli/skills/$MANIFEST_NAME" ]]; then
+    echo "提示：检测到旧版用户级目录 ${HOME}/.gemini/antigravity-cli/skills 仍有安装清单，可用 --uninstall 清理。"
+  fi
   [[ $DRY -eq 1 ]] && { echo "(dry-run，未写入)"; exit 0; }
 
-  if [[ -e "$DEST" && ! -f "$DEST/$MANIFEST_NAME" ]]; then
-    echo "跳过安装：${DEST} 已存在且不含 ${MANIFEST_NAME}（非本安装器创建，不覆盖）。如需重装请先手动卸载。"
-    exit 1
+  mkdir -p "$PLUGINS_ROOT"
+  mkdir "$LOCK_DIR" 2>/dev/null || { echo "另一个 kelin-stack 安装/卸载正在进行（锁: ${LOCK_DIR}），请稍后重试。"; exit 1; }
+
+  STAGE=""
+  BACKUP=""
+  cleanup_plugin_install() {
+    [[ -n "$STAGE" ]] && rm -rf "$STAGE" 2>/dev/null || true
+    [[ -n "$BACKUP" && -d "$BACKUP" && ! -e "$DEST" ]] && mv "$BACKUP" "$DEST" 2>/dev/null || true
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  }
+  trap cleanup_plugin_install EXIT
+
+  if [[ -e "$DEST" || -L "$DEST" ]]; then
+    if ! verify_plugin_ownership "$PLUGINS_ROOT" "$DEST"; then
+      echo "跳过安装：${DEST} 已存在且未通过所有权校验（非本安装器创建、符号链接或清单损坏，不覆盖）。如需重装请先手动卸载。"
+      exit 1
+    fi
   fi
 
-  mkdir -p "$PLUGINS_ROOT"
   STAGE="$(mktemp -d "$PLUGINS_ROOT/.kelin-stage.XXXXXX")"
-  trap 'rm -rf "$STAGE"' EXIT
-
-  mkdir -p "$STAGE/.antigravity-plugin" "$STAGE/hooks" "$STAGE/rules" "$STAGE/assets" "$STAGE/skills" "$STAGE/agents"
+  mkdir -p "$STAGE/.antigravity-plugin" "$STAGE/hooks" "$STAGE/rules" "$STAGE/assets" "$STAGE/skills" "$STAGE/agents" "$STAGE/docs"
   cp "$REPO/.antigravity-plugin/plugin.json" "$STAGE/.antigravity-plugin/plugin.json"
   cp "$REPO/hooks.json" "$STAGE/hooks.json"
   cp "$REPO/hooks/session-start.mjs" "$STAGE/hooks/session-start.mjs"
@@ -104,6 +190,9 @@ PY
   cp "$REPO/assets/logo.svg" "$STAGE/assets/logo.svg"
   for doc in README.md LICENSE NOTICE; do
     [[ -f "$REPO/$doc" ]] && cp "$REPO/$doc" "$STAGE/$doc"
+  done
+  for doc in skills.md support-matrix.md; do
+    [[ -f "$REPO/docs/$doc" ]] && cp "$REPO/docs/$doc" "$STAGE/docs/$doc"
   done
   for d in "$SRC"/kelin-*/; do
     [[ -d "$d" ]] && cp -R "${d%/}" "$STAGE/skills/"
@@ -120,15 +209,26 @@ mf.write_text(json.dumps({
     "installed_at": datetime.date.today().isoformat(),
     "mode": "antigravity-plugin",
     "version": meta.get("version", ""),
-    "entries": [".antigravity-plugin", "hooks.json", "hooks", "skills", "agents", "rules", "assets"],
+    "entries": [".antigravity-plugin", "hooks.json", "hooks", "skills", "agents", "rules", "assets", "docs"],
 }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 
-  rm -rf "$DEST"
+  if [[ -e "$DEST" || -L "$DEST" ]]; then
+    verify_plugin_ownership "$PLUGINS_ROOT" "$DEST"
+    BACKUP="$(mktemp -d "$PLUGINS_ROOT/.kelin-backup.XXXXXX")"
+    rmdir "$BACKUP"
+    mv "$DEST" "$BACKUP"
+  fi
   mv "$STAGE" "$DEST"
+  STAGE=""
+  if [[ -n "$BACKUP" ]]; then
+    rm -rf "$BACKUP"
+    BACKUP=""
+  fi
+  rmdir "$LOCK_DIR" 2>/dev/null || true
   trap - EXIT
-  echo "已安装 Antigravity 原生插件到: $DEST"
-  echo "可运行检查：agy plugin validate \"$DEST\" --strict && agy plugin list"
+  echo "已安装 Antigravity 原生插件到: ${DEST}"
+  echo "可运行检查：agy plugin validate \"${DEST}\" --strict && agy plugin list"
   exit 0
 fi
 
@@ -137,38 +237,15 @@ case "$HOST:$SCOPE" in
   codex:user) DEST="$HOME/.agents/skills" ;;
   antigravity:project) [[ -n "$TARGET" ]] || TARGET="$PWD"; DEST="$TARGET/.agents/skills" ;;
   antigravity:user) DEST="$HOME/.gemini/config/skills" ;;
-  *) echo "不支持的组合: host=$HOST scope=$SCOPE"; exit 2 ;;
+  *) echo "不支持的组合: host=${HOST} scope=${SCOPE}"; exit 2 ;;
 esac
 
 if [[ $UNINSTALL -eq 1 ]]; then
-  if [[ ! -f "$DEST/$MANIFEST_NAME" ]]; then
+  if uninstall_skills_dir "$DEST"; then
+    echo "卸载完成。"
+  else
     echo "未找到安装清单 ${DEST}/${MANIFEST_NAME}，本安装器没装过东西，不动。"
-    exit 0
   fi
-  echo "将删除以下条目（只删清单记录的 kelin-* 目录）:"
-  python3 - "$DEST/$MANIFEST_NAME" <<'PY'
-import json, sys, pathlib
-m = json.load(open(sys.argv[1]))
-for e in m.get("entries", []):
-    print("  -", e)
-PY
-  [[ $DRY -eq 1 ]] && { echo "(dry-run，未删除)"; exit 0; }
-  python3 - "$DEST/$MANIFEST_NAME" <<'PY'
-import json, sys, shutil, pathlib, os, re
-m = json.load(open(sys.argv[1]))
-base = pathlib.Path(sys.argv[1]).parent.resolve()
-for e in m.get("entries", []):
-    if not re.fullmatch(r"kelin-[a-z0-9-]+", e):
-        print("skip suspicious entry:", e); continue
-    p = (base / e).resolve()
-    if base not in p.parents:
-        print("skip outside entry:", e); continue
-    if p.is_symlink() or p.exists():
-        shutil.rmtree(p) if p.is_dir() and not p.is_symlink() else os.remove(p)
-        print("removed", e)
-os.remove(sys.argv[1])
-PY
-  echo "卸载完成。"
   exit 0
 fi
 
@@ -182,15 +259,15 @@ if [[ -n "$SUBSET" ]]; then
   IFS=',' read -ra WANTED <<< "$SUBSET"
   for w in "${WANTED[@]}"; do
     w="$(echo "$w" | xargs)"
-    [[ -d "$SRC/$w" ]] || { echo "subset 里没有这个 skill: $w"; exit 2; }
+    [[ -d "$SRC/$w" ]] || { echo "subset 里没有这个 skill: ${w}"; exit 2; }
     SELECTED+=("$w")
   done
 else
   SELECTED=("${ALL_DIRS[@]}")
 fi
 
-echo "宿主: $HOST  范围: $SCOPE"
-echo "目标目录: $DEST"
+echo "宿主: ${HOST}  范围: ${SCOPE}"
+echo "目标目录: ${DEST}"
 echo "将安装 ${#SELECTED[@]}/${#ALL_DIRS[@]} 个 skill: ${SELECTED[*]}"
 echo "方式: $([[ $LINK -eq 1 ]] && echo symlink || echo copy)"
 [[ $DRY -eq 1 ]] && { echo "(dry-run，未写入)"; exit 0; }
