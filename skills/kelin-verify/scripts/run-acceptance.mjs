@@ -6,6 +6,7 @@ import path from 'node:path';
 const DEFAULT_TIMEOUT_MS = 300_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const KILL_GRACE_MS = 150;
+const POLL_INTERVAL_MS = 20;
 const MAX_CAPTURE_BYTES = 32_768;
 
 const USAGE = `Usage: node run-acceptance.mjs [verify.json] [--json]
@@ -54,9 +55,7 @@ function parseTimeoutMs(raw, id) {
   let value = raw;
   if (typeof raw === 'string') {
     const trimmed = raw.trim();
-    if (!/^\d+$/.test(trimmed)) {
-      throw new Error(`check "${id}" timeoutMs must be a positive integer`);
-    }
+    if (!trimmed) return DEFAULT_TIMEOUT_MS;
     value = Number(trimmed);
     if (value === 0) return DEFAULT_TIMEOUT_MS;
   }
@@ -106,23 +105,92 @@ function appendTail(current, chunk) {
   return next.length > MAX_CAPTURE_BYTES ? next.slice(-MAX_CAPTURE_BYTES) : next;
 }
 
+function isGroupAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(process.platform !== 'win32' ? -pid : pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
 function terminateTree(child, signal) {
   if (child.pid && process.platform !== 'win32') {
     try {
       process.kill(-child.pid, signal);
       return;
     } catch {
-      // Fallback to direct signal when process group already exited.
+      // Fallback to direct child signal when group no longer exists.
     }
   }
   try {
     child.kill(signal);
   } catch {
-    // Ignore ESRCH when child already exited.
+    // Child already exited.
   }
 }
 
-function runCheck(check, base) {
+function waitForGroupExit(child, onDone) {
+  terminateTree(child, 'SIGTERM');
+  if (!isGroupAlive(child.pid)) {
+    onDone();
+    return null;
+  }
+  const killAt = Date.now() + KILL_GRACE_MS;
+  const hardDeadline = killAt + KILL_GRACE_MS;
+  let sigkillSent = false;
+  const poll = setInterval(() => {
+    if (!isGroupAlive(child.pid)) {
+      clearInterval(poll);
+      onDone();
+      return;
+    }
+    const now = Date.now();
+    if (!sigkillSent && now >= killAt) {
+      sigkillSent = true;
+      terminateTree(child, 'SIGKILL');
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      if (!isGroupAlive(child.pid)) {
+        clearInterval(poll);
+        onDone();
+      }
+      return;
+    }
+    if (sigkillSent && now >= hardDeadline) {
+      clearInterval(poll);
+      onDone();
+    }
+  }, POLL_INTERVAL_MS);
+  return poll;
+}
+
+function installSignalCleanup(state) {
+  const onSignal = (sig) => {
+    if (state.interrupted) return;
+    state.interrupted = true;
+    const child = state.activeChild;
+    const finalize = () => {
+      process.removeListener('SIGINT', onSignal);
+      process.removeListener('SIGTERM', onSignal);
+      process.kill(process.pid, sig);
+    };
+    if (!child) {
+      finalize();
+      return;
+    }
+    waitForGroupExit(child, finalize);
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  return () => {
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
+  };
+}
+
+function runCheck(check, base, state) {
   return new Promise((resolve) => {
     const started = Date.now();
     const cwd = check.cwd ? path.resolve(base, check.cwd) : base;
@@ -131,19 +199,41 @@ function runCheck(check, base) {
     let timedOut = false;
     let errorMessage = null;
     let settled = false;
-    let killTimer = null;
+    let closed = false;
+    let cleanupDone = false;
+    let closeCode = -1;
+    let closeSignal = null;
+    let cleanupPoll = null;
 
-    const child = spawn('sh', ['-c', check.cmd], {
-      cwd,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    let child;
+    try {
+      child = spawn('sh', ['-c', check.cmd], {
+        cwd,
+        detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      resolve({
+        id: check.id,
+        cmd: check.cmd,
+        exit: -1,
+        timedOut: false,
+        signal: null,
+        error: error.message,
+        durationMs: Date.now() - started,
+        output: '',
+      });
+      return;
+    }
+
+    state.activeChild = child;
 
     const finish = (exitCode, signal) => {
       if (settled) return;
       settled = true;
+      if (state.activeChild === child) state.activeChild = null;
       clearTimeout(timeoutTimer);
-      clearTimeout(killTimer);
+      if (cleanupPoll) clearInterval(cleanupPoll);
       resolve({
         id: check.id,
         cmd: check.cmd,
@@ -159,16 +249,11 @@ function runCheck(check, base) {
     const timeoutTimer = setTimeout(() => {
       timedOut = true;
       errorMessage = `Command timed out after ${check.timeoutMs}ms`;
-      terminateTree(child, 'SIGTERM');
-      killTimer = setTimeout(() => {
-        terminateTree(child, 'SIGKILL');
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        finish(-1, 'SIGKILL');
-      }, KILL_GRACE_MS);
-      killTimer.unref();
+      cleanupPoll = waitForGroupExit(child, () => {
+        cleanupDone = true;
+        finish(closed ? closeCode : -1, closed ? closeSignal : 'SIGKILL');
+      });
     }, check.timeoutMs);
-    timeoutTimer.unref();
 
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
@@ -183,7 +268,12 @@ function runCheck(check, base) {
       finish(-1, null);
     });
     child.on('close', (code, signal) => {
-      finish(code, signal);
+      closed = true;
+      closeCode = code ?? -1;
+      closeSignal = signal ?? null;
+      if (!timedOut || cleanupDone) {
+        finish(closeCode, closeSignal);
+      }
     });
   });
 }
@@ -214,10 +304,18 @@ async function main() {
     return;
   }
 
+  const state = { activeChild: null, interrupted: false };
+  const removeSignalCleanup = installSignalCleanup(state);
   const rows = [];
-  for (const check of checks) {
-    rows.push(await runCheck(check, base));
+  try {
+    for (const check of checks) {
+      if (state.interrupted) return;
+      rows.push(await runCheck(check, base, state));
+    }
+  } finally {
+    removeSignalCleanup();
   }
+  if (state.interrupted) return;
 
   const isPassed = (row) => row.exit === 0 && !row.timedOut && !row.error;
   const failed = rows.filter((row) => !isPassed(row));

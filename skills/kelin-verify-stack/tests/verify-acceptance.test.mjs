@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 const script = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify', 'scripts', 'run-acceptance.mjs');
-const run = (args, cwd) => spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
+const run = (args, cwd) => spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
 
 const makeSpec = async (spec) => {
   const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-'));
@@ -104,10 +104,11 @@ test('spec validation runs before any check executes (no partial side effects)',
   }
 });
 
-test('legacy timeoutMs values ("5000" and 0) remain accepted', async () => {
+test('legacy timeoutMs values ("5000", "5e3", and 0) remain accepted', async () => {
   const { dir, file } = await makeSpec({
     checks: [
       { id: 'str-timeout', cmd: 'node -e "process.exit(0)"', timeoutMs: '5000' },
+      { id: 'sci-timeout', cmd: 'node -e "process.exit(0)"', timeoutMs: '5e3' },
       { id: 'zero-timeout', cmd: 'node -e "process.exit(0)"', timeoutMs: 0 },
     ],
   });
@@ -115,13 +116,25 @@ test('legacy timeoutMs values ("5000" and 0) remain accepted', async () => {
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.ok, true);
-  assert.equal(payload.total, 2);
+  assert.equal(payload.total, 3);
 });
 
-test('timed out check reports timedOut=true and terminates SIGTERM-ignoring trees promptly', async () => {
-  const { dir, file } = await makeSpec({
-    checks: [{ id: 'slow', cmd: "trap '' TERM; sleep 5", timeoutMs: 80 }],
-  });
+const isPidAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+};
+
+test('timed out check kills SIGTERM-ignoring background grandchildren even after shell closes', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-bg-'));
+  const pidFile = path.join(dir, 'bg.pid');
+  const file = path.join(dir, 'verify.json');
+  const cmd = `(trap '' TERM; sleep 10 </dev/null >/dev/null 2>&1) & echo $! > ${JSON.stringify(pidFile)}; sleep 10`;
+  await writeFile(file, JSON.stringify({ checks: [{ id: 'bg-slow', cmd, timeoutMs: 120 }] }));
+
   const started = Date.now();
   const jsonRun = run([file, '--json'], dir);
   const elapsed = Date.now() - started;
@@ -133,10 +146,58 @@ test('timed out check reports timedOut=true and terminates SIGTERM-ignoring tree
   assert.equal(payload.rows[0].timedOut, true);
   assert.match(payload.rows[0].error || '', /timed out/i);
 
+  const bgPid = Number(readFileSync(pidFile, 'utf8').trim());
+  assert.ok(Number.isInteger(bgPid) && bgPid > 0, `expected valid bgPid, got ${bgPid}`);
+  assert.equal(isPidAlive(bgPid), false, `background grandchild ${bgPid} survived timeout cleanup`);
+
   const textRun = run([file], dir);
   assert.equal(textRun.status, 1);
-  assert.match(textRun.stdout, /FAIL slow/);
+  assert.match(textRun.stdout, /FAIL bg-slow/);
   assert.match(textRun.stdout, /TIMEOUT|timed out/i);
+  const bgPid2 = Number(readFileSync(pidFile, 'utf8').trim());
+  assert.equal(isPidAlive(bgPid2), false, `background grandchild ${bgPid2} survived text timeout cleanup`);
+});
+
+test('SIGINT/SIGTERM to runner terminates active detached check process group', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-sig-'));
+  const pidFile = path.join(dir, 'child.pid');
+  const file = path.join(dir, 'verify.json');
+  const cmd = `sleep 10 & echo $! > ${JSON.stringify(pidFile)}; wait`;
+  await writeFile(file, JSON.stringify({ checks: [{ id: 'long', cmd, timeoutMs: 10_000 }] }));
+
+  const runner = spawn(process.execPath, [script, file, '--json'], { cwd: dir, stdio: 'pipe' });
+  const deadline = Date.now() + 3000;
+  while (!existsSync(pidFile) || !readFileSync(pidFile, 'utf8').trim()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for child pid file');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  const childPid = Number(readFileSync(pidFile, 'utf8').trim());
+  assert.ok(isPidAlive(childPid), 'child should be alive before SIGTERM');
+
+  const closed = new Promise((resolve) => runner.on('close', (code, signal) => resolve({ code, signal })));
+  runner.kill('SIGTERM');
+  const exit = await closed;
+  assert.equal(exit.signal, 'SIGTERM');
+  assert.equal(isPidAlive(childPid), false, `detached child ${childPid} survived runner SIGTERM`);
+});
+
+test('synchronous spawn failure (E2BIG) records failed row and continues remaining checks', async () => {
+  const { dir, file } = await makeSpec({
+    checks: [
+      { id: 'huge', cmd: `echo ${'a'.repeat(1_200_000)}` },
+      { id: 'after', cmd: 'node -e "process.exit(0)"' },
+    ],
+  });
+  const result = run([file, '--json'], dir);
+  assert.equal(result.status, 1);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.total, 2);
+  assert.equal(payload.failed, 1);
+  assert.equal(payload.rows[0].id, 'huge');
+  assert.match(payload.rows[0].error || '', /E2BIG|ENAMETOOLONG|too/i);
+  assert.equal(payload.rows[1].id, 'after');
+  assert.equal(payload.rows[1].exit, 0);
 });
 
 test('large piped --json output (>65536 bytes) flushes without truncation', async () => {
