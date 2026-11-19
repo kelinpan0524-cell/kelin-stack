@@ -66,6 +66,7 @@ const stripHeredocs = (text) => {
     }
     let out = '';
     let quote = '';
+    let atWordStart = true;
     for (let i = 0; i < line.length; i += 1) {
       const ch = line[i];
       if (quote) {
@@ -81,19 +82,22 @@ const stripHeredocs = (text) => {
       if (ch === '\\' && i + 1 < line.length) {
         out += ch + line[i + 1];
         i += 1;
+        atWordStart = false;
         continue;
       }
       if (ch === "'" || ch === '"') {
         quote = ch;
         out += ch;
+        atWordStart = false;
         continue;
       }
-      if (ch === '#' && (i === 0 || isShellSep(line[i - 1]))) {
+      if (ch === '#' && atWordStart) {
         break;
       }
       if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') {
         out += '<<<';
         i += 2;
+        atWordStart = true;
         continue;
       }
       if (ch === '<' && line[i + 1] === '<') {
@@ -105,10 +109,12 @@ const stripHeredocs = (text) => {
           pending.push({ delim: word.value, stripTabs });
           out += ' ';
           i = Math.max(i + 1, word.end - 1);
+          atWordStart = true;
           continue;
         }
       }
       out += ch;
+      atWordStart = isShellSep(ch);
     }
     kept.push(out);
   }
@@ -322,11 +328,18 @@ export const resolveRedirectTargets = (command, initialDir, home = homedir()) =>
   const dirStack = [];
   let curDir = initialDir || '';
   let cdChain = true;
+  let cdPredicted = false;
   for (const entry of splitEntries(cleaned)) {
     const segment = entry.text;
     if (segment === '(') {
-      dirStack.push({ curDir, cdChain });
+      if (cdPredicted && entry.prevOp !== '&&') {
+        curDir = null;
+        cdPredicted = false;
+        cdChain = false;
+      }
+      dirStack.push({ curDir, cdChain, cdPredicted });
       cdChain = true;
+      cdPredicted = false;
       continue;
     }
     if (segment === ')') {
@@ -334,11 +347,18 @@ export const resolveRedirectTargets = (command, initialDir, home = homedir()) =>
         const restored = dirStack.pop();
         curDir = restored.curDir;
         cdChain = false;
+        cdPredicted = restored.cdPredicted;
       } else {
         curDir = null;
         cdChain = false;
+        cdPredicted = false;
       }
       continue;
+    }
+    if (cdPredicted && entry.prevOp !== '&&') {
+      curDir = null;
+      cdPredicted = false;
+      cdChain = false;
     }
     const rawTargets = extractRedirectsFromSegment(segment);
     const hasEmbeddedDirCmd = /(?:\$\(|`).*\b(?:cd|pushd|popd)\b/.test(segment);
@@ -355,9 +375,11 @@ export const resolveRedirectTargets = (command, initialDir, home = homedir()) =>
       const guaranteedSucceed = entry.nextOp === '&&';
       if (guaranteedReach && guaranteedSucceed && cmd === 'cd') {
         curDir = nextDirForSegment(segment, curDir, home);
+        cdPredicted = curDir !== null;
       } else {
         curDir = null;
         cdChain = false;
+        cdPredicted = false;
       }
     } else {
       cdChain = false;
