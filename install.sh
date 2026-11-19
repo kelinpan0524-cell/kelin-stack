@@ -120,12 +120,24 @@ if [[ $PLUGIN_MODE -eq 1 ]]; then
     REMOVED_ANY=0
     if [[ -e "$DEST" || -L "$DEST" ]]; then
       python3 - "$PLUGINS_ROOT" "$DEST" "$MANIFEST_NAME" "$LOCK_FILE" "$DRY" <<'PY'
-import fcntl, json, os, pathlib, shutil, sys
+import fcntl, json, os, pathlib, shutil, stat, sys
 root = pathlib.Path(sys.argv[1]).resolve()
 dest = pathlib.Path(sys.argv[2])
 mf_name = sys.argv[3]
 lock_path = pathlib.Path(sys.argv[4])
 dry = sys.argv[5] == "1"
+
+def open_lock(path_obj):
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path_obj, flags, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"refuse non-regular lock file: {path_obj}")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
 
 def verify():
     if not os.path.lexists(dest):
@@ -152,12 +164,14 @@ if dry:
     sys.exit(0)
 
 root.mkdir(parents=True, exist_ok=True)
-with open(lock_path, "w", encoding="utf-8") as lock_fh:
-    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+lock_fd = open_lock(lock_path)
+try:
     if verify():
         print(f"将卸载 Antigravity 插件目录: {dest}")
         shutil.rmtree(dest)
         print(f"removed {dest}")
+finally:
+    os.close(lock_fd)
 PY
       REMOVED_ANY=1
     fi
@@ -221,7 +235,7 @@ PY
   done
 
   python3 - "$PLUGINS_ROOT" "$DEST" "$STAGE" "$MANIFEST_NAME" "$REPO/.antigravity-plugin/plugin.json" "$LOCK_FILE" <<'PY'
-import ctypes, datetime, errno, fcntl, json, os, pathlib, shutil, sys
+import ctypes, datetime, errno, fcntl, json, os, pathlib, shutil, stat, sys
 
 root = pathlib.Path(sys.argv[1]).resolve()
 dest = pathlib.Path(sys.argv[2])
@@ -237,6 +251,18 @@ meta = json.loads(meta_file.read_text(encoding="utf-8"))
     "version": meta.get("version", ""),
     "entries": [".antigravity-plugin", "hooks.json", "hooks", "skills", "agents", "rules", "assets", "docs"],
 }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+def open_lock(path_obj):
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path_obj, flags, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"refuse non-regular lock file: {path_obj}")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
 
 def verify_existing():
     if not os.path.lexists(dest):
@@ -282,8 +308,8 @@ def atomic_exchange(src_path, dst_path):
         return
     raise OSError(errno.ENOSYS, "atomic directory exchange unsupported on this platform")
 
-with open(lock_path, "w", encoding="utf-8") as lock_fh:
-    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+lock_fd = open_lock(lock_path)
+try:
     existed = verify_existing()
     if not existed:
         if os.environ.get("KELIN_INSTALL_SIMULATE_SWAP_FAIL") == "1":
@@ -292,6 +318,8 @@ with open(lock_path, "w", encoding="utf-8") as lock_fh:
     else:
         atomic_exchange(stage, dest)
         shutil.rmtree(stage, ignore_errors=True)
+finally:
+    os.close(lock_fd)
 PY
 
   trap - EXIT

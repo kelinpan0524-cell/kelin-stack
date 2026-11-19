@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { decide, redirectTargets } from '../skills/kelin-safety/scripts/check-command.mjs';
+import { decide, resolveRedirectTargets } from '../skills/kelin-safety/scripts/check-command.mjs';
 import { decidePath, freezeFile } from '../skills/kelin-safety/scripts/freeze-lib.mjs';
 
 const hostIndex = process.argv.indexOf('--host');
@@ -133,8 +133,8 @@ if (SHELL_TOOLS.has(tool)) {
   const freezeRoot = pickFreezeRoot(execDir);
   if (result.decision !== 'deny' && freezeRoot) {
     const base = execDir || freezeRoot;
-    for (const target of redirectTargets(command)) {
-      const guard = decidePath(freezeRoot, resolveTarget(base, target));
+    for (const target of resolveRedirectTargets(command, base, homedir())) {
+      const guard = decidePath(freezeRoot, target);
       if (guard.decision === 'deny') {
         result = guard;
         break;

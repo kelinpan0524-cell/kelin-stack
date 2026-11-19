@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { decide } from '../../kelin-safety/scripts/check-command.mjs';
+import { decide, redirectTargets } from '../../kelin-safety/scripts/check-command.mjs';
 
 const hook = path.resolve(import.meta.dirname, '..', '..', '..', 'hooks', 'pre-tool-use.mjs');
 const freeze = path.resolve(import.meta.dirname, '..', '..', 'kelin-safety', 'scripts', 'freeze.mjs');
@@ -277,4 +277,45 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
     { KELIN_SAFETY: 'strict' },
   );
   assert.equal(JSON.parse(subCwdRedirect.stdout).decision, 'deny');
+
+  // cd changes directory mid-command before relative redirect
+  const cdOutside = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: path.join(dir, 'src'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'cd ../docs && echo x > nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(cdOutside.stdout).decision, 'deny');
+
+  const subshellCdOutside = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: path.join(dir, 'src'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: '(cd ../docs && echo x > nope.md)' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(subshellCdOutside.stdout).decision, 'deny');
+
+  const cdDynamic = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: path.join(dir, 'src'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'cd "$TARGET" && echo x > out.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(cdDynamic.stdout).decision, 'deny');
+
+  const cdInside = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'cd src && echo x > ok.js' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.deepEqual(JSON.parse(cdInside.stdout), { decision: 'ask' });
+
+  // Heredoc body containing > does not trigger false freeze deny, while redirect on heredoc command line still does
+  const heredocSafe = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: "cat <<'EOF'\na > docs/notes.txt\nEOF" } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.deepEqual(JSON.parse(heredocSafe.stdout), { decision: 'ask' });
+
+  const heredocOutside = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: "cat <<'EOF' > docs/out.txt\nhello\nEOF" } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(heredocOutside.stdout).decision, 'deny');
+
+  // Non-breaking space after tee terminates cleanly without hanging
+  assert.deepEqual(redirectTargets('echo hi | tee \u00a0out.txt'), ['\u00a0out.txt']);
 });

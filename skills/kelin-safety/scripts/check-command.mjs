@@ -1,9 +1,111 @@
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const rootTargets = new Set(['/', '/*', '~', '~/', '~/*', '$HOME', '$HOME/', '$HOME/*']);
 const safeDeleteDirs = /(^|\/)(node_modules|\.next|dist|build|coverage|\.cache|__pycache__|\.turbo|out|tmp)(\/|$)/;
 const unquote = (token) => token.replace(/^['"]+|['"]+$/g, '');
+const isBlank = (ch) => ch === ' ' || ch === '\t';
+const isShellSep = (ch) => isBlank(ch) || ch === ';' || ch === '&' || ch === '|' || ch === '\n' || ch === '\r' || ch === '<' || ch === '>' || ch === '(' || ch === ')';
+
+const readShellWord = (text, start) => {
+  let i = start;
+  while (i < text.length && isBlank(text[i])) i += 1;
+  if (i >= text.length || isShellSep(text[i])) return { value: '', end: i, dynamic: true };
+  let value = '';
+  let quote = '';
+  let dynamic = false;
+  while (i < text.length) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === '\\' && quote === '"' && i + 1 < text.length) {
+        value += text[i + 1];
+        i += 2;
+        continue;
+      }
+      if (ch === quote) {
+        quote = '';
+        i += 1;
+        continue;
+      }
+      if (quote === '"' && (ch === '$' || ch === '`')) dynamic = true;
+      value += ch;
+      i += 1;
+      continue;
+    }
+    if (isShellSep(ch)) break;
+    if (ch === '\\' && i + 1 < text.length) {
+      value += text[i + 1];
+      i += 2;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '$' || ch === '`' || ch === '*' || ch === '?') dynamic = true;
+    value += ch;
+    i += 1;
+  }
+  if (quote) return { value: '', end: i, dynamic: true };
+  return { value, end: i, dynamic };
+};
+
+const stripHeredocs = (text) => {
+  const lines = String(text || '').split(/\r?\n/);
+  const kept = [];
+  const pending = [];
+  for (const line of lines) {
+    if (pending.length) {
+      const current = pending[0];
+      const check = current.stripTabs ? line.replace(/^\t+/, '') : line;
+      if (check === current.delim) pending.shift();
+      continue;
+    }
+    let out = '';
+    let quote = '';
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i];
+      if (quote) {
+        out += ch;
+        if (ch === '\\' && quote === '"' && i + 1 < line.length) {
+          out += line[i + 1];
+          i += 1;
+        } else if (ch === quote) {
+          quote = '';
+        }
+        continue;
+      }
+      if (ch === '\\' && i + 1 < line.length) {
+        out += ch + line[i + 1];
+        i += 1;
+        continue;
+      }
+      if (ch === "'" || ch === '"') {
+        quote = ch;
+        out += ch;
+        continue;
+      }
+      if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
+        let pos = i + 2;
+        const stripTabs = line[pos] === '-';
+        if (stripTabs) pos += 1;
+        const word = readShellWord(line, pos);
+        if (word.value) {
+          pending.push({ delim: word.value, stripTabs });
+          out += ' ';
+          i = Math.max(i + 1, word.end - 1);
+          continue;
+        }
+      }
+      out += ch;
+    }
+    kept.push(out);
+  }
+  return kept.join('\n');
+};
 
 const splitSegments = (text) => {
   const segments = [];
@@ -42,52 +144,7 @@ const splitSegments = (text) => {
   return segments;
 };
 
-const readShellWord = (text, start) => {
-  let i = start;
-  while (i < text.length && (text[i] === ' ' || text[i] === '\t')) i += 1;
-  if (i >= text.length || /[;&|\n\r<>]/.test(text[i])) return { value: '', end: i, dynamic: true };
-  let value = '';
-  let quote = '';
-  let dynamic = false;
-  while (i < text.length) {
-    const ch = text[i];
-    if (quote) {
-      if (ch === '\\' && quote === '"' && i + 1 < text.length) {
-        value += text[i + 1];
-        i += 2;
-        continue;
-      }
-      if (ch === quote) {
-        quote = '';
-        i += 1;
-        continue;
-      }
-      if (quote === '"' && (ch === '$' || ch === '`')) dynamic = true;
-      value += ch;
-      i += 1;
-      continue;
-    }
-    if (/[\s;&|\n\r<>]/.test(ch)) break;
-    if (ch === '\\' && i + 1 < text.length) {
-      value += text[i + 1];
-      i += 2;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      i += 1;
-      continue;
-    }
-    if (ch === '$' || ch === '`' || ch === '*' || ch === '?') dynamic = true;
-    value += ch;
-    i += 1;
-  }
-  if (quote) return { value: '', end: i, dynamic: true };
-  return { value, end: i, dynamic };
-};
-
-export const redirectTargets = (command) => {
-  const text = String(command || '');
+const extractRedirectsFromSegment = (text) => {
   const targets = [];
   let quote = '';
   for (let i = 0; i < text.length; i += 1) {
@@ -111,7 +168,7 @@ export const redirectTargets = (command) => {
       if (text[pos] === '&') {
         const rest = readShellWord(text, pos + 1);
         if (/^(?:\d+|-)$/.test(rest.value)) {
-          i = rest.end - 1;
+          i = Math.max(i, rest.end - 1);
           continue;
         }
         pos += 1;
@@ -122,12 +179,18 @@ export const redirectTargets = (command) => {
       targets.push(word.dynamic || !word.value ? '' : word.value);
       continue;
     }
-    if (ch === 't' && text.slice(i, i + 3) === 'tee' && (i === 0 || /[\s;&|\n\r]/.test(text[i - 1])) && (i + 3 === text.length || /\s/.test(text[i + 3]))) {
+    if (
+      ch === 't' &&
+      text.slice(i, i + 3) === 'tee' &&
+      (i === 0 || isShellSep(text[i - 1])) &&
+      (i + 3 === text.length || isBlank(text[i + 3]))
+    ) {
       let pos = i + 3;
       while (pos < text.length) {
-        while (pos < text.length && (text[pos] === ' ' || text[pos] === '\t')) pos += 1;
-        if (pos >= text.length || /[;&|\n\r<>]/.test(text[pos])) break;
+        while (pos < text.length && isBlank(text[pos])) pos += 1;
+        if (pos >= text.length || isShellSep(text[pos])) break;
         const word = readShellWord(text, pos);
+        if (word.end <= pos) break;
         pos = word.end;
         if (!word.dynamic && word.value.startsWith('-')) continue;
         if (!word.dynamic && /^\/dev\/(null|stdout|stderr|tty)$/.test(word.value)) continue;
@@ -137,6 +200,74 @@ export const redirectTargets = (command) => {
     }
   }
   return targets;
+};
+
+const parseSegmentWords = (segment) => {
+  const words = [];
+  let pos = 0;
+  while (pos < segment.length && (isBlank(segment[pos]) || segment[pos] === '(' || segment[pos] === '{')) pos += 1;
+  while (pos < segment.length) {
+    while (pos < segment.length && isBlank(segment[pos])) pos += 1;
+    if (pos >= segment.length || isShellSep(segment[pos])) break;
+    const word = readShellWord(segment, pos);
+    if (word.end <= pos) break;
+    words.push(word);
+    pos = word.end;
+  }
+  return words;
+};
+
+const resolvePathFrom = (baseDir, target, home) => {
+  if (!target) return '';
+  if (target === '~' || target.startsWith('~/')) return path.join(home, target.slice(1));
+  if (path.isAbsolute(target)) return target;
+  return baseDir ? path.resolve(baseDir, target) : '';
+};
+
+const nextDirForSegment = (segment, curDir, home) => {
+  const words = parseSegmentWords(segment);
+  if (!words.length) return curDir;
+  let idx = 0;
+  if (!words[0].dynamic && words[0].value === 'builtin') idx = 1;
+  if (idx >= words.length || words[idx].dynamic) return curDir;
+  const cmd = words[idx].value;
+  if (cmd === 'pushd' || cmd === 'popd') return null;
+  if (cmd !== 'cd') return curDir;
+
+  let argIndex = idx + 1;
+  while (argIndex < words.length && !words[argIndex].dynamic && /^-[LP]+$/.test(words[argIndex].value)) {
+    argIndex += 1;
+  }
+  if (argIndex < words.length && !words[argIndex].dynamic && words[argIndex].value === '--') {
+    argIndex += 1;
+  }
+  if (argIndex >= words.length) return home;
+  const target = words[argIndex];
+  if (target.dynamic || !target.value || target.value === '-') return null;
+  return resolvePathFrom(curDir, target.value, home) || null;
+};
+
+export const redirectTargets = (command) => {
+  const cleaned = stripHeredocs(command);
+  const targets = [];
+  for (const segment of splitSegments(cleaned)) {
+    targets.push(...extractRedirectsFromSegment(segment));
+  }
+  return targets;
+};
+
+export const resolveRedirectTargets = (command, initialDir, home = homedir()) => {
+  const cleaned = stripHeredocs(command);
+  const resolved = [];
+  let curDir = initialDir || '';
+  for (const segment of splitSegments(cleaned)) {
+    const rawTargets = extractRedirectsFromSegment(segment);
+    for (const target of rawTargets) {
+      resolved.push(resolvePathFrom(curDir, target, home));
+    }
+    curDir = nextDirForSegment(segment, curDir, home);
+  }
+  return resolved;
 };
 
 const evaluateSegment = (segment, noteAsk) => {
@@ -201,7 +332,7 @@ const evaluateSegment = (segment, noteAsk) => {
 };
 
 export const decide = (command) => {
-  const text = String(command || '').trim();
+  const text = stripHeredocs(command).trim();
   if (!text) return { decision: 'allow', reason: '' };
 
   let firstAsk = null;

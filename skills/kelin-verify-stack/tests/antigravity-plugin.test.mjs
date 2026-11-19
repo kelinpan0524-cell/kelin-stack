@@ -98,6 +98,18 @@ test('install.sh installs clean Antigravity plugin, guards unsafe targets, handl
     assert.equal(existsSync(path.join(legacyDirKeep, 'kelin-mode')), false);
     assert.equal(existsSync(path.join(pluginDir, '.antigravity-plugin', 'plugin.json')), true);
 
+    // Symlink lock file must be refused without truncating target on both install and uninstall
+    const lockTarget = path.join(fakeHome, 'precious.txt');
+    const lockPath = path.join(fakeHome, '.gemini', 'config', 'plugins', '.kelin-stack.lock');
+    await writeFile(lockTarget, 'precious\n');
+    await rm(lockPath, { force: true });
+    await symlink(lockTarget, lockPath);
+    assert.notEqual(spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user'], { encoding: 'utf8', env }).status, 0);
+    assert.equal(readFileSync(lockTarget, 'utf8'), 'precious\n');
+    assert.notEqual(spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user', '--uninstall'], { encoding: 'utf8', env }).status, 0);
+    assert.equal(readFileSync(lockTarget, 'utf8'), 'precious\n');
+    await rm(lockPath, { force: true });
+
     const uninstall = spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user', '--uninstall'], { encoding: 'utf8', env });
     assert.equal(uninstall.status, 0, uninstall.stdout + uninstall.stderr);
     assert.equal(existsSync(pluginDir), false);
