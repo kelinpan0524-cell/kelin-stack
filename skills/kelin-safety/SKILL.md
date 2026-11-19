@@ -13,7 +13,7 @@ description: 运行时安全钩子：在命令和写入执行前拦下 rm -rf /�
 
 ## 装了什么
 
-- `hooks/hooks.json`：`PreToolUse`，matcher `Bash|Write|Edit|MultiEdit`；
+- `hooks/hooks.json`（ZCode）与 `hooks.json`（Antigravity）：`PreToolUse`，覆盖命令与文件写入/编辑；
 - `hooks/pre-tool-use.mjs`：读工具输入，调用判定模块；
 - `skills/kelin-safety/scripts/check-command.mjs`：命令判定，可单独测；
 - `skills/kelin-safety/scripts/freeze-lib.mjs`：编辑范围冻结；
@@ -69,8 +69,8 @@ printf '%s\n' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{
 
 - 只看 Bash 命令字符串，不解析 SQL、文件内容、脚本内部；
 - JSON 解析失败时放行（fail-open），避免一个坏 hook 把所有命令挡住；硬拒绝规则只匹配明确模式；
-- 不替代 ZCode 自己的权限确认；`ask` 仍走宿主确认；
-- 冻结只覆盖 Write/Edit/MultiEdit，不覆盖 Bash 里的重定向写文件。
+- 不替代宿主自己的权限确认；ZCode `ask` 与 Antigravity `force_ask` 仍走宿主确认；
+- 冻结覆盖写入/编辑工具及命令重定向写文件，不解析复杂脚本内部写操作。
 
 ## 验证
 

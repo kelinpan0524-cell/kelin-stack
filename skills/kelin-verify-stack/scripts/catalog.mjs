@@ -215,7 +215,7 @@ async function checkTools(ctx) {
     const usage = await run(process.execPath, [kelinPlan], { timeoutMs: 30_000 });
     assertions.push(assertion('kelin-plan:usage', usage.code === 2 && /Usage/.test(usage.stderr), `exit ${usage.code}`));
     const good = path.join(ctx.tempDir, 'good-plan.md');
-    await writeFile(good, '# 目标\n做一件事\n\n# 验收标准\n- [ ] `npm test` 退出 0\n\n# 方案与取舍\n推荐 A\n\n# 任务拆解\n- [ ] 单元 1：实现 / 验证：`npm test`\n\n# 风险与回滚\n回滚：revert\n');
+    await writeFile(good, '# 目标\n做一件事\n\n# 验收标准\n- [ ] `npm test` 退出 0\n\n# 方案与取舍\n推荐 A\n\n# 任务拆解\n- [ ] 单元 1：实现 / 验证：`npm test`\n\n# 风险与回滚\n回滚：revert\n\n# 本期不做\n- 不改无关模块\n');
     const accepted = await run(process.execPath, [kelinPlan, good], { timeoutMs: 30_000 });
     assertions.push(assertion('kelin-plan:accepts-complete', accepted.code === 0, `exit ${accepted.code}`));
     const bad = path.join(ctx.tempDir, 'bad-plan.md');

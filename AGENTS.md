@@ -5,6 +5,7 @@
 - 单元测试：`node --test $(find skills -name "*.test.mjs" | sort | tr "\n" " ")`（CI 同款全量）
 - 结构检查：`node skills/kelin-verify-stack/scripts/offline-check.mjs`
 - 全量验证：`node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --output /tmp/ks-verify`
+- Antigravity 插件校验：`agy plugin validate .`（安装后的 `~/.gemini/config/plugins/kelin-stack` 须过 `--strict`）
 
 ## 硬约束
 
@@ -12,7 +13,7 @@
 - skill 的 frontmatter `name` 必须等于目录名。
 - 脚本不写非必要注释；代码表达不了的“为什么”才写一行。
 - 验证器的 live 检查必须断言 `skill_called`；模型自称通过不算证据。
-- 版本号同时改 `.zcode-plugin/plugin.json` 和 `.claude-plugin/plugin.json`，两处必须一致。
+- 版本号同时改 `.zcode-plugin/plugin.json`、`.claude-plugin/plugin.json` 和 `.antigravity-plugin/plugin.json`，三处必须一致。
 - 报告和门禁字段只允许可打印 ASCII、不超过 160 字符、不含反引号和尖括号。
 - 同一事实只在一个地方写；改完文档跑 `node skills/kelin-neat/scripts/neat-check.mjs neat.json`。
 - `docs/skills.md` 和 `agents-digest/kelin-AGENTS.md` 是生成文件，勿手改；跑 `gen-docs.mjs` 更新，CI 查 drift。
@@ -25,7 +26,7 @@
 
 ## 已知坑
 
-- 本地目录安装会把 `.git` 一起拷进插件缓存；正式安装走 GitHub。
+- 本地目录安装（ZCode 或 `agy plugin install .`）会把 `.git` 一起拷进插件目录；ZCode 正式安装走 GitHub，Antigravity 走 `./install.sh --host antigravity --scope user`。
 - 本机 git 协议经常超时，推送用 GitHub API 兜底；API 推送必须跳过 `.gitignore` 里的路径（`.kelin/`、日志、依赖目录），否则过程产物会进公开仓库。
 - 一个 live 检查会真开无头会话，约 10-20 秒、10 万级输入 token；不要并行跑。
 

@@ -1,5 +1,12 @@
 # Changelog
 
+# 0.20.0（2026-11-20）
+
+- **Antigravity 原生插件**：新增 `.antigravity-plugin/plugin.json`、根目录 `hooks.json`、`rules/AGENTS.md`、`assets/logo.svg`，三份插件清单统一升至 `0.20.0`，ZCode / Antigravity 共用全部 40 skills、3 agents 与 2 个钩子脚本。
+- **双宿主钩子适配**：`hooks/session-start.mjs` 与 `hooks/pre-tool-use.mjs` 支持 `--host antigravity` 及自动识别；`SessionStart` 按 AGY `injectSteps` 格式注入并兼容空工作区；`PreToolUse` 支持 `run_command`/`write_file`/`edit_file` 等工具，放行用 `{"decision":"ask"}` 交回宿主默认权限，高危用 `force_ask`，灾难与越界冻结用 `deny`。
+- **安装器升级**：`install.sh --host antigravity --scope user` 默认安装干净原生插件包到 `~/.gemini/config/plugins/kelin-stack`（排除 `.git` 与 ZCode 专用 `hooks/hooks.json`，通过 `agy plugin validate --strict` 零警告）；`--subset` 修正为装入 `~/.gemini/config/skills/`。
+- **门禁与 neat 对齐**：`offline-check`、`verify-stack`、`registry.json`、`neat-check`、`release.mjs`、`kelin-policy.json` 纳入 `.antigravity-plugin/plugin.json` 与 `hooks.json`；新增双宿主钩子与安装器单元测试；同步 README、AGENTS.md、support-matrix 与 kelin-safety 文档。
+
 # 0.19.0（2026-11-18）
 
 - **新 skill**：`kelin-grill`（拷问）——移植 Matt Pocock 的 grilling（`mattpocock/skills`，MIT，32.7 万 star，2026-11-18 版）。设计树 + 轮次：每轮问完整个前沿、每题给推荐答案、事实自己查、决定交给人，前沿问空才算收。定位在 `kelin-plan` 之前，专治“还没想清楚就开写”。补了它与 plan/product/goal/architect/review 的分工、反模式与下游衔接。

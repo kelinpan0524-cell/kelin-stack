@@ -108,3 +108,86 @@ test('wrappers do not bypass safety decisions', () => {
   assert.equal(decide('git -C /some/dir push --force origin main').decision, 'deny');
   assert.equal(decide('rm -rf /tmp/build-cache').decision, 'allow');
 });
+
+const runAgyHook = (payload, env = {}) => {
+  const clean = { ...process.env, ...env };
+  delete clean.ZCODE_PLUGIN_ROOT;
+  delete clean.ZCODE_PROJECT_DIR;
+  return spawnSync(process.execPath, [hook, '--host', 'antigravity'], {
+    encoding: 'utf8',
+    input: typeof payload === 'string' ? payload : JSON.stringify(payload),
+    env: clean,
+  });
+};
+
+test('antigravity PreToolUse maps off/allow to ask (defer), risky to force_ask, catastrophic to deny', () => {
+  const off = runAgyHook(
+    { hookEventName: 'PreToolUse', toolCall: { name: 'run_command', args: { CommandLine: 'rm -rf /' } } },
+    { KELIN_SAFETY: 'off' },
+  );
+  assert.equal(off.status, 0);
+  assert.deepEqual(JSON.parse(off.stdout), { decision: 'ask' });
+
+  const safe = runAgyHook(
+    { hookEventName: 'PreToolUse', toolCall: { name: 'run_command', args: { CommandLine: 'ls -la' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(safe.status, 0);
+  assert.deepEqual(JSON.parse(safe.stdout), { decision: 'ask' });
+
+  const riskyStrict = runAgyHook(
+    { hookEventName: 'PreToolUse', toolCall: { name: 'run_command', args: { CommandLine: 'git reset --hard' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(riskyStrict.status, 0);
+  assert.equal(JSON.parse(riskyStrict.stdout).decision, 'force_ask');
+
+  const riskyRelaxed = runAgyHook(
+    { hookEventName: 'PreToolUse', toolCall: { name: 'run_command', args: { CommandLine: 'git reset --hard' } } },
+    { KELIN_SAFETY: 'relaxed' },
+  );
+  assert.equal(riskyRelaxed.status, 0);
+  assert.deepEqual(JSON.parse(riskyRelaxed.stdout), { decision: 'ask' });
+
+  const catastrophic = runAgyHook(
+    { hookEventName: 'PreToolUse', toolCall: { name: 'run_command', args: { CommandLine: 'rm -rf /' } } },
+    { KELIN_SAFETY: 'relaxed' },
+  );
+  assert.equal(catastrophic.status, 0);
+  assert.equal(JSON.parse(catastrophic.stdout).decision, 'deny');
+
+  const invalid = runAgyHook('not json', { KELIN_SAFETY: 'strict' });
+  assert.equal(invalid.status, 0);
+  assert.deepEqual(JSON.parse(invalid.stdout), { decision: 'ask' });
+});
+
+test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and run_command redirection', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-freeze-agy-'));
+  await mkdir(path.join(dir, 'src'), { recursive: true });
+  await mkdir(path.join(dir, 'docs'), { recursive: true });
+  assert.equal(spawnSync(process.execPath, [freeze, 'set', 'src', '--root', dir], { encoding: 'utf8' }).status, 0);
+
+  const inside = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'write_file', args: { Path: path.join(dir, 'src/ok.js') } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.deepEqual(JSON.parse(inside.stdout), { decision: 'ask' });
+
+  const outsideWrite = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'write_file', args: { Path: path.join(dir, 'docs/nope.md') } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(outsideWrite.stdout).decision, 'deny');
+
+  const outsideEdit = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'edit_file', args: { Path: path.join(dir, 'docs/nope.md') } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(outsideEdit.stdout).decision, 'deny');
+
+  const outsideRedirect = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo hi > docs/nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(outsideRedirect.stdout).decision, 'deny');
+});

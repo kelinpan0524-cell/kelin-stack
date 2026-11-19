@@ -49,3 +49,50 @@ test('SessionStart ignores invalid input', () => {
   assert.equal(result.status, 0);
   assert.equal(result.stdout, '');
 });
+
+test('SessionStart emits Antigravity injectSteps using workspace cwd and PLUGIN_ROOT', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-session-agy-'));
+  await mkdir(path.join(dir, '.kelin'), { recursive: true });
+  await mkdir(path.join(dir, '.agents', 'skills', 'verify-agy'), { recursive: true });
+  await writeFile(path.join(dir, '.kelin', 'state.json'), JSON.stringify({ mode: 'fix', phase: 'verify' }));
+  await writeFile(path.join(dir, '.agents', 'skills', 'verify-agy', 'SKILL.md'), '---\nname: verify-agy\ndescription: demo\n---\n');
+
+  const agyEnv = { ...process.env, PLUGIN_ROOT: repo, KELIN_SAFETY: 'relaxed' };
+  delete agyEnv.ZCODE_PLUGIN_ROOT;
+  delete agyEnv.ZCODE_PROJECT_DIR;
+  const result = spawnSync(process.execPath, [hook, '--host', 'antigravity'], {
+    encoding: 'utf8',
+    input: JSON.stringify({ hookEventName: 'SessionStart', cwd: dir, workspacePaths: [dir] }),
+    env: agyEnv,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  const text = payload.injectSteps?.[0]?.systemMessage?.systemMessage || '';
+  assert.match(text, new RegExp(version.replace(/\./g, '\\.')));
+  assert.match(text, /mode=fix phase=verify/);
+  assert.match(text, /verify-agy/);
+  assert.match(text, /安全钩子模式=relaxed/);
+});
+
+test('SessionStart in Antigravity handles empty workspace and invalid JSON safely', () => {
+  const agyEnv = { ...process.env, PLUGIN_ROOT: repo };
+  delete agyEnv.ZCODE_PLUGIN_ROOT;
+  delete agyEnv.ZCODE_PROJECT_DIR;
+
+  const emptyWs = spawnSync(process.execPath, [hook, '--host', 'antigravity'], {
+    encoding: 'utf8',
+    input: JSON.stringify({ hookEventName: 'SessionStart', cwd: '', workspacePaths: [] }),
+    env: agyEnv,
+  });
+  assert.equal(emptyWs.status, 0, emptyWs.stderr);
+  const text = JSON.parse(emptyWs.stdout).injectSteps?.[0]?.systemMessage?.systemMessage || '';
+  assert.match(text, /未打开工作区/);
+
+  const bad = spawnSync(process.execPath, [hook, '--host', 'antigravity'], {
+    encoding: 'utf8',
+    input: 'not json',
+    env: agyEnv,
+  });
+  assert.equal(bad.status, 0);
+  assert.equal(bad.stdout, '{}');
+});

@@ -8,7 +8,7 @@ const root = path.resolve(import.meta.dirname, '..', '..', '..');
 const problems = [];
 const fail = (message) => problems.push(message);
 
-const manifests = ['.zcode-plugin/plugin.json', '.claude-plugin/plugin.json', '.cursor-plugin/plugin.json']
+const manifests = ['.antigravity-plugin/plugin.json', '.zcode-plugin/plugin.json', '.claude-plugin/plugin.json', '.cursor-plugin/plugin.json']
   .filter((rel) => existsSync(path.join(root, rel)));
 
 if (!manifests.length) fail('no plugin manifest');
@@ -18,11 +18,28 @@ for (const rel of manifests) {
     const data = JSON.parse(await readFile(path.join(root, rel), 'utf8'));
     identities.push(`${data.name}@${data.version}`);
     if (!data.name || !data.version) fail(`${rel}: missing name or version`);
+    if (typeof data.logo === 'string' && !existsSync(path.join(root, data.logo.replace(/^\.\//, '')))) {
+      fail(`${rel}: missing logo ${data.logo}`);
+    }
   } catch (error) {
     fail(`${rel}: ${error.message}`);
   }
 }
 if (new Set(identities).size > 1) fail(`manifest versions disagree: ${identities.join(', ')}`);
+
+for (const hookRel of ['hooks/hooks.json', 'hooks.json']) {
+  const hookFile = path.join(root, hookRel);
+  if (!existsSync(hookFile)) continue;
+  try {
+    const parsed = JSON.parse(await readFile(hookFile, 'utf8'));
+    const text = JSON.stringify(parsed);
+    for (const match of text.matchAll(/(?:hooks|scripts)\/[A-Za-z0-9._\-/]+\.(?:sh|cmd|ps1|js|mjs)/g)) {
+      if (!existsSync(path.join(root, match[0]))) fail(`${hookRel}: missing target ${match[0]}`);
+    }
+  } catch (error) {
+    fail(`${hookRel}: ${error.message}`);
+  }
+}
 
 const skillsDir = path.join(root, 'skills');
 const skills = await readdir(skillsDir);

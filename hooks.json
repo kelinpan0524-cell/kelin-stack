@@ -1,0 +1,25 @@
+{
+  "kelin-session-start": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ./hooks/session-start.mjs --host antigravity",
+        "timeout": 5
+      }
+    ]
+  },
+  "kelin-safety": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command|write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/pre-tool-use.mjs --host antigravity",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
