@@ -181,6 +181,60 @@ test('SIGINT/SIGTERM to runner terminates active detached check process group', 
   assert.equal(isPidAlive(childPid), false, `detached child ${childPid} survived runner SIGTERM`);
 });
 
+test('SIGINT during SIGTERM cleanup grace window does not abort process-group kill', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-sig2-'));
+  const pidFile = path.join(dir, 'bg.pid');
+  const file = path.join(dir, 'verify.json');
+  const cmd = `(trap '' TERM; sleep 10 </dev/null >/dev/null 2>&1) & echo $! > ${JSON.stringify(pidFile)}; sleep 10`;
+  await writeFile(file, JSON.stringify({ checks: [{ id: 'long-bg', cmd, timeoutMs: 10_000 }] }));
+
+  const runner = spawn(process.execPath, [script, file, '--json'], { cwd: dir, stdio: 'pipe' });
+  const deadline = Date.now() + 3000;
+  while (!existsSync(pidFile) || !readFileSync(pidFile, 'utf8').trim()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for bg pid file');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  const bgPid = Number(readFileSync(pidFile, 'utf8').trim());
+  assert.ok(isPidAlive(bgPid), 'bg child should be alive before SIGTERM');
+
+  const closed = new Promise((resolve) => runner.on('close', (code, signal) => resolve({ code, signal })));
+  runner.kill('SIGTERM');
+  await new Promise((r) => setTimeout(r, 40));
+  runner.kill('SIGINT');
+  const exit = await closed;
+  assert.equal(exit.signal, 'SIGTERM');
+  assert.equal(isPidAlive(bgPid), false, `bg child ${bgPid} survived SIGTERM+SIGINT cleanup`);
+});
+
+test('timeout closes child stdio pipes even when a new-session grandchild holds stdout open', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-setsid-'));
+  const pidFile = path.join(dir, 'grandchild.pid');
+  const file = path.join(dir, 'verify.json');
+  const grandchildScript = `const { spawn } = require("node:child_process"); const fs = require("node:fs"); const c = spawn(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], { detached: true, stdio: ["ignore", 1, 2] }); fs.writeFileSync(${JSON.stringify(pidFile)}, String(c.pid)); c.unref(); setTimeout(() => {}, 5000);`;
+  await writeFile(file, JSON.stringify({
+    checks: [{ id: 'setsid-pipe', cmd: `node -e '${grandchildScript}'`, timeoutMs: 120 }],
+  }));
+
+  const started = Date.now();
+  const result = run([file, '--json'], dir);
+  const elapsed = Date.now() - started;
+  let gcPid = 0;
+  try {
+    if (existsSync(pidFile)) gcPid = Number(readFileSync(pidFile, 'utf8').trim());
+    assert.equal(result.status, 1);
+    assert.ok(elapsed < 1500, `runner hung waiting on leaked stdout pipe: ${elapsed}ms`);
+    const payload = JSON.parse(result.stdout);
+    assert.equal(payload.ok, false);
+    assert.equal(payload.rows[0].timedOut, true);
+  } finally {
+    if (gcPid > 0) {
+      try {
+        process.kill(gcPid, 'SIGKILL');
+      } catch {}
+    }
+  }
+});
+
 test('synchronous spawn failure (E2BIG) records failed row and continues remaining checks', async () => {
   const { dir, file } = await makeSpec({
     checks: [

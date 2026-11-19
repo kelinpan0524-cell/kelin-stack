@@ -131,10 +131,20 @@ function terminateTree(child, signal) {
   }
 }
 
+function destroyChildPipes(child) {
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.unref();
+}
+
 function waitForGroupExit(child, onDone) {
+  const done = () => {
+    destroyChildPipes(child);
+    onDone();
+  };
   terminateTree(child, 'SIGTERM');
   if (!isGroupAlive(child.pid)) {
-    onDone();
+    done();
     return null;
   }
   const killAt = Date.now() + KILL_GRACE_MS;
@@ -143,24 +153,23 @@ function waitForGroupExit(child, onDone) {
   const poll = setInterval(() => {
     if (!isGroupAlive(child.pid)) {
       clearInterval(poll);
-      onDone();
+      done();
       return;
     }
     const now = Date.now();
     if (!sigkillSent && now >= killAt) {
       sigkillSent = true;
       terminateTree(child, 'SIGKILL');
-      child.stdout?.destroy();
-      child.stderr?.destroy();
+      destroyChildPipes(child);
       if (!isGroupAlive(child.pid)) {
         clearInterval(poll);
-        onDone();
+        done();
       }
       return;
     }
     if (sigkillSent && now >= hardDeadline) {
       clearInterval(poll);
-      onDone();
+      done();
     }
   }, POLL_INTERVAL_MS);
   return poll;
@@ -234,6 +243,7 @@ function runCheck(check, base, state) {
       if (state.activeChild === child) state.activeChild = null;
       clearTimeout(timeoutTimer);
       if (cleanupPoll) clearInterval(cleanupPoll);
+      if (timedOut) destroyChildPipes(child);
       resolve({
         id: check.id,
         cmd: check.cmd,
@@ -313,7 +323,7 @@ async function main() {
       rows.push(await runCheck(check, base, state));
     }
   } finally {
-    removeSignalCleanup();
+    if (!state.interrupted) removeSignalCleanup();
   }
   if (state.interrupted) return;
 
