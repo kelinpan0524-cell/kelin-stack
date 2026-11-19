@@ -88,7 +88,12 @@ const stripHeredocs = (text) => {
         out += ch;
         continue;
       }
-      if (ch === '<' && line[i + 1] === '<' && line[i + 2] !== '<') {
+      if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') {
+        out += '<<<';
+        i += 2;
+        continue;
+      }
+      if (ch === '<' && line[i + 1] === '<') {
         let pos = i + 2;
         const stripTabs = line[pos] === '-';
         if (stripTabs) pos += 1;
@@ -111,6 +116,7 @@ const splitSegments = (text) => {
   const segments = [];
   let cur = '';
   let quote = '';
+  const parenStack = [];
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
     if (quote) {
@@ -130,6 +136,41 @@ const splitSegments = (text) => {
     }
     if (ch === "'" || ch === '"') {
       quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === '(') {
+      if (text[i - 1] === '$') {
+        parenStack.push('cmdsub');
+        cur += ch;
+        continue;
+      }
+      if (!cur.trim()) {
+        parenStack.push('subshell');
+        segments.push('(');
+        cur = '';
+        continue;
+      }
+      parenStack.push('other');
+      cur += ch;
+      continue;
+    }
+    if (ch === ')') {
+      const kind = parenStack.pop();
+      if (kind === 'subshell') {
+        if (cur.trim()) segments.push(cur.trim());
+        segments.push(')');
+        cur = '';
+        continue;
+      }
+      cur += ch;
+      continue;
+    }
+    if (ch === '&' && (text[i - 1] === '>' || text[i - 1] === '<' || text[i + 1] === '>')) {
+      cur += ch;
+      continue;
+    }
+    if (ch === '|' && text[i - 1] === '>') {
       cur += ch;
       continue;
     }
@@ -251,6 +292,7 @@ export const redirectTargets = (command) => {
   const cleaned = stripHeredocs(command);
   const targets = [];
   for (const segment of splitSegments(cleaned)) {
+    if (segment === '(' || segment === ')') continue;
     targets.push(...extractRedirectsFromSegment(segment));
   }
   return targets;
@@ -259,8 +301,17 @@ export const redirectTargets = (command) => {
 export const resolveRedirectTargets = (command, initialDir, home = homedir()) => {
   const cleaned = stripHeredocs(command);
   const resolved = [];
+  const dirStack = [];
   let curDir = initialDir || '';
   for (const segment of splitSegments(cleaned)) {
+    if (segment === '(') {
+      dirStack.push(curDir);
+      continue;
+    }
+    if (segment === ')') {
+      curDir = dirStack.length ? dirStack.pop() : null;
+      continue;
+    }
     const rawTargets = extractRedirectsFromSegment(segment);
     for (const target of rawTargets) {
       resolved.push(resolvePathFrom(curDir, target, home));
@@ -341,6 +392,7 @@ export const decide = (command) => {
   };
 
   for (const segment of splitSegments(text)) {
+    if (segment === '(' || segment === ')') continue;
     const denied = evaluateSegment(segment, noteAsk);
     if (denied) return denied;
   }

@@ -116,6 +116,7 @@ test('deny always takes precedence over an earlier ask in compound commands', ()
   assert.equal(decide('echo ok\nrm -rf /').decision, 'deny');
   assert.equal(decide('printf ok\ngit push --force origin main').decision, 'deny');
   assert.equal(decide('echo ok\ngit reset --hard\nchmod -R 777 /').decision, 'deny');
+  assert.equal(decide('cat <<< hi\nrm -rf /').decision, 'deny');
 });
 
 const runAgyHook = (payload, env = {}) => {
@@ -318,4 +319,37 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
 
   // Non-breaking space after tee terminates cleanly without hanging
   assert.deepEqual(redirectTargets('echo hi | tee \u00a0out.txt'), ['\u00a0out.txt']);
+
+  // Here-string <<< must not eat subsequent lines
+  const hereStringFollowup = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'cat <<< hi\necho x > docs/nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(hereStringFollowup.stdout).decision, 'deny');
+
+  // Subshell cd does not leak into parent shell relative redirect after )
+  const subshellRestore = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: path.join(dir, 'docs'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: '(cd ../src && echo a > ok.js) && echo b > nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(subshellRestore.stdout).decision, 'deny');
+
+  // File descriptor duplication 2>&1 does not false-deny under freeze; &> and >| still deny outside freeze
+  const fdDup = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'ls 2>&1' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.deepEqual(JSON.parse(fdDup.stdout), { decision: 'ask' });
+
+  const ampRedirect = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo hi &>docs/out.log' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(ampRedirect.stdout).decision, 'deny');
+
+  const clobberRedirect = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo hi >| docs/out.log' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(clobberRedirect.stdout).decision, 'deny');
 });
