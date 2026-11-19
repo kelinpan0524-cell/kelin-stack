@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { decide, redirectTargets } from '../skills/kelin-safety/scripts/check-command.mjs';
-import { decidePath } from '../skills/kelin-safety/scripts/freeze-lib.mjs';
+import { decidePath, freezeFile } from '../skills/kelin-safety/scripts/freeze-lib.mjs';
 
 const hostIndex = process.argv.indexOf('--host');
 const hostArg = hostIndex >= 0 ? process.argv[hostIndex + 1] || '' : '';
@@ -72,20 +72,38 @@ const tool = typeof toolCall?.name === 'string'
       ? input.toolName
       : '';
 
-const firstWorkspace = Array.isArray(input.workspacePaths) && typeof input.workspacePaths[0] === 'string' ? input.workspacePaths[0] : '';
+const workspaceList = Array.isArray(input.workspacePaths)
+  ? input.workspacePaths.filter((entry) => typeof entry === 'string' && entry.trim())
+  : [];
 const eventCwd = typeof input.cwd === 'string' ? input.cwd : '';
-const projectDir = isAgy
-  ? eventCwd || firstWorkspace || ''
-  : process.env.ZCODE_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+
+const containsPath = (parent, child) => {
+  if (!parent || !child) return false;
+  const rel = path.relative(path.resolve(parent), path.resolve(child));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
+const pickFreezeRoot = (execDir) => {
+  if (!isAgy) return process.env.ZCODE_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const enclosing = workspaceList.filter((ws) => containsPath(ws, execDir || eventCwd));
+  const candidates = [...enclosing, ...workspaceList, eventCwd, execDir].filter(Boolean);
+  const unique = [...new Set(candidates)];
+  const withFreeze = unique.find((dir) => existsSync(freezeFile(dir)));
+  return withFreeze || enclosing[0] || workspaceList[0] || eventCwd || execDir || '';
+};
 
 const resolveExecDir = () => {
+  const base = isAgy
+    ? eventCwd || workspaceList[0] || ''
+    : process.env.ZCODE_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd();
   const explicitCwd = typeof toolArgs.Cwd === 'string' ? toolArgs.Cwd : typeof toolArgs.cwd === 'string' ? toolArgs.cwd : '';
-  if (!explicitCwd) return projectDir;
+  if (!explicitCwd) return base;
   if (explicitCwd === '~' || explicitCwd.startsWith('~/')) return path.join(homedir(), explicitCwd.slice(1));
-  return path.isAbsolute(explicitCwd) ? explicitCwd : path.resolve(projectDir || process.cwd(), explicitCwd);
+  return path.isAbsolute(explicitCwd) ? explicitCwd : path.resolve(base || process.cwd(), explicitCwd);
 };
 
 const resolveTarget = (baseDir, target) => {
+  if (!target) return '';
   if (target === '~' || target.startsWith('~/')) return path.join(homedir(), target.slice(1));
   return path.isAbsolute(target) ? target : path.resolve(baseDir, target);
 };
@@ -111,11 +129,12 @@ if (SHELL_TOOLS.has(tool)) {
       ? toolArgs.command
       : '';
   result = decide(command);
-  const freezeRoot = projectDir || resolveExecDir();
+  const execDir = resolveExecDir();
+  const freezeRoot = pickFreezeRoot(execDir);
   if (result.decision !== 'deny' && freezeRoot) {
-    const execDir = resolveExecDir() || freezeRoot;
+    const base = execDir || freezeRoot;
     for (const target of redirectTargets(command)) {
-      const guard = decidePath(freezeRoot, resolveTarget(execDir, target));
+      const guard = decidePath(freezeRoot, resolveTarget(base, target));
       if (guard.decision === 'deny') {
         result = guard;
         break;
@@ -123,9 +142,13 @@ if (SHELL_TOOLS.has(tool)) {
       if (guard.decision === 'ask' && result.decision === 'allow') result = guard;
     }
   }
-} else if (WRITE_TOOLS.has(tool) && projectDir) {
-  const filePath = [toolArgs.Path, toolArgs.path, toolArgs.TargetFile, toolArgs.file_path].find((v) => typeof v === 'string') || '';
-  result = decidePath(projectDir, filePath);
+} else if (WRITE_TOOLS.has(tool)) {
+  const base = isAgy ? eventCwd || workspaceList[0] || '' : process.env.ZCODE_PROJECT_DIR || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const freezeRoot = pickFreezeRoot(base);
+  if (freezeRoot) {
+    const filePath = [toolArgs.Path, toolArgs.path, toolArgs.TargetFile, toolArgs.file_path].find((v) => typeof v === 'string') || '';
+    result = decidePath(freezeRoot, resolveTarget(base || freezeRoot, filePath));
+  }
 }
 
 if (result.decision === 'ask' && MODE === 'relaxed') result = { decision: 'allow', reason: '' };

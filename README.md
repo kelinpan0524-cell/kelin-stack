@@ -154,7 +154,7 @@ WorkBuddy 支持标准 `SKILL.md`。分三种情况：
 - **带脚本的 skill**（map、verify、agents、guard、ci 等）：脚本是 Node，无外部依赖；脚本调用使用 `$SKILL_DIR` 占位符自定位；
 - **插件安装**：WorkBuddy 支持插件 ZIP / 自定义 marketplace，但清单格式不同；本仓库目前有 `.zcode-plugin` / `.claude-plugin` / `.cursor-plugin` / `.antigravity-plugin` 四份清单。需要的话可以补一份 WorkBuddy 清单，告诉我它的 manifest 路径和字段即可。
 
-注意：`kelin-verify-stack`（含 `verify-stack run --all`）依赖本机 ZCode CLI；在只有 Antigravity / Codex / WorkBuddy 的环境里跑 `offline-check.mjs`、`node --test` 与 `agy plugin validate` 即可；斜杠命令名也可能随运行时不同。
+注意：`kelin-verify-stack`（含 `verify-stack run --all`）依赖本机 ZCode CLI；无 ZCode 环境可跑通用的 `offline-check.mjs` 与 `node --test`，Antigravity 环境另跑 `agy plugin validate`；斜杠命令名也可能随运行时不同。
 
 ## 开发
 

@@ -564,10 +564,11 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-policy:rejects', badPolicy.code === 1 && badPolicy.stdout.includes('release-bump') && badPolicy.stdout.includes('budget-agents'), `exit ${badPolicy.code}`));
     rows.push({ tool: 'kelin-mode/scripts/policy-check.mjs', goodExit: goodPolicy.code, badExit: badPolicy.code });
   }
+  const hasAgyManifest = existsSync(path.join(ctx.pluginRoot, '.antigravity-plugin/plugin.json'));
   const rulesAgents = path.join(ctx.pluginRoot, 'rules/AGENTS.md');
-  if (existsSync(rulesAgents)) {
-    const body = (await readFile(rulesAgents, 'utf8')).trim();
-    assertions.push(assertion('agy-rules:non-empty', body.length > 0 && !body.startsWith('---'), `${body.length} chars`));
+  if (hasAgyManifest || existsSync(rulesAgents)) {
+    const body = existsSync(rulesAgents) ? (await readFile(rulesAgents, 'utf8')).trim() : '';
+    assertions.push(assertion('agy-rules:non-empty', body.length > 0 && !body.startsWith('---'), body ? `${body.length} chars` : 'missing'));
     rows.push({ tool: 'rules/AGENTS.md', bytes: Buffer.byteLength(body) });
   }
   const installScript = path.join(ctx.pluginRoot, 'install.sh');

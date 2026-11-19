@@ -79,9 +79,36 @@ test('install.sh installs clean Antigravity plugin, guards unsafe targets, handl
     const reinstall = spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user'], { encoding: 'utf8', env });
     assert.equal(reinstall.status, 0, reinstall.stdout + reinstall.stderr);
 
+    // Failed atomic swap leaves existing plugin intact and cleans up lock/stage
+    const swapFail = spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user'], {
+      encoding: 'utf8',
+      env: { ...env, KELIN_INSTALL_SIMULATE_SWAP_FAIL: '1' },
+    });
+    assert.notEqual(swapFail.status, 0);
+    assert.equal(existsSync(path.join(pluginDir, '.antigravity-plugin', 'plugin.json')), true);
+    const recover = spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user'], { encoding: 'utf8', env });
+    assert.equal(recover.status, 0, recover.stdout + recover.stderr);
+
+    // --clean-legacy removes legacy antigravity-cli/skills WITHOUT removing new native plugin
+    const legacyDirKeep = path.join(fakeHome, '.gemini', 'antigravity-cli', 'skills');
+    await mkdir(path.join(legacyDirKeep, 'kelin-mode'), { recursive: true });
+    await writeFile(path.join(legacyDirKeep, '.kelin-install.json'), JSON.stringify({ entries: ['kelin-mode'] }));
+    const cleanLegacy = spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user', '--clean-legacy'], { encoding: 'utf8', env });
+    assert.equal(cleanLegacy.status, 0, cleanLegacy.stdout + cleanLegacy.stderr);
+    assert.equal(existsSync(path.join(legacyDirKeep, 'kelin-mode')), false);
+    assert.equal(existsSync(path.join(pluginDir, '.antigravity-plugin', 'plugin.json')), true);
+
     const uninstall = spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user', '--uninstall'], { encoding: 'utf8', env });
     assert.equal(uninstall.status, 0, uninstall.stdout + uninstall.stderr);
     assert.equal(existsSync(pluginDir), false);
+
+    // Corrupt skills manifest must fail uninstall (never report success)
+    const brokenSkills = path.join(fakeHome, '.gemini', 'config', 'skills');
+    await mkdir(brokenSkills, { recursive: true });
+    await writeFile(path.join(brokenSkills, '.kelin-install.json'), '{broken');
+    const brokenUninstall = spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user', '--uninstall'], { encoding: 'utf8', env });
+    assert.notEqual(brokenUninstall.status, 0);
+    await rm(path.join(brokenSkills, '.kelin-install.json'), { force: true });
 
     // Foreign dir without manifest -> refused
     await mkdir(pluginDir, { recursive: true });

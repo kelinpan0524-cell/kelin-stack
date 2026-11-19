@@ -7,9 +7,9 @@ REPO="$(cd "$(dirname "$0")" && pwd)"
 SRC="$REPO/skills"
 MANIFEST_NAME=".kelin-install.json"
 PLUGIN_NAME="kelin-stack"
-USAGE="用法: ./install.sh --host codex|antigravity|zcode [--scope project|user] [--path DIR] [--subset 'kelin-mode,kelin-plan,...'] [--symlink] [--uninstall] [--dry-run]"
+USAGE="用法: ./install.sh --host codex|antigravity|zcode [--scope project|user] [--path DIR] [--subset 'kelin-mode,kelin-plan,...'] [--symlink] [--uninstall] [--clean-legacy] [--dry-run]"
 
-HOST="" SCOPE="project" TARGET="" SUBSET="" LINK=0 UNINSTALL=0 DRY=0
+HOST="" SCOPE="project" TARGET="" SUBSET="" LINK=0 UNINSTALL=0 CLEAN_LEGACY=0 DRY=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --host) HOST="$2"; shift 2 ;;
@@ -18,6 +18,7 @@ while [[ $# -gt 0 ]]; do
     --subset) SUBSET="$2"; shift 2 ;;
     --symlink) LINK=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
+    --clean-legacy) CLEAN_LEGACY=1; shift ;;
     --dry-run) DRY=1; shift ;;
     -h|--help) echo "$USAGE"; exit 0 ;;
     *) echo "未知参数: $1"; echo "$USAGE"; exit 2 ;;
@@ -33,25 +34,38 @@ if [[ "$HOST" == "zcode" ]]; then
   exit 0
 fi
 
+# 退出码：0=已卸载，3=未找到清单（无操作），非0且非3=失败
 uninstall_skills_dir() {
   local dir="$1"
-  if [[ ! -f "$dir/$MANIFEST_NAME" ]]; then
+  if [[ ! -e "$dir/$MANIFEST_NAME" && ! -L "$dir/$MANIFEST_NAME" ]]; then
+    return 3
+  fi
+  if [[ -L "$dir/$MANIFEST_NAME" || ! -f "$dir/$MANIFEST_NAME" ]]; then
+    echo "拒绝卸载：${dir}/${MANIFEST_NAME} 不是常规清单文件。" >&2
     return 1
   fi
   echo "将删除以下条目（只删清单记录的 kelin-* 条目，位置: ${dir}）:"
-  python3 - "$dir/$MANIFEST_NAME" <<'PY'
-import json, sys
-m = json.load(open(sys.argv[1]))
-for e in m.get("entries", []):
+  python3 - "$dir/$MANIFEST_NAME" <<'PY' || return 1
+import json, pathlib, sys
+mf = pathlib.Path(sys.argv[1])
+data = json.loads(mf.read_text(encoding="utf-8"))
+if not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+    sys.exit(f"invalid manifest schema: {mf}")
+for e in data["entries"]:
     print("  -", e)
 PY
-  [[ $DRY -eq 1 ]] && { echo "(dry-run，未删除)"; return 0; }
-  python3 - "$dir/$MANIFEST_NAME" <<'PY'
+  if [[ $DRY -eq 1 ]]; then
+    echo "(dry-run，未删除)"
+    return 0
+  fi
+  python3 - "$dir/$MANIFEST_NAME" <<'PY' || return 1
 import json, os, pathlib, re, shutil, sys
 mf = pathlib.Path(sys.argv[1])
 base = mf.parent.resolve()
 m = json.loads(mf.read_text(encoding="utf-8"))
-for e in m.get("entries", []):
+if not isinstance(m, dict) or not isinstance(m.get("entries"), list):
+    sys.exit(f"invalid manifest schema: {mf}")
+for e in m["entries"]:
     if not isinstance(e, str) or not re.fullmatch(r"kelin-[a-z0-9-]+", e):
         print("skip suspicious entry:", e)
         continue
@@ -72,30 +86,24 @@ PY
   return 0
 }
 
-verify_plugin_ownership() {
-  local plugins_root="$1" dest="$2"
-  python3 - "$plugins_root" "$dest" "$MANIFEST_NAME" <<'PY'
-import json, os, pathlib, sys
-root = pathlib.Path(sys.argv[1]).resolve()
-dest = pathlib.Path(sys.argv[2])
-mf_name = sys.argv[3]
-if not os.path.lexists(dest):
-    sys.exit(0)
-if dest.is_symlink() or not dest.is_dir():
-    sys.exit(f"refuse non-directory or symlink target: {dest}")
-if dest.resolve().parent != root or dest.name != "kelin-stack":
-    sys.exit(f"refuse unexpected target: {dest}")
-mf = dest / mf_name
-if not os.path.lexists(mf) or mf.is_symlink() or not mf.is_file():
-    sys.exit(f"missing or unsafe manifest: {mf}")
-try:
-    data = json.loads(mf.read_text(encoding="utf-8"))
-except Exception as err:
-    sys.exit(f"unreadable manifest {mf}: {err}")
-if not isinstance(data, dict) or data.get("mode") != "antigravity-plugin":
-    sys.exit(f"refuse non-plugin manifest: {mf}")
-PY
-}
+if [[ $CLEAN_LEGACY -eq 1 ]]; then
+  if [[ "$HOST" != "antigravity" || "$SCOPE" != "user" ]]; then
+    echo "--clean-legacy 仅适用于 --host antigravity --scope user"
+    exit 2
+  fi
+  LEGACY_DIR="$HOME/.gemini/antigravity-cli/skills"
+  rc=0
+  uninstall_skills_dir "$LEGACY_DIR" || rc=$?
+  if [[ $rc -eq 0 ]]; then
+    echo "旧版用户级 skills 清理完成（未动原生插件）。"
+    exit 0
+  elif [[ $rc -eq 3 ]]; then
+    echo "未找到旧版安装清单 ${LEGACY_DIR}/${MANIFEST_NAME}，无需清理。"
+    exit 0
+  else
+    exit "$rc"
+  fi
+fi
 
 # Antigravity 用户级默认安装完整原生插件；指定 --subset 时装进全局 skills 目录
 PLUGIN_MODE=0
@@ -106,33 +114,60 @@ fi
 if [[ $PLUGIN_MODE -eq 1 ]]; then
   PLUGINS_ROOT="$HOME/.gemini/config/plugins"
   DEST="$PLUGINS_ROOT/$PLUGIN_NAME"
-  LOCK_DIR="$PLUGINS_ROOT/.kelin-stack.lock"
+  LOCK_FILE="$PLUGINS_ROOT/.kelin-stack.lock"
 
   if [[ $UNINSTALL -eq 1 ]]; then
     REMOVED_ANY=0
     if [[ -e "$DEST" || -L "$DEST" ]]; then
-      if ! verify_plugin_ownership "$PLUGINS_ROOT" "$DEST"; then
-        echo "跳过插件目录 ${DEST}（非本安装器所有或清单损坏，未删除）。"
-        exit 1
-      fi
-      echo "将卸载 Antigravity 插件目录: ${DEST}"
-      if [[ $DRY -eq 1 ]]; then
-        echo "(dry-run，未删除)"
-      else
-        mkdir -p "$PLUGINS_ROOT"
-        mkdir "$LOCK_DIR" 2>/dev/null || { echo "另一个 kelin-stack 安装/卸载正在进行（锁: ${LOCK_DIR}），请稍后重试。"; exit 1; }
-        trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
-        verify_plugin_ownership "$PLUGINS_ROOT" "$DEST"
-        rm -rf "$DEST"
-        echo "removed ${DEST}"
-        rmdir "$LOCK_DIR" 2>/dev/null || true
-        trap - EXIT
-      fi
+      python3 - "$PLUGINS_ROOT" "$DEST" "$MANIFEST_NAME" "$LOCK_FILE" "$DRY" <<'PY'
+import fcntl, json, os, pathlib, shutil, sys
+root = pathlib.Path(sys.argv[1]).resolve()
+dest = pathlib.Path(sys.argv[2])
+mf_name = sys.argv[3]
+lock_path = pathlib.Path(sys.argv[4])
+dry = sys.argv[5] == "1"
+
+def verify():
+    if not os.path.lexists(dest):
+        return False
+    if dest.is_symlink() or not dest.is_dir():
+        sys.exit(f"refuse non-directory or symlink target: {dest}")
+    if dest.resolve().parent != root or dest.name != "kelin-stack":
+        sys.exit(f"refuse unexpected target: {dest}")
+    mf = dest / mf_name
+    if not os.path.lexists(mf) or mf.is_symlink() or not mf.is_file():
+        sys.exit(f"missing or unsafe manifest: {mf}")
+    try:
+        data = json.loads(mf.read_text(encoding="utf-8"))
+    except Exception as err:
+        sys.exit(f"unreadable manifest {mf}: {err}")
+    if not isinstance(data, dict) or data.get("mode") != "antigravity-plugin":
+        sys.exit(f"refuse non-plugin manifest: {mf}")
+    return True
+
+if dry:
+    if verify():
+        print(f"将卸载 Antigravity 插件目录: {dest}")
+        print("(dry-run，未删除)")
+    sys.exit(0)
+
+root.mkdir(parents=True, exist_ok=True)
+with open(lock_path, "w", encoding="utf-8") as lock_fh:
+    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+    if verify():
+        print(f"将卸载 Antigravity 插件目录: {dest}")
+        shutil.rmtree(dest)
+        print(f"removed {dest}")
+PY
       REMOVED_ANY=1
     fi
     for skill_dir in "$HOME/.gemini/config/skills" "$HOME/.gemini/antigravity-cli/skills"; do
-      if uninstall_skills_dir "$skill_dir"; then
+      rc=0
+      uninstall_skills_dir "$skill_dir" || rc=$?
+      if [[ $rc -eq 0 ]]; then
         REMOVED_ANY=1
+      elif [[ $rc -ne 3 ]]; then
+        exit "$rc"
       fi
     done
     if [[ $REMOVED_ANY -eq 0 ]]; then
@@ -157,30 +192,14 @@ if [[ $PLUGIN_MODE -eq 1 ]]; then
   echo "包含组件: manifest(.antigravity-plugin) + ${SKILL_COUNT} skills + agents + rules/AGENTS.md + hooks.json + assets/logo.svg + docs"
   echo "排除项: .git、.kelin、.github、evals、hooks/hooks.json（ZCode 专用）"
   if [[ -f "$HOME/.gemini/antigravity-cli/skills/$MANIFEST_NAME" ]]; then
-    echo "提示：检测到旧版用户级目录 ${HOME}/.gemini/antigravity-cli/skills 仍有安装清单，可用 --uninstall 清理。"
+    echo "提示：检测到旧版用户级目录 ${HOME}/.gemini/antigravity-cli/skills 仍有安装清单，可用 ./install.sh --host antigravity --scope user --clean-legacy 单独清理，不影响新装原生插件。"
   fi
   [[ $DRY -eq 1 ]] && { echo "(dry-run，未写入)"; exit 0; }
 
   mkdir -p "$PLUGINS_ROOT"
-  mkdir "$LOCK_DIR" 2>/dev/null || { echo "另一个 kelin-stack 安装/卸载正在进行（锁: ${LOCK_DIR}），请稍后重试。"; exit 1; }
-
-  STAGE=""
-  BACKUP=""
-  cleanup_plugin_install() {
-    [[ -n "$STAGE" ]] && rm -rf "$STAGE" 2>/dev/null || true
-    [[ -n "$BACKUP" && -d "$BACKUP" && ! -e "$DEST" ]] && mv "$BACKUP" "$DEST" 2>/dev/null || true
-    rmdir "$LOCK_DIR" 2>/dev/null || true
-  }
-  trap cleanup_plugin_install EXIT
-
-  if [[ -e "$DEST" || -L "$DEST" ]]; then
-    if ! verify_plugin_ownership "$PLUGINS_ROOT" "$DEST"; then
-      echo "跳过安装：${DEST} 已存在且未通过所有权校验（非本安装器创建、符号链接或清单损坏，不覆盖）。如需重装请先手动卸载。"
-      exit 1
-    fi
-  fi
-
   STAGE="$(mktemp -d "$PLUGINS_ROOT/.kelin-stage.XXXXXX")"
+  trap 'rm -rf "$STAGE" 2>/dev/null || true' EXIT
+
   mkdir -p "$STAGE/.antigravity-plugin" "$STAGE/hooks" "$STAGE/rules" "$STAGE/assets" "$STAGE/skills" "$STAGE/agents" "$STAGE/docs"
   cp "$REPO/.antigravity-plugin/plugin.json" "$STAGE/.antigravity-plugin/plugin.json"
   cp "$REPO/hooks.json" "$STAGE/hooks.json"
@@ -201,31 +220,80 @@ if [[ $PLUGIN_MODE -eq 1 ]]; then
     [[ -f "$f" ]] && cp "$f" "$STAGE/agents/"
   done
 
-  python3 - "$STAGE/$MANIFEST_NAME" "$REPO/.antigravity-plugin/plugin.json" <<'PY'
-import datetime, json, pathlib, sys
-mf = pathlib.Path(sys.argv[1])
-meta = json.loads(pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"))
-mf.write_text(json.dumps({
+  python3 - "$PLUGINS_ROOT" "$DEST" "$STAGE" "$MANIFEST_NAME" "$REPO/.antigravity-plugin/plugin.json" "$LOCK_FILE" <<'PY'
+import ctypes, datetime, errno, fcntl, json, os, pathlib, shutil, sys
+
+root = pathlib.Path(sys.argv[1]).resolve()
+dest = pathlib.Path(sys.argv[2])
+stage = pathlib.Path(sys.argv[3])
+mf_name = sys.argv[4]
+meta_file = pathlib.Path(sys.argv[5])
+lock_path = pathlib.Path(sys.argv[6])
+
+meta = json.loads(meta_file.read_text(encoding="utf-8"))
+(stage / mf_name).write_text(json.dumps({
     "installed_at": datetime.date.today().isoformat(),
     "mode": "antigravity-plugin",
     "version": meta.get("version", ""),
     "entries": [".antigravity-plugin", "hooks.json", "hooks", "skills", "agents", "rules", "assets", "docs"],
 }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+def verify_existing():
+    if not os.path.lexists(dest):
+        return False
+    if dest.is_symlink() or not dest.is_dir():
+        sys.exit(f"跳过安装：{dest} 已存在且为符号链接或非目录，不覆盖。")
+    if dest.resolve().parent != root or dest.name != "kelin-stack":
+        sys.exit(f"跳过安装：异常目标路径 {dest}")
+    mf = dest / mf_name
+    if not os.path.lexists(mf) or mf.is_symlink() or not mf.is_file():
+        sys.exit(f"跳过安装：{dest} 缺少有效安装清单 {mf_name}，不覆盖。")
+    try:
+        data = json.loads(mf.read_text(encoding="utf-8"))
+    except Exception as err:
+        sys.exit(f"跳过安装：{mf} 无法解析（{err}），不覆盖。")
+    if not isinstance(data, dict) or data.get("mode") != "antigravity-plugin":
+        sys.exit(f"跳过安装：{mf} 不是 antigravity-plugin 清单，不覆盖。")
+    return True
+
+def atomic_exchange(src_path, dst_path):
+    if os.environ.get("KELIN_INSTALL_SIMULATE_SWAP_FAIL") == "1":
+        raise OSError(errno.EIO, "simulated swap failure")
+    src_b = os.fsencode(src_path)
+    dst_b = os.fsencode(dst_path)
+    if sys.platform == "darwin":
+        libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+        libc.renamex_np.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        libc.renamex_np.restype = ctypes.c_int
+        RENAME_SWAP = 0x00000002
+        if libc.renamex_np(src_b, dst_b, RENAME_SWAP) != 0:
+            err = ctypes.get_errno()
+            raise OSError(err, os.strerror(err))
+        return
+    if sys.platform.startswith("linux"):
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        libc.renameat2.restype = ctypes.c_int
+        AT_FDCWD = -100
+        RENAME_EXCHANGE = 2
+        if libc.renameat2(AT_FDCWD, src_b, AT_FDCWD, dst_b, RENAME_EXCHANGE) != 0:
+            err = ctypes.get_errno()
+            raise OSError(err, os.strerror(err))
+        return
+    raise OSError(errno.ENOSYS, "atomic directory exchange unsupported on this platform")
+
+with open(lock_path, "w", encoding="utf-8") as lock_fh:
+    fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+    existed = verify_existing()
+    if not existed:
+        if os.environ.get("KELIN_INSTALL_SIMULATE_SWAP_FAIL") == "1":
+            raise OSError(errno.EIO, "simulated swap failure")
+        os.rename(stage, dest)
+    else:
+        atomic_exchange(stage, dest)
+        shutil.rmtree(stage, ignore_errors=True)
 PY
 
-  if [[ -e "$DEST" || -L "$DEST" ]]; then
-    verify_plugin_ownership "$PLUGINS_ROOT" "$DEST"
-    BACKUP="$(mktemp -d "$PLUGINS_ROOT/.kelin-backup.XXXXXX")"
-    rmdir "$BACKUP"
-    mv "$DEST" "$BACKUP"
-  fi
-  mv "$STAGE" "$DEST"
-  STAGE=""
-  if [[ -n "$BACKUP" ]]; then
-    rm -rf "$BACKUP"
-    BACKUP=""
-  fi
-  rmdir "$LOCK_DIR" 2>/dev/null || true
   trap - EXIT
   echo "已安装 Antigravity 原生插件到: ${DEST}"
   echo "可运行检查：agy plugin validate \"${DEST}\" --strict && agy plugin list"
@@ -241,12 +309,17 @@ case "$HOST:$SCOPE" in
 esac
 
 if [[ $UNINSTALL -eq 1 ]]; then
-  if uninstall_skills_dir "$DEST"; then
+  rc=0
+  uninstall_skills_dir "$DEST" || rc=$?
+  if [[ $rc -eq 0 ]]; then
     echo "卸载完成。"
-  else
+    exit 0
+  elif [[ $rc -eq 3 ]]; then
     echo "未找到安装清单 ${DEST}/${MANIFEST_NAME}，本安装器没装过东西，不动。"
+    exit 0
+  else
+    exit "$rc"
   fi
-  exit 0
 fi
 
 [[ -d "$SRC" ]] || { echo "找不到 ${SRC}（要在 kelin-stack 仓库根运行）"; exit 2; }

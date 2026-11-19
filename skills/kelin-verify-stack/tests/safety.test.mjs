@@ -113,6 +113,9 @@ test('deny always takes precedence over an earlier ask in compound commands', ()
   assert.equal(decide('rm -rf src/build-output && rm -rf /').decision, 'deny');
   assert.equal(decide('git reset --hard && chmod -R 777 /').decision, 'deny');
   assert.equal(decide('rm -rf src/build-output && git push --force origin main').decision, 'deny');
+  assert.equal(decide('echo ok\nrm -rf /').decision, 'deny');
+  assert.equal(decide('printf ok\ngit push --force origin main').decision, 'deny');
+  assert.equal(decide('echo ok\ngit reset --hard\nchmod -R 777 /').decision, 'deny');
 });
 
 const runAgyHook = (payload, env = {}) => {
@@ -236,4 +239,42 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
     { KELIN_SAFETY: 'relaxed' },
   );
   assert.equal(JSON.parse(askPlusFreezeRelaxed.stdout).decision, 'deny');
+
+  // Tight redirect, quoted path with spaces, dynamic redirect, and quoted non-redirect
+  const tightRedirect = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo hi>docs/nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(tightRedirect.stdout).decision, 'deny');
+
+  const quotedSpaces = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo hi > "docs/my file.md"' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(quotedSpaces.stdout).decision, 'deny');
+
+  const dynamicRedirect = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo hi > $OUT' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(dynamicRedirect.stdout).decision, 'deny');
+
+  const quotedLiteral = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo "hi > docs/nope.md"' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.deepEqual(JSON.parse(quotedLiteral.stdout), { decision: 'ask' });
+
+  // Event cwd is a subdirectory under workspacePaths root where .kelin/freeze.json lives
+  const subCwdWrite = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: path.join(dir, 'docs'), workspacePaths: [dir], toolCall: { name: 'write_file', args: { Path: 'sub.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(subCwdWrite.stdout).decision, 'deny');
+
+  const subCwdRedirect = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: path.join(dir, 'docs'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo x > sub.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(subCwdRedirect.stdout).decision, 'deny');
 });

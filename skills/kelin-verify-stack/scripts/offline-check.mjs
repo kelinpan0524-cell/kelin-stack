@@ -72,13 +72,12 @@ if (manifests.includes('.antigravity-plugin/plugin.json')) {
     }
   }
   const rulesFile = path.join(root, 'rules', 'AGENTS.md');
-  if (existsSync(path.join(root, 'rules'))) {
-    if (!existsSync(rulesFile)) fail('rules/AGENTS.md: missing');
-    else {
-      const body = (await readFile(rulesFile, 'utf8')).trim();
-      if (!body) fail('rules/AGENTS.md: empty');
-      if (body.startsWith('---')) fail('rules/AGENTS.md: must not contain frontmatter');
-    }
+  if (!existsSync(rulesFile)) {
+    fail('rules/AGENTS.md: required for Antigravity native plugin');
+  } else {
+    const body = (await readFile(rulesFile, 'utf8')).trim();
+    if (!body) fail('rules/AGENTS.md: empty');
+    if (body.startsWith('---')) fail('rules/AGENTS.md: must not contain frontmatter');
   }
 }
 
