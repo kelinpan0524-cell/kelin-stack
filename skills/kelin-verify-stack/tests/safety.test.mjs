@@ -117,6 +117,7 @@ test('deny always takes precedence over an earlier ask in compound commands', ()
   assert.equal(decide('printf ok\ngit push --force origin main').decision, 'deny');
   assert.equal(decide('echo ok\ngit reset --hard\nchmod -R 777 /').decision, 'deny');
   assert.equal(decide('cat <<< hi\nrm -rf /').decision, 'deny');
+  assert.equal(decide('# cat <<EOF\nrm -rf /').decision, 'deny');
 });
 
 const runAgyHook = (payload, env = {}) => {
@@ -352,4 +353,32 @@ test('antigravity PreToolUse enforces edit freeze on write_file, edit_file and r
     { KELIN_SAFETY: 'strict' },
   );
   assert.equal(JSON.parse(clobberRedirect.stdout).decision, 'deny');
+
+  // Shell comment containing << must not swallow subsequent lines
+  const commentHeredoc = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: dir, workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo ok # <<EOF\necho hi > docs/nope.md' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(commentHeredoc.stdout).decision, 'deny');
+
+  // cd in pipeline, conditional branch, or command substitution never falsely moves parent shell into allowed root
+  for (const cmd of [
+    'cd ../src | cat; echo x > nope.md',
+    'false && cd ../src; echo x > nope.md',
+    'true || cd ../src; echo x > nope.md',
+    'echo $(cd ../src); echo x > nope.md',
+    'cd ../src; echo x > nope.md',
+  ]) {
+    const res = runAgyHook(
+      { hookEventName: 'PreToolUse', cwd: path.join(dir, 'docs'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: cmd } } },
+      { KELIN_SAFETY: 'strict' },
+    );
+    assert.equal(JSON.parse(res.stdout).decision, 'deny', `expected deny for: ${cmd}`);
+  }
+
+  const cmdSubCd = runAgyHook(
+    { hookEventName: 'PreToolUse', cwd: path.join(dir, 'src'), workspacePaths: [dir], toolCall: { name: 'run_command', args: { CommandLine: 'echo $(cd ../docs && echo x > nope.md)' } } },
+    { KELIN_SAFETY: 'strict' },
+  );
+  assert.equal(JSON.parse(cmdSubCd.stdout).decision, 'deny');
 });

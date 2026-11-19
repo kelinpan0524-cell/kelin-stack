@@ -88,6 +88,9 @@ const stripHeredocs = (text) => {
         out += ch;
         continue;
       }
+      if (ch === '#' && (i === 0 || isShellSep(line[i - 1]))) {
+        break;
+      }
       if (ch === '<' && line[i + 1] === '<' && line[i + 2] === '<') {
         out += '<<<';
         i += 2;
@@ -112,11 +115,19 @@ const stripHeredocs = (text) => {
   return kept.join('\n');
 };
 
-const splitSegments = (text) => {
-  const segments = [];
+const splitEntries = (text) => {
+  const entries = [];
   let cur = '';
+  let prevOp = '';
   let quote = '';
   const parenStack = [];
+  const flush = (nextOp) => {
+    if (cur.trim()) {
+      entries.push({ text: cur.trim(), prevOp, nextOp });
+      cur = '';
+    }
+    prevOp = nextOp;
+  };
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
     if (quote) {
@@ -147,7 +158,8 @@ const splitSegments = (text) => {
       }
       if (!cur.trim()) {
         parenStack.push('subshell');
-        segments.push('(');
+        entries.push({ text: '(', prevOp, nextOp: '(' });
+        prevOp = '(';
         cur = '';
         continue;
       }
@@ -158,9 +170,9 @@ const splitSegments = (text) => {
     if (ch === ')') {
       const kind = parenStack.pop();
       if (kind === 'subshell') {
-        if (cur.trim()) segments.push(cur.trim());
-        segments.push(')');
-        cur = '';
+        flush(')');
+        entries.push({ text: ')', prevOp: ')', nextOp: '' });
+        prevOp = ')';
         continue;
       }
       cur += ch;
@@ -174,16 +186,22 @@ const splitSegments = (text) => {
       cur += ch;
       continue;
     }
-    if (ch === ';' || ch === '&' || ch === '|' || ch === '\n' || ch === '\r') {
-      if (cur.trim()) segments.push(cur.trim());
-      cur = '';
+    if (!parenStack.includes('cmdsub') && ((ch === '&' && text[i + 1] === '&') || (ch === '|' && text[i + 1] === '|'))) {
+      flush(ch + ch);
+      i += 1;
+      continue;
+    }
+    if (!parenStack.includes('cmdsub') && (ch === ';' || ch === '&' || ch === '|' || ch === '\n' || ch === '\r')) {
+      flush(ch);
       continue;
     }
     cur += ch;
   }
-  if (cur.trim()) segments.push(cur.trim());
-  return segments;
+  flush('');
+  return entries;
 };
+
+const splitSegments = (text) => splitEntries(text).map((entry) => entry.text);
 
 const extractRedirectsFromSegment = (text) => {
   const targets = [];
@@ -303,20 +321,47 @@ export const resolveRedirectTargets = (command, initialDir, home = homedir()) =>
   const resolved = [];
   const dirStack = [];
   let curDir = initialDir || '';
-  for (const segment of splitSegments(cleaned)) {
+  let cdChain = true;
+  for (const entry of splitEntries(cleaned)) {
+    const segment = entry.text;
     if (segment === '(') {
-      dirStack.push(curDir);
+      dirStack.push({ curDir, cdChain });
+      cdChain = true;
       continue;
     }
     if (segment === ')') {
-      curDir = dirStack.length ? dirStack.pop() : null;
+      if (dirStack.length) {
+        const restored = dirStack.pop();
+        curDir = restored.curDir;
+        cdChain = false;
+      } else {
+        curDir = null;
+        cdChain = false;
+      }
       continue;
     }
     const rawTargets = extractRedirectsFromSegment(segment);
+    const hasEmbeddedDirCmd = /(?:\$\(|`).*\b(?:cd|pushd|popd)\b/.test(segment);
     for (const target of rawTargets) {
-      resolved.push(resolvePathFrom(curDir, target, home));
+      resolved.push(resolvePathFrom(hasEmbeddedDirCmd ? null : curDir, target, home));
     }
-    curDir = nextDirForSegment(segment, curDir, home);
+    const words = parseSegmentWords(segment);
+    let idx = 0;
+    if (words.length && !words[0].dynamic && words[0].value === 'builtin') idx = 1;
+    const cmd = idx < words.length && !words[idx].dynamic ? words[idx].value : '';
+    const isDirCmd = cmd === 'cd' || cmd === 'pushd' || cmd === 'popd';
+    if (isDirCmd) {
+      const guaranteedReach = cdChain && (entry.prevOp === '' || entry.prevOp === '(' || entry.prevOp === '&&');
+      const guaranteedSucceed = entry.nextOp === '&&';
+      if (guaranteedReach && guaranteedSucceed && cmd === 'cd') {
+        curDir = nextDirForSegment(segment, curDir, home);
+      } else {
+        curDir = null;
+        cdChain = false;
+      }
+    } else {
+      cdChain = false;
+    }
   }
   return resolved;
 };
