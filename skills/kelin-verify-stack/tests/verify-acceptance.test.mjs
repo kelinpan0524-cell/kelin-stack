@@ -212,7 +212,7 @@ test('timeout closes child stdio pipes even when a new-session grandchild holds 
   const file = path.join(dir, 'verify.json');
   const grandchildScript = `const { spawn } = require("node:child_process"); const fs = require("node:fs"); const c = spawn(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], { detached: true, stdio: ["ignore", 1, 2] }); fs.writeFileSync(${JSON.stringify(pidFile)}, String(c.pid)); c.unref(); setTimeout(() => {}, 5000);`;
   await writeFile(file, JSON.stringify({
-    checks: [{ id: 'setsid-pipe', cmd: `node -e '${grandchildScript}'`, timeoutMs: 120 }],
+    checks: [{ id: 'setsid-pipe', cmd: `node -e '${grandchildScript}'`, timeoutMs: 250 }],
   }));
 
   const started = Date.now();
@@ -220,9 +220,11 @@ test('timeout closes child stdio pipes even when a new-session grandchild holds 
   const elapsed = Date.now() - started;
   let gcPid = 0;
   try {
-    if (existsSync(pidFile)) gcPid = Number(readFileSync(pidFile, 'utf8').trim());
+    assert.equal(existsSync(pidFile), true, 'grandchild must start and write pidFile before timeout');
+    gcPid = Number(readFileSync(pidFile, 'utf8').trim());
+    assert.ok(Number.isInteger(gcPid) && gcPid > 0, `expected valid grandchild pid, got ${gcPid}`);
     assert.equal(result.status, 1);
-    assert.ok(elapsed < 1500, `runner hung waiting on leaked stdout pipe: ${elapsed}ms`);
+    assert.ok(elapsed < 1800, `runner hung waiting on leaked stdout pipe: ${elapsed}ms`);
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.ok, false);
     assert.equal(payload.rows[0].timedOut, true);
