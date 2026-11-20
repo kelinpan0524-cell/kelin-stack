@@ -53,6 +53,8 @@ test('mode walks every phase and enforces artifacts', async () => {
 
   await artifact(root, 'refine.md');
   assert.equal(run(['advance'], root).code, 1, 'refine must rerun acceptance before ship');
+  await artifact(root, 'acceptance.json', '{"ok": false}\n');
+  assert.equal(run(['advance'], root).code, 1, 'refine must reject ok:false acceptance');
   await artifact(root, 'acceptance.json', '{"ok": true}\n');
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "ship"/);

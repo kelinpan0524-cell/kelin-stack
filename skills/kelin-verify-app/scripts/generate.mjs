@@ -1,22 +1,68 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { scanApp } from './scan-app.mjs';
 
+const USAGE = `Usage: node generate.mjs [--root <dir>] [--name <app>] [--out <dir>] [--write] [--force]
+
+Generate a project-local verify-<app> skill (preview by default; pass --write to save).
+
+Options:
+  --root <dir>   Project root to scan (default: cwd)
+  --name <app>   Override detected app name
+  --out <dir>    Output skills directory (default: <root>/.zcode/skills)
+  --write        Write generated files to disk
+  --force        Overwrite existing files (use only for deliberate regeneration)
+  -h, --help     Show this help message and exit
+
+Examples:
+  node generate.mjs --root .
+  node generate.mjs --root . --out .agents/skills --write`;
+
 const args = process.argv.slice(2);
-const option = (name, fallback = '') => {
-  const index = args.indexOf(name);
-  return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
-};
+if (args.includes('-h') || args.includes('--help')) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
+const VALUE_FLAGS = new Set(['--root', '--name', '--out']);
+const BOOL_FLAGS = new Set(['--write', '--force']);
+const options = new Map();
+for (let i = 0; i < args.length; i += 1) {
+  const arg = args[i];
+  if (VALUE_FLAGS.has(arg)) {
+    if (options.has(arg)) {
+      console.error(`Duplicate option: ${arg}\n\n${USAGE}`);
+      process.exit(2);
+    }
+    const value = args[i + 1];
+    if (!value || value.startsWith('-')) {
+      console.error(`${arg} requires a value\n\n${USAGE}`);
+      process.exit(2);
+    }
+    options.set(arg, value);
+    i += 1;
+  } else if (BOOL_FLAGS.has(arg)) {
+    options.set(arg, true);
+  } else {
+    console.error(`Unknown argument: ${arg}\n\n${USAGE}`);
+    process.exit(2);
+  }
+}
+const option = (name, fallback = '') => options.get(name) || fallback;
 
 const root = path.resolve(option('--root', process.cwd()));
+if (!existsSync(root) || !statSync(root).isDirectory()) {
+  console.error(`--root must be an existing directory: ${root}`);
+  process.exit(2);
+}
 const scan = await scanApp(root);
 const appName = option('--name', scan.name);
 const slug = appName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
 const outBase = path.resolve(option('--out', path.join(root, '.zcode', 'skills')));
 const skillDir = path.join(outBase, `verify-${slug}`);
-const write = args.includes('--write');
-const force = args.includes('--force');
+const write = Boolean(options.get('--write'));
+const force = Boolean(options.get('--force'));
 
 const featureSlug = (name, index) => `${String(index + 1).padStart(2, '0')}-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'feature'}`;
 
@@ -73,6 +119,7 @@ description: 项目本地验证 skill：启动、体检、驱动、留证、清�
 
 - 一次只开一个实例；24GB 机器不并行跑构建和浏览器；
 - 用户路径失败就报失败，不改弱旅程来通过；
+- 旅程失败后先重跑体检或重置状态，记清尝试入口与缺失前置条件，再决定是否继续；
 - 证据标准写在功能文件里，模型自述不算；
 - 生成后必须真跑一遍：启动、体检、驱动一个功能、留证、清理，再确认证据还在。
 

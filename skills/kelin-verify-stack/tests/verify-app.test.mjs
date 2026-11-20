@@ -9,7 +9,7 @@ import test from 'node:test';
 const scan = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify-app', 'scripts', 'scan-app.mjs');
 const generate = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify-app', 'scripts', 'generate.mjs');
 
-const run = (script, args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' });
+const run = (script, args, cwd) => spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
 
 const project = async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-app-'));
@@ -58,4 +58,32 @@ test('generate previews without writing, then writes the five sections and featu
 
   const forced = run(generate, ['--root', dir, '--write', '--force']);
   assert.equal(forced.status, 0, forced.stderr);
+});
+
+test('generate validates flags, rejects file --root, and --help creates no files in cwd', async () => {
+  const dir = await project();
+  const result = run(generate, ['--help'], dir);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage:/);
+  assert.match(result.stdout, /--write/);
+  assert.equal(existsSync(path.join(dir, '.zcode')), false);
+
+  const badFlag = run(generate, ['--root', dir, '--bogus'], dir);
+  assert.equal(badFlag.status, 2);
+  assert.match(badFlag.stderr, /--bogus/);
+  assert.equal(existsSync(path.join(dir, '.zcode')), false);
+
+  const missingVal = run(generate, ['--root', '--write'], dir);
+  assert.equal(missingVal.status, 2);
+  assert.match(missingVal.stderr, /requires a value/);
+
+  const dupOut = run(generate, ['--root', dir, '--out', path.join(dir, 'a'), '--out', path.join(dir, 'b'), '--write'], dir);
+  assert.equal(dupOut.status, 2);
+  assert.match(dupOut.stderr, /Duplicate option: --out/);
+  assert.equal(existsSync(path.join(dir, 'a')), false);
+  assert.equal(existsSync(path.join(dir, 'b')), false);
+
+  const fileRoot = run(generate, ['--root', path.join(dir, 'package.json')], dir);
+  assert.equal(fileRoot.status, 2);
+  assert.match(fileRoot.stderr, /existing directory/);
 });

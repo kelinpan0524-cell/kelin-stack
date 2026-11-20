@@ -42,21 +42,26 @@ const load = () => {
   return JSON.parse(readFileSync(stateFile, 'utf8'));
 };
 
+const checkAcceptance = (acceptanceFile, missing) => {
+  try {
+    if (JSON.parse(readFileSync(acceptanceFile, 'utf8')).ok !== true) missing.push('acceptance.json (ok must be true)');
+  } catch {
+    missing.push('acceptance.json (unreadable)');
+  }
+};
+
 const inspect = (state) => {
   const files = required(state.phase, state.mode).map((file) => ({ file, exists: existsSync(path.join(dir, file)) }));
   const missing = files.filter((entry) => !entry.exists).map((entry) => entry.file);
+  const acceptanceFile = path.join(dir, 'acceptance.json');
   if (state.phase === 'verify' && !missing.length) {
-    try {
-      if (JSON.parse(readFileSync(path.join(dir, 'acceptance.json'), 'utf8')).ok !== true) missing.push('acceptance.json (ok must be true)');
-    } catch {
-      missing.push('acceptance.json (unreadable)');
-    }
+    checkAcceptance(acceptanceFile, missing);
   }
   if (state.phase === 'refine') {
     const refineFile = path.join(dir, 'refine.md');
-    const acceptanceFile = path.join(dir, 'acceptance.json');
     if (!existsSync(acceptanceFile)) missing.push('acceptance.json (missing)');
     else if (existsSync(refineFile) && statSync(acceptanceFile).mtimeMs < statSync(refineFile).mtimeMs) missing.push('acceptance.json (rerun after refine)');
+    else checkAcceptance(acceptanceFile, missing);
   }
   return { files, missing, ready: missing.length === 0 };
 };
