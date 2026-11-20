@@ -2,14 +2,15 @@
   "skills": "skills",
   "agents": "agents",
   "manifests": [
+    ".antigravity-plugin/plugin.json",
     ".claude-plugin/plugin.json",
     ".cursor-plugin/plugin.json",
     ".zcode-plugin/plugin.json"
   ],
   "assets": ["assets/**"],
-  "hooks": ["hooks/**"],
+  "hooks": ["hooks/**", "hooks.json"],
   "setup": ["skills/setup-pstack/**"],
-  "tools": ["skills/*/scripts/**"],
+  "tools": ["skills/*/scripts/**", "rules/**", "install.sh"],
   "nonRuntime": [
     "docs/**",
     "automations/**",

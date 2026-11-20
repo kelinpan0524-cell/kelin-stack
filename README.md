@@ -1,8 +1,8 @@
 # Kelin Stack
 
-**pstack 的 ZCode 版**：把“怎么把活干扎实”从口号变成一套能执行、能检查的流程。
+**跨宿主工作流插件（ZCode + Antigravity 原生插件，Codex 兼容）**：把“怎么把活干扎实”从口号变成一套能执行、能检查的流程。
 
-pstack 是为 Claude Code / Codex 写的。ZCode 的 skill、斜杠命令和插件模型都不一样，直接搬会水土不服：命令会撞名、依赖 bun、无头会话的接法也不同。所以这里是重写，不是 fork。
+pstack 是为 Claude Code / Codex 写的，直接搬到 ZCode 和 Antigravity 会水土不服：命令撞名、钩子协议不同、依赖 bun、无头会话接法也不同。所以这里是重写，不是 fork。
 
 ## 一个命令跑完：`/kelin-mode`
 
@@ -74,7 +74,28 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --live --outpu
 
 ## 安装
 
-三个宿主都能装，同一份 `skills/` 内容源：
+三个宿主共用同一份 `skills/`、`agents/` 与钩子脚本：
+
+**Antigravity（原生插件，推荐）**：
+
+```sh
+git clone https://github.com/kelinpan0524-cell/kelin-stack.git && cd kelin-stack
+
+# 用户级（默认装完整原生插件到 ~/.gemini/config/plugins/kelin-stack，自动排除 .git 与 ZCode 专用 hooks/hooks.json）
+./install.sh --host antigravity --scope user
+agy plugin validate ~/.gemini/config/plugins/kelin-stack --strict
+
+# 只装 skill 子集到全局 ~/.gemini/config/skills/（省上下文）
+./install.sh --host antigravity --scope user --subset "kelin-mode,kelin-plan,kelin-verify,kelin-review"
+
+# 项目级（装进目标项目 .agents/skills/）
+./install.sh --host antigravity --scope project --path /path/to/your-project
+
+# 卸载（只删本安装器创建的插件目录或清单条目）
+./install.sh --host antigravity --scope user --uninstall
+```
+
+也可用 `agy plugin install ./kelin-stack` 直接安装，注意它会把 `.git` 和 ZCode 的 `hooks/hooks.json` 一并拷入插件目录。
 
 **ZCode（插件市场，推荐）**：
 
@@ -83,25 +104,22 @@ zcode plugins marketplace add kelinpan0524-cell/kelin-stack
 zcode plugins install kelin-stack@kelin-stack-market
 ```
 
-**Codex / Antigravity（用安装脚本）**：
+**Codex（用安装脚本）**：
 
 ```sh
 git clone https://github.com/kelinpan0524-cell/kelin-stack.git && cd kelin-stack
 
-# 项目级（两宿主都认 .agents/skills/，推荐在目标项目里跑）
+# 项目级（装进 .agents/skills/）
 ./install.sh --host codex --scope project --path /path/to/your-project
-./install.sh --host antigravity --scope project --path /path/to/your-project
 
-# 用户级（全局）
+# 用户级（全局 ~/.agents/skills/）
 ./install.sh --host codex --scope user
-./install.sh --host antigravity --scope user
 
 # 只装一部分（省上下文注入）
 ./install.sh --host codex --scope user --subset "kelin-mode,kelin-plan,kelin-verify,kelin-review"
 
 # 可选：把 kelin 路由块写进全局 AGENTS.md（进入 kelin-mode 的入口）
 node skills/kelin-agents/scripts/ensure-workflow.mjs --global codex --dry-run
-node skills/kelin-agents/scripts/ensure-workflow.mjs --global antigravity --dry-run
 
 # 卸载（只删本安装器装的 kelin-* 条目）
 ./install.sh --host codex --scope user --uninstall
@@ -109,23 +127,23 @@ node skills/kelin-agents/scripts/ensure-workflow.mjs --global antigravity --dry-
 
 安装器幂等、写入前显示目标、不覆盖非 kelin 内容、`--uninstall` 只删清单记录的条目。各宿主的能力边界与实测结论见 [docs/support-matrix.md](docs/support-matrix.md)。
 
-本地开发时可用目录安装；注意它会把整个目录（含 `.git`）拷进插件缓存：
+ZCode 本地开发时可用目录安装；注意它会把整个目录（含 `.git`）拷进插件缓存：
 
 ```sh
 zcode plugins marketplace add ./kelin-stack
 zcode plugins install kelin-stack@kelin-stack-market
 ```
 
-装完重启 ZCode，输入 `/kelin-plan` 就能看到。
+装完重启 ZCode（Antigravity 热加载，下轮生效），输入 `kelin-plan` 或 `/kelin-plan` 就能看到。
 
 ## 安装后怎么用（小白版）
 
-安装并重启 ZCode 后，每个新会话会自动注入 kelin-stack 的激活上下文，**你只需要记住一个命令：`/kelin-mode`**。
+在 ZCode 或 Antigravity 安装插件后，每个新会话会自动注入 kelin-stack 的激活上下文（Antigravity 还自带常驻规则 `rules/AGENTS.md`），**你只需要记住一个入口：`kelin-mode`**。
 
 1. 直接说你要做什么；非平凡任务（跨 2 个文件、多步、产品/交付/审计）会自动进入 `kelin-mode`，按阶段调用对应 skill，不需要你点名。
-2. 想手动开始，输入 `/kelin-mode`；它会读 `.kelin/state.json` 续跑，没有就初始化。
-3. 项目里有 `.zcode/skills/verify-*` 或 `.agents/skills/verify-*` 时，验证阶段会自动发现并使用；没有就用 `/kelin-verify-app` 生成。
-4. 危险命令和安全边界由 `PreToolUse` 钩子自动拦截；编辑冻结用 `kelin-safety` 开启。
+2. 想手动开始，输入 `/kelin-mode` 或直接说用 `kelin-mode`；它会读 `.kelin/state.json` 续跑，没有就初始化。
+3. 项目里有 `.zcode/skills/verify-*` 或 `.agents/skills/verify-*` 时，验证阶段会自动发现并使用；没有就用 `kelin-verify-app` 生成。
+4. 危险命令和安全边界由 `PreToolUse` 钩子按 `KELIN_SAFETY` 三档拦截（默认关闭，开启后生效）；编辑冻结用 `kelin-safety` 开启。
 5. 不需要每次会话重复解释 kelin-stack；SessionStart 只注入一次简短上下文，不阻塞会话。
 
 ## 给 WorkBuddy 用
@@ -133,16 +151,16 @@ zcode plugins install kelin-stack@kelin-stack-market
 WorkBuddy 支持标准 `SKILL.md`。分三种情况：
 
 - **纯指令类 skill**（plan、review、principles 等）：把 `skills/<名字>/` 整个目录拷到 `~/.workbuddy/skills/`（全局）或项目的 `.workbuddy/skills/` 即可；
-- **带脚本的 skill**（map、verify、agents、guard、ci 等）：脚本是 Node，无外部依赖；但命令里的 `skills/kelin-*/scripts/...` 是相对仓库根目录的，建议保留仓库 checkout，在仓库根目录执行；
-- **插件安装**：WorkBuddy 支持插件 ZIP / 自定义 marketplace，但清单格式和 ZCode 不同；本仓库目前只有 `.zcode-plugin` / `.claude-plugin` / `.cursor-plugin` 三份清单。需要的话可以补一份 WorkBuddy 清单，告诉我它的 manifest 路径和字段即可。
+- **带脚本的 skill**（map、verify、agents、guard、ci 等）：脚本是 Node，无外部依赖；脚本调用使用 `$SKILL_DIR` 占位符自定位；
+- **插件安装**：WorkBuddy 支持插件 ZIP / 自定义 marketplace，但清单格式不同；本仓库目前有 `.zcode-plugin` / `.claude-plugin` / `.cursor-plugin` / `.antigravity-plugin` 四份清单。需要的话可以补一份 WorkBuddy 清单，告诉我它的 manifest 路径和字段即可。
 
-注意：`kelin-verify-stack` 的 live 检查依赖 ZCode 的 `zcode` CLI，WorkBuddy 里只能跑静态检查；`/kelin-*` 斜杠命令名也可能随运行时不同。
+注意：`kelin-verify-stack`（含 `verify-stack run --all`）依赖本机 ZCode CLI；无 ZCode 环境可跑通用的 `offline-check.mjs` 与 `node --test`，Antigravity 环境另跑 `agy plugin validate`；斜杠命令名也可能随运行时不同。
 
 ## 开发
 
 ```sh
 node skills/kelin-health/scripts/health.mjs --root .
-node --test skills/kelin-verify-stack/tests/*.test.mjs
+node --test $(find skills -name '*.test.mjs' | sort | tr '\n' ' ')
 node skills/kelin-verify-stack/scripts/offline-check.mjs
 node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
 node skills/kelin-guard/scripts/guard-check.mjs guards.json
@@ -153,9 +171,10 @@ node skills/kelin-evals/scripts/drift-check.mjs --root .
 node skills/kelin-docs/scripts/gen-docs.mjs --check
 node skills/kelin-docs/scripts/doc-coverage.mjs --root . --check
 node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
+agy plugin validate .
 ```
 
-CI 每次 push 跑八类：单元测试、离线结构检查、AGENTS.md 预算、guards 完整性、文档一致性、skill 结构与触发检查、生成文档 drift、策略文件校验（不需要 ZCode 登录，不消耗模型）。
+CI 每次 push 跑九项：全量单元测试、离线结构检查、引用漂移检查、AGENTS.md 预算、guards 完整性、文档一致性、skill 结构与触发检查、生成文档 drift、策略文件校验（不需要宿主登录，不消耗模型）。
 
 改 skill 之后，按改动路径验证：
 
@@ -189,16 +208,24 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 
 ```
 kelin-stack/
-├── skills/            # 40 个 skill，完整索引见 docs/skills.md
-├── agents/            # 3 个子代理：审查、验证、worker
-├── evals/             # 触发 eval + fixture 行为 eval
-├── install.sh         # codex / antigravity 跨宿主安装器
-├── agents-digest/     # 一页速查，给不装插件的 agent
-├── docs/              # 生成的 skill 索引 + 跨宿主支持矩阵
-├── kelin-policy.json  # 自动化边界与预算
-├── guards.json        # bug → 防再犯记录
-├── neat.json          # 文档一致性配置
-└── .github/           # CI 门禁
+├── .antigravity-plugin/ # Antigravity 原生插件清单
+├── .zcode-plugin/       # ZCode 插件清单
+├── .claude-plugin/      # Claude Code 插件与市场清单
+├── .cursor-plugin/      # Cursor 市场清单（marketplace.json）
+├── hooks.json           # Antigravity 根目录钩子声明（SessionStart + PreToolUse）
+├── hooks/               # 双宿主钩子脚本 + ZCode hooks/hooks.json
+├── rules/               # Antigravity 常驻规则（AGENTS.md）
+├── assets/              # 插件图标（logo.svg）
+├── skills/              # 40 个 skill，完整索引见 docs/skills.md
+├── agents/              # 3 个子代理：审查、验证、worker
+├── evals/               # 触发 eval + fixture 行为 eval
+├── install.sh           # antigravity 原生插件 / codex 跨宿主安装器
+├── agents-digest/       # 一页速查，给不装插件的 agent
+├── docs/                # 生成的 skill 索引 + 跨宿主支持矩阵
+├── kelin-policy.json    # 自动化边界与预算
+├── guards.json          # bug → 防再犯记录
+├── neat.json            # 文档一致性配置
+└── .github/             # CI 门禁
 ```
 
 ## 许可

@@ -24,7 +24,7 @@ const git = (gitArgs, allowFail = false) => {
   }
 };
 
-const manifests = ['.zcode-plugin/plugin.json', '.claude-plugin/plugin.json', 'package.json']
+const manifests = ['.antigravity-plugin/plugin.json', '.zcode-plugin/plugin.json', '.claude-plugin/plugin.json', 'package.json']
   .map((rel) => path.join(root, rel))
   .filter((file) => existsSync(file));
 

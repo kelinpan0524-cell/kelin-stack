@@ -57,7 +57,7 @@ const docs = allFiles.filter((rel) => config.docs.some((pattern) => match(patter
 const findings = [];
 const add = (code, severity, detail, extra = {}) => findings.push({ code, severity, detail, ...extra });
 
-const manifestCandidates = ['.zcode-plugin/plugin.json', '.claude-plugin/plugin.json', 'package.json'];
+const manifestCandidates = ['.antigravity-plugin/plugin.json', '.zcode-plugin/plugin.json', '.claude-plugin/plugin.json', 'package.json'];
 let manifestVersion = '';
 for (const rel of manifestCandidates) {
   const file = path.join(root, rel);

@@ -5,7 +5,7 @@
     "ask": ["deploy", "delete-data", "force-push", "publish-release", "send-message", "spend", "change-permissions"]
   },
   "paths": {
-    "writable": ["skills/", "agents/", "evals/", "docs/", "agents-digest/", "README.md", "AGENTS.md", "NOTICE"],
+    "writable": [".antigravity-plugin/", ".zcode-plugin/", ".claude-plugin/", "skills/", "agents/", "rules/", "hooks/", "hooks.json", "assets/", "evals/", "docs/", "agents-digest/", "install.sh", "README.md", "AGENTS.md", "CHANGELOG.md", "NOTICE"],
     "forbidden": [".env", "secrets/", "*.pem"]
   },
   "checks": {

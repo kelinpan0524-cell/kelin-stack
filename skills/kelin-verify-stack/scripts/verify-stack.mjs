@@ -77,7 +77,12 @@ async function discoverPlugin(zcodeRef) {
   if (process.env.VERIFY_STACK_PLUGIN) return path.resolve(process.env.VERIFY_STACK_PLUGIN);
   if (process.env.VERIFY_PSTACK_PLUGIN) return path.resolve(process.env.VERIFY_PSTACK_PLUGIN);
   const self = path.resolve(import.meta.dirname, '..', '..', '..');
-  if (existsSync(path.join(self, '.zcode-plugin/plugin.json')) || existsSync(path.join(self, '.claude-plugin/plugin.json')) || existsSync(path.join(self, '.cursor-plugin/plugin.json'))) {
+  if (
+    existsSync(path.join(self, '.antigravity-plugin/plugin.json')) ||
+    existsSync(path.join(self, '.zcode-plugin/plugin.json')) ||
+    existsSync(path.join(self, '.claude-plugin/plugin.json')) ||
+    existsSync(path.join(self, '.cursor-plugin/plugin.json'))
+  ) {
     return self;
   }
   const listed = await zcode(zcodeRef, ['plugins', 'list', '--json'], { timeoutMs: 120_000 });
@@ -113,7 +118,7 @@ async function discoverPlugin(zcodeRef) {
 }
 
 async function readPluginMeta(pluginRoot) {
-  for (const rel of ['.claude-plugin/plugin.json', '.cursor-plugin/plugin.json', '.zcode-plugin/plugin.json']) {
+  for (const rel of ['.antigravity-plugin/plugin.json', '.claude-plugin/plugin.json', '.cursor-plugin/plugin.json', '.zcode-plugin/plugin.json']) {
     const file = path.join(pluginRoot, rel);
     if (!existsSync(file)) continue;
     try {

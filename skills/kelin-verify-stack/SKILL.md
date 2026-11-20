@@ -58,11 +58,11 @@ node "$SKILL_DIR"/scripts/verify-stack.mjs run --all --live --output "$OUT/live"
 | 改动路径 | 触达的功能 |
 | --- | --- |
 | `skills/<名字>/**` | `zcode:skill-invocation:<名字>` |
-| `skills/<名字>/scripts/**` | 上面这条 + `zcode:tools` |
-| `.zcode-plugin/**`、`.claude-plugin/**`、`.cursor-plugin/**` | `zcode:manifest`、`zcode:catalog` |
+| `skills/<名字>/scripts/**`、`rules/**`、`install.sh` | 对应技能（如有）+ `zcode:tools` |
+| `.antigravity-plugin/**`、`.zcode-plugin/**`、`.claude-plugin/**`、`.cursor-plugin/**` | `zcode:manifest`、`zcode:catalog` |
 | `agents/**` | `zcode:agents` |
 | `assets/**` | `zcode:assets` |
-| `hooks/**` | `zcode:hooks` |
+| `hooks/**`、`hooks.json` | `zcode:hooks` |
 | `skills/setup-*/**` | `zcode:setup`（只做静态检查） |
 | `docs/**`、`automations/**`、`README.md`、`LICENSE` | 非运行时，不开会话 |
 | 其它任何路径 | 直接报错，绝不猜 |

@@ -215,7 +215,7 @@ async function checkTools(ctx) {
     const usage = await run(process.execPath, [kelinPlan], { timeoutMs: 30_000 });
     assertions.push(assertion('kelin-plan:usage', usage.code === 2 && /Usage/.test(usage.stderr), `exit ${usage.code}`));
     const good = path.join(ctx.tempDir, 'good-plan.md');
-    await writeFile(good, '# 目标\n做一件事\n\n# 验收标准\n- [ ] `npm test` 退出 0\n\n# 方案与取舍\n推荐 A\n\n# 任务拆解\n- [ ] 单元 1：实现 / 验证：`npm test`\n\n# 风险与回滚\n回滚：revert\n');
+    await writeFile(good, '# 目标\n做一件事\n\n# 验收标准\n- [ ] `npm test` 退出 0\n\n# 方案与取舍\n推荐 A\n\n# 任务拆解\n- [ ] 单元 1：实现 / 验证：`npm test`\n\n# 风险与回滚\n回滚：revert\n\n# 本期不做\n- 不改无关模块\n');
     const accepted = await run(process.execPath, [kelinPlan, good], { timeoutMs: 30_000 });
     assertions.push(assertion('kelin-plan:accepts-complete', accepted.code === 0, `exit ${accepted.code}`));
     const bad = path.join(ctx.tempDir, 'bad-plan.md');
@@ -563,6 +563,19 @@ async function checkTools(ctx) {
     assertions.push(assertion('kelin-policy:accepts', goodPolicy.code === 0, `exit ${goodPolicy.code}`));
     assertions.push(assertion('kelin-policy:rejects', badPolicy.code === 1 && badPolicy.stdout.includes('release-bump') && badPolicy.stdout.includes('budget-agents'), `exit ${badPolicy.code}`));
     rows.push({ tool: 'kelin-mode/scripts/policy-check.mjs', goodExit: goodPolicy.code, badExit: badPolicy.code });
+  }
+  const hasAgyManifest = existsSync(path.join(ctx.pluginRoot, '.antigravity-plugin/plugin.json'));
+  const rulesAgents = path.join(ctx.pluginRoot, 'rules/AGENTS.md');
+  if (hasAgyManifest || existsSync(rulesAgents)) {
+    const body = existsSync(rulesAgents) ? (await readFile(rulesAgents, 'utf8')).trim() : '';
+    assertions.push(assertion('agy-rules:non-empty', body.length > 0 && !body.startsWith('---'), body ? `${body.length} chars` : 'missing'));
+    rows.push({ tool: 'rules/AGENTS.md', bytes: Buffer.byteLength(body) });
+  }
+  const installScript = path.join(ctx.pluginRoot, 'install.sh');
+  if (existsSync(installScript)) {
+    const dry = await run('bash', [installScript, '--host', 'antigravity', '--scope', 'user', '--dry-run'], { timeoutMs: 30_000 });
+    assertions.push(assertion('install-sh:agy-dry-run', dry.code === 0 && dry.stdout.includes('kelin-stack'), `exit ${dry.code}`));
+    rows.push({ tool: 'install.sh', dryRunExit: dry.code });
   }
   if (!rows.length) {
     return { feature: `${ctx.harness}:tools`, kind: 'static', ok: true, applicable: false, assertions: [assertion('tools-shipped', true, 'no known shipped tool found')], details: {} };
