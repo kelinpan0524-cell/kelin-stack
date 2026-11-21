@@ -91,6 +91,38 @@ test('completeEvidence requires one passing record with artifacts', () => {
   assert.throws(() => completeEvidence({ ...receipt, observations: [{ ...receipt.observations[0], artifacts: [] }] }), /No artifacts/);
 });
 
+test('completeEvidence enforces 1-to-1 per (feature, caseId) when expectedCases is set', () => {
+  const art = [{ path: 'sessions/s1/a.json', sha256: 'a'.repeat(64) }];
+  const tx = { transcript: 'sessions/s1/rollout.jsonl', transcriptHash: 'b'.repeat(64) };
+  const receipt = {
+    features: ['zcode:skill-invocation:kelin-plan'],
+    expectedCases: [
+      { feature: 'zcode:skill-invocation:kelin-plan', caseId: 'c1' },
+      { feature: 'zcode:skill-invocation:kelin-plan', caseId: 'c2' },
+    ],
+    observations: [
+      { feature: 'zcode:skill-invocation:kelin-plan', kind: 'live', case: 'c1', ok: true, assertions: [{ id: 'a1', ok: true }], artifacts: art, ...tx },
+      { feature: 'zcode:skill-invocation:kelin-plan', kind: 'live', case: 'c2', ok: true, assertions: [{ id: 'a2', ok: true }], artifacts: art, ...tx },
+    ],
+  };
+  assert.doesNotThrow(() => completeEvidence(receipt));
+  assert.throws(() => completeEvidence({ ...receipt, observations: [receipt.observations[0]] }), /Missing or duplicate/);
+  assert.throws(
+    () => completeEvidence({
+      ...receipt,
+      expectedCases: [...receipt.expectedCases, { feature: 'zcode:skill-invocation:kelin-plan', caseId: 'c1' }],
+    }),
+    /Duplicate expectedCase/,
+  );
+  assert.throws(
+    () => completeEvidence({
+      ...receipt,
+      observations: [...receipt.observations, { ...receipt.observations[0], case: 'extra' }],
+    }),
+    /Unexpected observation/,
+  );
+});
+
 test('sanitizeText drops unsafe publishing values', () => {
   assert.equal(sanitizeText('ok text'), 'ok text');
   assert.equal(sanitizeText('bad `tick`'), '');
@@ -113,6 +145,30 @@ test('assertions check skill calls, files and responses', async () => {
     { toolCalls: [{ name: 'Skill', input: { skill: 'pstack:demo' } }], response: 'DONE', fixtureDir: dir, marker: 'VPS-ABC' },
   );
   assert.deepEqual(results.map((entry) => entry.ok), [true, true, true, true, true]);
+  assert.equal(results[0].value, 'pstack:demo');
+
+  const pluginStub = await mkdtemp(path.join(tmpdir(), 'vps-plugin-'));
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(path.join(pluginStub, 'skills', 'kelin-plan', 'scripts'), { recursive: true });
+  await writeFile(path.join(pluginStub, 'skills', 'kelin-plan', 'scripts', 'check-plan.mjs'), 'export function validatePlanMarkdown() { return { ok: true, planHash: "0123456789abcdef" }; }\n');
+  await writeFile(path.join(dir, 'plan.md'), '# ok\n');
+  const planRes = await evaluateAssertions([{ id: 'p', type: 'plan_valid', path: 'plan.md' }], {
+    toolCalls: [],
+    response: '',
+    fixtureDir: dir,
+    marker: '',
+    pluginRoot: pluginStub,
+  });
+  assert.equal(planRes[0].ok, true);
+
+  assert.throws(
+    () => completeEvidence({
+      features: ['zcode:manifest'],
+      observations: [{ feature: 'zcode:manifest', ok: false, assertions: [{ id: 'a', ok: true }], artifacts: [{ path: 'a.json', sha256: 'a'.repeat(64) }] }],
+      failure: '',
+    }),
+    /Observation failed/,
+  );
 });
 
 test('assertions fail on the wrong skill and missing files', async () => {

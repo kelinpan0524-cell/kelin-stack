@@ -1,11 +1,25 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const file = process.argv[2] || 'feature-map.json';
+const rawArgs = process.argv.slice(2);
+let file = 'feature-map.json';
+let explicitRoot = '';
+for (let i = 0; i < rawArgs.length; i += 1) {
+  if (rawArgs[i] === '--root' && rawArgs[i + 1]) {
+    explicitRoot = rawArgs[i + 1];
+    i += 1;
+  } else if (!rawArgs[i].startsWith('-')) {
+    file = rawArgs[i];
+  }
+}
 const configDir = path.dirname(path.resolve(file));
-let base = configDir;
+const anchor = explicitRoot
+  ? path.resolve(explicitRoot)
+  : (path.basename(configDir) === '.kelin' ? path.dirname(configDir) : configDir);
+let base = anchor;
+const isWithin = (parentReal, childReal) => childReal === parentReal || childReal.startsWith(`${parentReal}${path.sep}`);
 
 const glob = (pattern) => {
   if (!pattern.includes('*')) return (target) => target === pattern;
@@ -15,12 +29,15 @@ const glob = (pattern) => {
   return (target) => regex.test(target);
 };
 
-const walk = async (root, rel = '') => {
+const walk = async (root, rel = '', boundaryReal = '') => {
   const entries = await readdir(path.join(root, rel), { withFileTypes: true });
   const out = [];
   for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
     const next = rel ? `${rel}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) out.push(...(await walk(root, next)));
+    const full = path.join(root, next);
+    if (boundaryReal && !isWithin(boundaryReal, realpathSync(full))) continue;
+    if (entry.isDirectory()) out.push(...(await walk(root, next, boundaryReal)));
     else if (entry.isFile()) out.push(next);
   }
   return out;
@@ -35,11 +52,26 @@ try {
 }
 
 const problems = [];
-const roots = Array.isArray(spec.roots) ? spec.roots : [];
-const owners = Array.isArray(spec.owners) ? spec.owners : [];
-const nonRuntime = Array.isArray(spec.nonRuntime) ? spec.nonRuntime : [];
+const roots = Array.isArray(spec?.roots) ? spec.roots : [];
+const owners = Array.isArray(spec?.owners) ? spec.owners : [];
+const nonRuntime = Array.isArray(spec?.nonRuntime) ? spec.nonRuntime : [];
+const anchorReal = existsSync(anchor) ? realpathSync(anchor) : path.resolve(anchor);
 
-if (typeof spec.base === 'string' && spec.base) base = path.resolve(configDir, spec.base);
+if (typeof spec?.base === 'string' && spec.base) {
+  if (path.isAbsolute(spec.base)) {
+    problems.push(`unsafe base outside root: ${spec.base}`);
+  } else {
+    const configReal = existsSync(configDir) ? realpathSync(configDir) : path.resolve(configDir);
+    const baseAnchor = isWithin(anchorReal, configReal) ? configReal : anchorReal;
+    const candidate = path.resolve(baseAnchor, spec.base);
+    const candidateReal = existsSync(candidate) ? realpathSync(candidate) : candidate;
+    if (!isWithin(anchorReal, candidateReal)) {
+      problems.push(`unsafe base outside root: ${spec.base}`);
+    } else {
+      base = candidateReal;
+    }
+  }
+}
 if (!roots.length) problems.push('roots is empty');
 if (!owners.length) problems.push('owners is empty');
 
@@ -47,19 +79,26 @@ for (const root of roots) {
   if (typeof root !== 'string' || !root || root.startsWith('/') || root.includes('..')) problems.push(`unsafe root: ${root}`);
 }
 for (const entry of [...owners, ...nonRuntime.map((pattern) => ({ pattern }))]) {
-  if (typeof entry.pattern !== 'string' || !entry.pattern || entry.pattern.startsWith('/') || entry.pattern.includes('..')) {
-    problems.push(`unsafe pattern: ${entry.pattern}`);
+  if (typeof entry?.pattern !== 'string' || !entry.pattern || entry.pattern.startsWith('/') || entry.pattern.includes('..')) {
+    problems.push(`unsafe pattern: ${entry?.pattern}`);
   }
 }
 for (const owner of owners) {
-  if (!owner.feature) problems.push(`owner without feature: ${owner.pattern}`);
-  if (!owner.verify) problems.push(`owner without verify: ${owner.pattern}`);
+  if (!owner?.feature) problems.push(`owner without feature: ${owner?.pattern}`);
+  if (!owner?.verify) problems.push(`owner without verify: ${owner?.pattern}`);
 }
 
 const files = [];
+const baseReal = existsSync(base) ? realpathSync(base) : path.resolve(base);
 for (const root of roots) {
   try {
-    const found = await walk(path.join(base, root));
+    const targetDir = path.join(base, root);
+    const targetReal = realpathSync(targetDir);
+    if (!isWithin(baseReal, targetReal) || !isWithin(anchorReal, targetReal)) {
+      problems.push(`unsafe root escaping base: ${root}`);
+      continue;
+    }
+    const found = await walk(targetReal, '', targetReal);
     for (const rel of found) files.push(`${root}/${rel}`);
   } catch (error) {
     problems.push(`cannot walk ${root}: ${error.message}`);
@@ -68,8 +107,10 @@ for (const root of roots) {
 
 const unmapped = [];
 const ambiguous = [];
-const runtimeOwners = owners.map((owner) => ({ ...owner, match: glob(owner.pattern) }));
-const runtimeFree = nonRuntime.map((pattern) => glob(pattern));
+const validOwners = owners.filter((owner) => typeof owner?.pattern === 'string' && owner.pattern && !owner.pattern.startsWith('/') && !owner.pattern.includes('..'));
+const validNonRuntime = nonRuntime.filter((pattern) => typeof pattern === 'string' && pattern && !pattern.startsWith('/') && !pattern.includes('..'));
+const runtimeOwners = validOwners.map((owner) => ({ ...owner, match: glob(owner.pattern) }));
+const runtimeFree = validNonRuntime.map((pattern) => glob(pattern));
 
 for (const rel of files) {
   const hits = runtimeOwners.filter((owner) => owner.match(rel));

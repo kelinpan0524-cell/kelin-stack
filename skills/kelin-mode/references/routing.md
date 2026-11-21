@@ -18,14 +18,23 @@ SessionStart 会把这份路由注入会话。用户不需要点名 skill；按�
 
 ## 自动激活规则
 
-- 每个会话 SessionStart 注入版本、当前 mode/phase、本地 verify skill、冻结状态和安全钩子。
-- 有 `.kelin/state.json` 就续跑，不重新 interview；没有就在任务开始时 `init`。
-- 非平凡任务（跨 2 个文件、多步、产品/交付/审计）自动进入 kelin-mode；单文件小修直接做 + `kelin-verify` 快速档。
+- 每个会话 SessionStart 注入版本、当前 mode/phase、本阶段配套 skill（`activeSkills`）、项目接入状态、本地 verify skill、冻结状态和安全钩子。
+- 有 `.kelin/state.json` 且未到 `done` 就续跑；若上一轮已 `done`，再次 `init` 会自动归档到 `.kelin/history/`。
+- 说“kelin mode setup”或首次接入仓库时，先预览 `setup --root .`，确认后再 `--apply`（可选 `--with-verify-app` / `--with-precommit`）。
+- 说“kelin mode”或任意任务描述时，先跑 `route --task "<需求>" --root .` 自动判定模式、是否需要 `kelin-grill` 先问透、以及条件 companion（`kelin-product`/`kelin-ui`/`kelin-multirepo`/`kelin-benchmark`）。
 - 本地 `verify-*` skill 只在验证阶段执行；会话开始不自动起服务。
 - 不要每轮重复声明 kelin-stack 规则；按本表选 skill。
 
-## 资源约束
+## plan / refine / verify 决策规则
 
-- 最多 2 个子代理（1 写 1 读）；`budget.mjs` 说 1 就只用 1。
+- **何时 plan**：跨文件、跨模块、动数据/权限/对外接口、或同类任务曾返工；产品类先 `kelin-product` 再 `kelin-plan`。单文件可逆小改跳过。
+- **何时 refine**：`verify` 过后 diff > 100 行，或新增了抽象/依赖/死代码；紧急修复/纯配置/<20 行跳过。
+- **verify 三档**：快速（文案/单文件：1 条命令或截图）、标准（`acceptance.json` + 边界矩阵）、严格（钱/权限/迁移/对外接口：标准 + 差分/变异）。
+- **老仓库模式（`legacy`）**：先跑 `kelin-legacy` 建基线、功能地图、热点与特征测试，再按切片推进，**一次只动一个缝**，禁大爆炸重写与顺手升依赖。
+
+## 何时用 ZCode `/workflow` 与资源约束
+
+- 用：任务可拆为 >=3 个互不写同一文件的子任务、`budget.mjs` 给出 `maxAgents >= 2` 且无需人工分步确认；不用：1-2 文件或会改同一批文件。
+- 最多 2 个子代理（1 写 1 读）；`budget.mjs` 说 1 就只用 1；不允许嵌套子代理。
 - 不并行跑构建和测试；不在同一时刻开浏览器自动化和构建。
 - 子代理只接窄任务；通用 worker 用 `agents/kelin-worker.md`，它先读本 skill 和 `kelin-principles`。

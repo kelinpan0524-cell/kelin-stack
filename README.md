@@ -138,13 +138,12 @@ zcode plugins install kelin-stack@kelin-stack-market
 
 ## 安装后怎么用（小白版）
 
-在 ZCode 或 Antigravity 安装插件后，每个新会话会自动注入 kelin-stack 的激活上下文（Antigravity 还自带常驻规则 `rules/AGENTS.md`），**你只需要记住一个入口：`kelin-mode`**。
+在 Antigravity 或 ZCode **原生插件**安装后，每个新会话会自动注入 kelin-stack 上下文，并提供可按需开启的 `PreToolUse` 安全钩子（默认 `off` 不拦截，设 `KELIN_SAFETY=strict|relaxed` 或写入 `~/.kelin/safety.mode` 后生效；Antigravity 还自带常驻规则 `rules/AGENTS.md`）；若在 **Codex** 仅走 skills 安装，则无运行时钩子，需配合 `ensure-workflow.mjs` 写入的 `AGENTS.md` 路由块触发（能力边界详见 [docs/support-matrix.md](docs/support-matrix.md)）。不论哪种装法，**不懂流程也只需记住两句话**：
 
-1. 直接说你要做什么；非平凡任务（跨 2 个文件、多步、产品/交付/审计）会自动进入 `kelin-mode`，按阶段调用对应 skill，不需要你点名。
-2. 想手动开始，输入 `/kelin-mode` 或直接说用 `kelin-mode`；它会读 `.kelin/state.json` 续跑，没有就初始化。
-3. 项目里有 `.zcode/skills/verify-*` 或 `.agents/skills/verify-*` 时，验证阶段会自动发现并使用；没有就用 `kelin-verify-app` 生成。
-4. 危险命令和安全边界由 `PreToolUse` 钩子按 `KELIN_SAFETY` 三档拦截（默认关闭，开启后生效）；编辑冻结用 `kelin-safety` 开启。
-5. 不需要每次会话重复解释 kelin-stack；SessionStart 只注入一次简短上下文，不阻塞会话。
+1. **新仓库一键接入**：直接说 **`kelin mode setup`**（或运行 `node skills/kelin-mode/scripts/mode.mjs setup --root .`）。先只读预览缺什么（`AGENTS.md`、`.gitignore`、`kelin-policy.json`、本地验证手册、`pre-commit`、内存预算与安全钩子），确认后再加 `--apply` 自动配置。
+2. **直接交办任务**：直接说 **`用 kelin mode 帮我做 <需求>`**，agent 会先跑 `route` 判断模式（`light`/`feature`/`fix`/`legacy`/`audit`）、自动挂载当前阶段的配套 skill（如产品先走 `kelin-product`、前端加 `kelin-ui`、模糊需求先 `kelin-grill`），并按 `.kelin/state.json` 门禁推进，不再需要记住 40 个 skill 名字。
+3. **连续多轮不打架**：上一轮跑到 `done` 后，下个需求直接 `init` 会自动把旧记录归档到 `.kelin/history/`；没做完的任务下个会话直接续跑。
+4. **项目与安全兜底**：项目里有 `.zcode/skills/verify-*` 或 `.agents/skills/verify-*` 时验证阶段自动启用；高危操作由 `PreToolUse` 按 `KELIN_SAFETY`（off/relaxed/strict）兜底拦住。
 
 ## 给 WorkBuddy 用
 
@@ -164,6 +163,7 @@ node --test $(find skills -name '*.test.mjs' | sort | tr '\n' ' ')
 node skills/kelin-verify-stack/scripts/offline-check.mjs
 node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
 node skills/kelin-guard/scripts/guard-check.mjs guards.json
+node skills/kelin-guard/scripts/ratchet-check.mjs ratchet.json --strict-shrink
 node skills/kelin-neat/scripts/neat-check.mjs neat.json
 node skills/kelin-evals/scripts/skill-eval.mjs --root .
 node skills/kelin-evals/scripts/skill-bill.mjs --root .
@@ -171,10 +171,12 @@ node skills/kelin-evals/scripts/drift-check.mjs --root .
 node skills/kelin-docs/scripts/gen-docs.mjs --check
 node skills/kelin-docs/scripts/doc-coverage.mjs --root . --check
 node skills/kelin-mode/scripts/policy-check.mjs kelin-policy.json
+node skills/kelin-verify-stack/scripts/verify-stack.mjs smoke --host antigravity
+node skills/kelin-verify-stack/scripts/verify-stack.mjs smoke --host codex
 agy plugin validate .
 ```
 
-CI 每次 push 跑九项：全量单元测试、离线结构检查、引用漂移检查、AGENTS.md 预算、guards 完整性、文档一致性、skill 结构与触发检查、生成文档 drift、策略文件校验（不需要宿主登录，不消耗模型）。
+CI 每次 push 跑十项检查：全量单元测试、离线结构检查、引用漂移检查、AGENTS.md 预算、guards 完整性与棘轮不回退检查、文档一致性、skill 结构与触发检查、生成文档 drift、策略文件校验（不需要宿主登录，不消耗模型）。
 
 改 skill 之后，按改动路径验证：
 
@@ -224,6 +226,7 @@ kelin-stack/
 ├── docs/                # 生成的 skill 索引 + 跨宿主支持矩阵
 ├── kelin-policy.json    # 自动化边界与预算
 ├── guards.json          # bug → 防再犯记录
+├── ratchet.json         # 只减不增质量棘轮基线
 ├── neat.json            # 文档一致性配置
 └── .github/             # CI 门禁
 ```

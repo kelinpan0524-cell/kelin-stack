@@ -50,7 +50,7 @@ description: 把方案、决定或想法一层层问透，只问不答：把决�
 | 先把问题问干净，再谈怎么做 | 本 skill，在 `kelin-plan` 前面 |
 | 需求没说清、环境没摸清 | `kelin-product`；grill 比它狠——不帮你想，只逼你想 |
 | 想清楚了要落成可判定的契约 | `kelin-goal` |
-| 跨模块要出设计草图，草图里有开放决策 | `kelin-architect` 出图，再用本 skill 逐个问掉 |
+| 跨模块要出设计草图，草图里有开放决策 | `kelin-plan` 出设计草图，再用本 skill 逐个问掉 |
 | 已经成形、只要挑毛病 | `kelin-review`，不是本 skill |
 
 ## 反模式

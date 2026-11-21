@@ -137,3 +137,43 @@ test('SessionStart rejects untrusted state fields and malformed verify skill nam
   assert.match(text, /未初始化/);
   assert.match(text, /verify-good-1/);
 });
+
+test('SessionStart recognizes audit phase, injects companion skills and onboarding state', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-session-audit-'));
+  await mkdir(path.join(dir, '.kelin'), { recursive: true });
+  await writeFile(path.join(dir, '.kelin', 'state.json'), JSON.stringify({ mode: 'audit', phase: 'audit' }));
+
+  const first = run({ hook_event_name: 'SessionStart' }, { ZCODE_PROJECT_DIR: dir });
+  assert.equal(first.status, 0, first.stderr);
+  const firstCtx = JSON.parse(first.stdout).hookSpecificOutput.additionalContext;
+  assert.match(firstCtx, /mode=audit phase=audit/);
+  assert.match(firstCtx, /kelin-audit/);
+  assert.match(firstCtx, /未检测到工作流规则块/);
+  assert.match(firstCtx, /kelin mode setup/);
+
+  await writeFile(path.join(dir, 'AGENTS.md'), '# Rules\n<!-- kelin:workflow:start -->\n- test\n<!-- kelin:workflow:end -->\n');
+  const second = run({ hook_event_name: 'SessionStart' }, { ZCODE_PROJECT_DIR: dir });
+  assert.equal(second.status, 0, second.stderr);
+  const secondCtx = JSON.parse(second.stdout).hookSpecificOutput.additionalContext;
+  assert.match(secondCtx, /AGENTS\.md 已就绪/);
+  assert.doesNotMatch(secondCtx, /未检测到工作流规则块/);
+
+  const dirAgents = await mkdtemp(path.join(tmpdir(), 'kelin-session-dir-agents-'));
+  await mkdir(path.join(dirAgents, 'AGENTS.md'), { recursive: true });
+  const third = run({ hook_event_name: 'SessionStart' }, { ZCODE_PROJECT_DIR: dirAgents });
+  assert.equal(third.status, 0, third.stderr);
+  const thirdCtx = JSON.parse(third.stdout).hookSpecificOutput.additionalContext;
+  assert.match(thirdCtx, /未检测到工作流规则块/);
+
+  // Legacy audit phase resolves read-only to audit without writing state.json on disk
+  const legacyDir = await mkdtemp(path.join(tmpdir(), 'kelin-session-legacy-audit-'));
+  const rawLegacyState = JSON.stringify({ mode: 'audit', phase: 'build', history: [] });
+  await mkdir(path.join(legacyDir, '.kelin'), { recursive: true });
+  await writeFile(path.join(legacyDir, '.kelin', 'state.json'), rawLegacyState);
+  const legacyRes = run({ hook_event_name: 'SessionStart' }, { ZCODE_PROJECT_DIR: legacyDir });
+  assert.equal(legacyRes.status, 0, legacyRes.stderr);
+  const legacyCtx = JSON.parse(legacyRes.stdout).hookSpecificOutput.additionalContext;
+  assert.match(legacyCtx, /mode=audit phase=audit/);
+  const { readFileSync } = await import('node:fs');
+  assert.equal(readFileSync(path.join(legacyDir, '.kelin', 'state.json'), 'utf8'), rawLegacyState);
+});

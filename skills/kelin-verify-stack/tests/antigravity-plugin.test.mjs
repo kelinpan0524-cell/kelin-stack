@@ -160,11 +160,43 @@ test('install.sh installs clean Antigravity plugin, guards unsafe targets, handl
     assert.equal(subsetSym.status, 0, subsetSym.stdout + subsetSym.stderr);
     const linkPath = path.join(fakeHome, '.gemini', 'config', 'skills', 'kelin-mode');
     assert.equal(lstatSync(linkPath).isSymbolicLink(), true);
+    // Subset install resolves runtime deps so kelin-mode works directly under --symlink too
+    const subsetProj = path.join(fakeHome, 'subset-proj');
+    await mkdir(subsetProj, { recursive: true });
+    const modeSub = spawnSync(process.execPath, [path.join(linkPath, 'scripts', 'mode.mjs'), 'init', '--mode', 'light', '--root', subsetProj], { encoding: 'utf8', env });
+    assert.equal(modeSub.status, 0, modeSub.stdout + modeSub.stderr);
+    assert.match(modeSub.stdout, /"phase": "intake"/);
     const subsetUninstall = spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user', '--uninstall'], { encoding: 'utf8', env });
     assert.equal(subsetUninstall.status, 0, subsetUninstall.stdout + subsetUninstall.stderr);
     assert.equal(existsSync(linkPath), false);
     assert.equal(existsSync(path.join(repo, 'skills', 'kelin-mode', 'SKILL.md')), true);
+
+    // Copied --subset kelin-review and kelin-release/kelin-mode resolves transitive runtime deps cleanly
+    const copySub = spawnSync('bash', [installer, '--host', 'codex', '--scope', 'project', '--path', fakeHome, '--subset', 'kelin-review,kelin-mode'], { encoding: 'utf8', env });
+    assert.equal(copySub.status, 0, copySub.stdout + copySub.stderr);
+    const copiedSkillsDir = path.join(fakeHome, '.agents', 'skills');
+    assert.equal(spawnSync(process.execPath, [path.join(copiedSkillsDir, 'kelin-review', 'scripts', 'gate-scan.mjs'), '--help'], { encoding: 'utf8' }).status, 2);
+    assert.equal(spawnSync(process.execPath, [path.join(copiedSkillsDir, 'kelin-review', 'scripts', 'review-check.mjs'), '--help'], { encoding: 'utf8' }).status, 2);
+    const routedCopy = spawnSync(process.execPath, [path.join(copiedSkillsDir, 'kelin-mode', 'scripts', 'mode.mjs'), 'route', '--task', '修 bug', '--root', fakeHome], { encoding: 'utf8' });
+    assert.equal(routedCopy.status, 0, routedCopy.stderr);
+    assert.equal(JSON.parse(routedCopy.stdout).mode, 'fix');
+
+    // --subset kelin-verify-stack includes kelin-plan so plan_valid runs inside copied subset
+    const vsSubset = spawnSync('bash', [installer, '--host', 'codex', '--scope', 'project', '--path', fakeHome, '--subset', 'kelin-verify-stack'], { encoding: 'utf8', env });
+    assert.equal(vsSubset.status, 0, vsSubset.stdout + vsSubset.stderr);
+    assert.equal(existsSync(path.join(copiedSkillsDir, 'kelin-plan', 'scripts', 'check-plan.mjs')), true);
   } finally {
     await rm(fakeHome, { recursive: true, force: true });
   }
+});
+
+test('verify-stack smoke passes for antigravity and codex and rejects invalid host', () => {
+  const verifyStack = path.join(repo, 'skills', 'kelin-verify-stack', 'scripts', 'verify-stack.mjs');
+  for (const host of ['antigravity', 'codex']) {
+    const res = spawnSync(process.execPath, [verifyStack, 'smoke', '--host', host], { encoding: 'utf8' });
+    assert.equal(res.status, 0, `${host} smoke failed:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, new RegExp(`PASS smoke:${host}`));
+  }
+  const bad = spawnSync(process.execPath, [verifyStack, 'smoke', '--host', 'foo'], { encoding: 'utf8' });
+  assert.notEqual(bad.status, 0);
 });

@@ -129,20 +129,46 @@ export function requiredSessionCount(cases) {
   return cases.filter((entry) => entry.kind === 'live').length;
 }
 
+function validateRecord(record, label) {
+  if (record.ok !== true) throw new Error(`Observation failed: ${label}`);
+  if (!record.assertions?.length) throw new Error(`No assertions: ${label}`);
+  if (record.assertions.some((assertion) => !assertion.ok)) throw new Error(`Failed assertion: ${label}/${record.assertions.find((a) => !a.ok).id}`);
+  if (!record.artifacts?.length) throw new Error(`No artifacts: ${label}`);
+  if (record.artifacts.some((artifact) => !artifact.path || !/^[a-f0-9]{64}$/.test(artifact.sha256))) {
+    throw new Error(`Invalid artifact: ${label}`);
+  }
+  if (record.kind === 'live') {
+    if (!record.transcript || !/^[a-f0-9]{64}$/.test(record.transcriptHash)) throw new Error(`Missing transcript: ${label}`);
+  }
+}
+
 export function completeEvidence(receipt) {
   if (!receipt.features.length) throw new Error('No features verified');
-  for (const feature of receipt.features) {
-    const records = receipt.observations.filter((entry) => entry.feature === feature);
-    if (records.length !== 1) throw new Error(`Missing or duplicate evidence: ${feature}`);
-    const record = records[0];
-    if (!record.assertions?.length) throw new Error(`No assertions: ${feature}`);
-    if (record.assertions.some((assertion) => !assertion.ok)) throw new Error(`Failed assertion: ${feature}/${record.assertions.find((a) => !a.ok).id}`);
-    if (!record.artifacts?.length) throw new Error(`No artifacts: ${feature}`);
-    if (record.artifacts.some((artifact) => !artifact.path || !/^[a-f0-9]{64}$/.test(artifact.sha256))) {
-      throw new Error(`Invalid artifact: ${feature}`);
+  if (Array.isArray(receipt.expectedCases) && receipt.expectedCases.length) {
+    const matched = new Set();
+    for (const expected of receipt.expectedCases) {
+      const key = `${expected.feature}::${expected.caseId}`;
+      if (matched.has(key)) throw new Error(`Duplicate expectedCase: ${key}`);
+      const records = receipt.observations.filter(
+        (entry) => entry.feature === expected.feature && (entry.case === expected.caseId || entry.caseId === expected.caseId),
+      );
+      if (records.length !== 1) throw new Error(`Missing or duplicate evidence: ${expected.feature}:${expected.caseId}`);
+      validateRecord(records[0], `${expected.feature}:${expected.caseId}`);
+      matched.add(key);
     }
-    if (record.kind === 'live') {
-      if (!record.transcript || !/^[a-f0-9]{64}$/.test(record.transcriptHash)) throw new Error(`Missing transcript: ${feature}`);
+    for (const feature of receipt.features) {
+      if (!receipt.expectedCases.some((expected) => expected.feature === feature)) {
+        throw new Error(`Missing or duplicate evidence: ${feature}`);
+      }
+    }
+    if (matched.size !== receipt.observations.length) {
+      throw new Error('Unexpected observation outside expectedCases');
+    }
+  } else {
+    for (const feature of receipt.features) {
+      const records = receipt.observations.filter((entry) => entry.feature === feature);
+      if (records.length !== 1) throw new Error(`Missing or duplicate evidence: ${feature}`);
+      validateRecord(records[0], feature);
     }
   }
   if (receipt.failure) throw new Error(receipt.failure);

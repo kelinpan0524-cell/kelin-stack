@@ -20,8 +20,8 @@
   ],
   "zcode:skill-invocation:kelin-plan": [
     {
-      "id": "readback-verification-sentence",
-      "prompt": "/skill {qualified} 读这个 skill。把「步骤」第 1 节最后关于“验收标准写不出来”的那一整句原样写进 ./answer.md，然后回复 DONE。",
+      "id": "behavioral-structured-plan",
+      "prompt": "/skill {qualified} 读完这个 skill 与当前目录里的 .verify-marker。按本 skill 的完整计划模板在 ./plan.md 写入可执行计划：首行放 `.verify-marker` 原文，包含 `# 目标`、`# 验收标准`（至少一条 `- [ ]` 复选框且有实际标准）、`# 方案与取舍`、`# 任务拆解`（至少两条 `- [ ] 单元 ... / 验证：`node --test``）、`# 风险与回滚`、`# 本期不做`。完成后只回复 DONE。",
       "assertions": [
         {
           "id": "skill-load",
@@ -29,18 +29,34 @@
           "value": "{qualified}"
         },
         {
-          "id": "verbatim-body",
+          "id": "plan-exists",
+          "type": "file_exists",
+          "path": "plan.md"
+        },
+        {
+          "id": "marker-bound",
           "type": "file_contains",
-          "path": "answer.md",
-          "value": "验收标准写不出可执行形式，说明还没想清楚，停下来问。"
+          "path": "plan.md",
+          "value": "{{marker}}"
+        },
+        {
+          "id": "plan-structure-valid",
+          "type": "plan_valid",
+          "path": "plan.md",
+          "level": "standard"
+        },
+        {
+          "id": "clean-exit",
+          "type": "response_equals",
+          "value": "DONE"
         }
       ]
     }
   ],
   "zcode:skill-invocation:kelin-mode": [
     {
-      "id": "readback-routing",
-      "prompt": "/skill {qualified} 读这个 skill。把开头那句「你说一句要什么」所在的整句原样写进 ./answer.md，然后回复 DONE。",
+      "id": "behavioral-mode-route",
+      "prompt": "/skill {qualified} 读完这个 skill 与当前目录里的 .verify-marker。请运行你所在插件的 `kelin-mode/scripts/mode.mjs route`（如果不可达则按路由规则推演），针对用户请求「用户提交报价单后页面白屏、接口返回 500 异常」，把合法 JSON 写进 ./route.json，仅含 `marker`（`.verify-marker` 原文）、`mode`、`firstPhase` 与 `companionSkills` 数组。完成后只回复 DONE。",
       "assertions": [
         {
           "id": "skill-load",
@@ -48,10 +64,42 @@
           "value": "{qualified}"
         },
         {
-          "id": "verbatim-body",
-          "type": "file_contains",
-          "path": "answer.md",
-          "value": "调哪个 skill、什么时候停"
+          "id": "route-exists",
+          "type": "file_exists",
+          "path": "route.json"
+        },
+        {
+          "id": "marker-bound",
+          "type": "json_field",
+          "path": "route.json",
+          "field": "marker",
+          "value": "{{marker}}"
+        },
+        {
+          "id": "routed-mode",
+          "type": "json_field",
+          "path": "route.json",
+          "field": "mode",
+          "value": "fix"
+        },
+        {
+          "id": "routed-phase",
+          "type": "json_field",
+          "path": "route.json",
+          "field": "firstPhase",
+          "value": "intake"
+        },
+        {
+          "id": "has-companions",
+          "type": "json_field",
+          "path": "route.json",
+          "field": "companionSkills",
+          "regex": "^kelin-"
+        },
+        {
+          "id": "clean-exit",
+          "type": "response_equals",
+          "value": "DONE"
         }
       ]
     }
@@ -318,6 +366,65 @@
           "type": "file_contains",
           "path": "answer.md",
           "value": "手写的索引一定会漂移"
+        }
+      ]
+    }
+  ],
+  "zcode:skill-invocation:kelin-review": [
+    {
+      "id": "behavioral-review-finding",
+      "prompt": "/skill {qualified} 读完这个 skill 与 .verify-marker。按本 skill 的发现格式，针对未记录日志且直接吞掉错误的空 catch（位置 `src/auth.js:12`）写一条包含 `.verify-marker` 原文的审查意见到 ./review.md，必须写明 严重度（按 P0-P3 分级）、位置、触发条件、后果 和 最小改法。完成后只回复 DONE。",
+      "assertions": [
+        {
+          "id": "skill-load",
+          "type": "skill_called",
+          "value": "{qualified}"
+        },
+        {
+          "id": "review-exists",
+          "type": "file_exists",
+          "path": "review.md"
+        },
+        {
+          "id": "marker-bound",
+          "type": "file_contains",
+          "path": "review.md",
+          "value": "{{marker}}"
+        },
+        {
+          "id": "has-location",
+          "type": "file_contains",
+          "path": "review.md",
+          "value": "src/auth.js:12"
+        },
+        {
+          "id": "has-severity",
+          "type": "file_regex",
+          "path": "review.md",
+          "value": "\\bP[0-3]\\b"
+        },
+        {
+          "id": "has-trigger",
+          "type": "file_regex",
+          "path": "review.md",
+          "value": "触发(?:条件)?[:：]?\\s*\\S+"
+        },
+        {
+          "id": "has-consequence",
+          "type": "file_regex",
+          "path": "review.md",
+          "value": "后果[:：]?\\s*\\S+"
+        },
+        {
+          "id": "has-fix",
+          "type": "file_regex",
+          "path": "review.md",
+          "value": "改法[:：]?\\s*\\S+"
+        },
+        {
+          "id": "clean-exit",
+          "type": "response_equals",
+          "value": "DONE"
         }
       ]
     }

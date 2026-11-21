@@ -409,9 +409,18 @@ async function checkTools(ctx) {
   if (existsSync(kelinGuard)) {
     const dir = path.join(ctx.tempDir, 'guard-repo');
     await mkdir(path.join(dir, 'test'), { recursive: true });
+    await mkdir(path.join(dir, '.github', 'workflows'), { recursive: true });
     await writeFile(path.join(dir, 'test/quote.test.js'), 'export {};\n');
+    await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), 'jobs:\n  test:\n    steps:\n      - run: node --test test/quote.test.js\n');
     const file = path.join(dir, 'guards.json');
-    const entry = { id: 'q0', bug: 'qty 0 divides by zero', rootCause: 'no qty>0 check', guard: { type: 'test', location: 'test/quote.test.js', command: 'node --test test/quote.test.js' }, proof: { command: 'revert then node --test test/quote.test.js', expected: 'fail-on-old' } };
+    const entry = {
+      id: 'q0',
+      bug: 'qty 0 divides by zero',
+      rootCause: 'no qty>0 check',
+      guard: { type: 'test', location: 'test/quote.test.js', command: 'node --test test/quote.test.js' },
+      enforcedIn: ['.github/workflows/ci.yml'],
+      proof: { command: 'revert then node --test test/quote.test.js', expected: 'fail-on-old' },
+    };
     await writeFile(file, JSON.stringify({ guards: [entry] }));
     const accepted = await run(process.execPath, [kelinGuard, file], { timeoutMs: 30_000 });
     await writeFile(file, JSON.stringify({ guards: [{ ...entry, proof: undefined }] }));
@@ -543,8 +552,20 @@ async function checkTools(ctx) {
   }
   const kelinPlanGate = path.join(ctx.pluginRoot, 'skills/kelin-plan/scripts/plan-gate.mjs');
   if (existsSync(kelinPlanGate)) {
+    const planFile = path.join(ctx.tempDir, 'gate-plan.md');
+    const planBody = '# 目标\n验证 gate\n\n# 验收标准\n- [ ] `node -v` 退出 0\n';
+    await writeFile(planFile, planBody);
+    const planHash = sha256(planBody);
     const gateFile = path.join(ctx.tempDir, 'plan-gate.json');
-    const base = { lenses: [{ name: 'product', reviewer: 'self', findings: [] }, { name: 'engineering', reviewer: 'self', findings: [] }], decisions: [{ id: 'D1', question: 'scope?', recommendation: 'keep', status: 'approved' }] };
+    const base = {
+      plan: 'gate-plan.md',
+      planHash,
+      lenses: [
+        { name: 'product', reviewer: 'self', verdict: 'approved', summary: 'scope ok', findings: [] },
+        { name: 'engineering', reviewer: 'self', verdict: 'approved', summary: 'types ok', findings: [] },
+      ],
+      decisions: [{ id: 'D1', question: 'scope?', recommendation: 'keep', status: 'approved' }],
+    };
     await writeFile(gateFile, JSON.stringify(base));
     const resolved = await run(process.execPath, [kelinPlanGate, gateFile, '--require-resolved'], { timeoutMs: 30_000 });
     await writeFile(gateFile, JSON.stringify({ ...base, decisions: [{ ...base.decisions[0], status: 'pending' }] }));

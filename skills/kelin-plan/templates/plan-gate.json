@@ -1,8 +1,21 @@
 {
   "plan": "plan.md",
+  "planHash": "",
   "lenses": [
-    { "name": "product", "reviewer": "self", "findings": [] },
-    { "name": "engineering", "reviewer": "self", "findings": [] }
+    {
+      "name": "product",
+      "reviewer": "self",
+      "verdict": "pending",
+      "summary": "",
+      "findings": []
+    },
+    {
+      "name": "engineering",
+      "reviewer": "self",
+      "verdict": "pending",
+      "summary": "",
+      "findings": []
+    }
   ],
   "decisions": []
 }

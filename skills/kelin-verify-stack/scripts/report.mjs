@@ -80,13 +80,16 @@ export function renderReport(receipt) {
 }
 
 export function renderGate(receipt) {
+  const features = Array.isArray(receipt?.features) ? receipt.features : [];
+  const observations = Array.isArray(receipt?.observations) ? receipt.observations : [];
+  const assertions = observations.flatMap((entry) => entry?.assertions || []);
   const lines = [
     '## kelin-verify-stack evidence',
-    `- Plugin: ${sanitizeText(`${receipt.plugin.name}@${receipt.plugin.version}`) || 'omitted'}`,
-    `- Plugin tree: ${receipt.plugin.treeHash.slice(0, 16)}...`,
-    `- Result: ${receipt.ok ? 'PASSED' : 'FAILED'}`,
-    `- Features: ${receipt.features.length}; assertions: ${receipt.observations.flatMap((entry) => entry.assertions || []).length}; headless sessions: ${receipt.sessionsRun}`,
-    `- ZCode: ${sanitizeText(receipt.zcodeVersion) || 'omitted'}`,
+    `- Plugin: ${sanitizeText(`${receipt?.plugin?.name || 'unknown'}@${receipt?.plugin?.version || '0.0.0'}`) || 'omitted'}`,
+    `- Plugin tree: ${String(receipt?.plugin?.treeHash || '').slice(0, 16) || 'omitted'}...`,
+    `- Result: ${receipt?.ok ? 'PASSED' : 'FAILED'}`,
+    `- Features: ${features.length}; assertions: ${assertions.length}; headless sessions: ${receipt?.sessionsRun ?? 0}`,
+    `- ZCode: ${sanitizeText(receipt?.zcodeVersion) || 'omitted'}`,
     `- Policy: this gate verifies one pinned plugin tree; a changed tree needs a fresh run.`,
   ];
   return lines.join('\n');

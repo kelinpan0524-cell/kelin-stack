@@ -1,7 +1,7 @@
 {
   "name": "kelin-stack",
   "displayName": "Kelin Stack",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "一套把工作做扎实的流程：先规划、再验证、交付前自审、按纪律上线、结束后复盘。每个环节都有可执行的检查，不靠感觉。",
   "logo": "assets/logo.svg",
   "author": {
@@ -9,8 +9,8 @@
   },
   "repository": "https://github.com/kelinpan0524-cell/kelin-stack",
   "suggestedPrompts": [
+    "用 kelin mode setup 一键接入当前项目并检查环境",
     "用 kelin-mode 规划并实现这个需求",
-    "用 kelin-review 审查当前改动并给出 file:line 证据",
-    "用 kelin-neat 对齐仓库文档与代码事实"
+    "用 kelin-review 审查当前改动并给出 file:line 证据"
   ]
 }

@@ -4,13 +4,19 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
+const option = (name, fallback = '') => {
+  const index = args.indexOf(name);
+  return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
+};
+const root = path.resolve(option('--root', process.cwd()));
 const noReview = args.includes('--no-review');
 const requireReview = args.includes('--require-review');
-const git = (args) => spawnSync('git', args, { encoding: 'utf8' });
-const must = (args) => {
-  const result = git(args);
+const strictGates = args.includes('--strict-gates');
+const git = (argv) => spawnSync('git', ['-C', root, ...argv], { encoding: 'utf8' });
+const must = (argv) => {
+  const result = git(argv);
   if (result.status !== 0) {
-    console.error(`git ${args.join(' ')}: ${(result.stderr || '').trim() || 'failed'}`);
+    console.error(`git ${argv.join(' ')}: ${(result.stderr || '').trim() || 'failed'}`);
     process.exit(2);
   }
   return result.stdout.trim();
@@ -21,6 +27,7 @@ const staged = must(['diff', '--cached', '--name-only']).split('\n').filter(Bool
 const diff = git(['diff', '--cached', '--unified=0']).stdout || '';
 
 const findings = [];
+const warnings = [];
 const add = (code, severity, detail) => findings.push({ code, severity, detail });
 
 if (['main', 'master'].includes(branch)) {
@@ -28,14 +35,14 @@ if (['main', 'master'].includes(branch)) {
 }
 
 let review = null;
-const reviewFile = path.join(process.cwd(), '.kelin', 'review.json');
+const reviewFile = path.join(root, '.kelin', 'review.json');
 if (!noReview) {
   if (existsSync(reviewFile)) {
     const script = path.resolve(import.meta.dirname, '..', '..', '..', 'skills', 'kelin-review', 'scripts', 'review-check.mjs');
     if (!existsSync(script)) {
       add('review-check-missing', 'P0', 'review stamp exists but review-check.mjs is unavailable');
     } else {
-      const check = spawnSync(process.execPath, [script], { cwd: process.cwd(), encoding: 'utf8' });
+      const check = spawnSync(process.execPath, [script, '--root', root], { cwd: root, encoding: 'utf8' });
       let payload = null;
       try {
         payload = JSON.parse(check.stdout);
@@ -75,11 +82,37 @@ for (const line of diff.split('\n')) {
   }
 }
 
+if (staged.length > 0) {
+  const gateScript = path.resolve(import.meta.dirname, '..', '..', '..', 'skills', 'kelin-review', 'scripts', 'gate-scan.mjs');
+  if (!existsSync(gateScript)) {
+    add('gate-scan-error', strictGates ? 'P0' : 'P1', 'gate-scan.mjs is missing');
+  } else {
+    const scan = spawnSync(process.execPath, [gateScript, '--root', root, '--staged'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    let scanPayload = null;
+    try {
+      scanPayload = scan.stdout ? JSON.parse(scan.stdout) : null;
+    } catch {
+      scanPayload = null;
+    }
+    if (scan.error || (scan.status !== 0 && scan.status !== 1) || !scanPayload || !Array.isArray(scanPayload.findings)) {
+      const detail = (scan.stderr || scan.error?.message || `exit ${scan.status}`).trim().slice(0, 160);
+      add('gate-scan-error', strictGates ? 'P0' : 'P1', `gate-scan failed: ${detail}`);
+    } else if (scanPayload.findings.length) {
+      for (const item of scanPayload.findings) {
+        const msg = `${item.tag} ${item.path}:${item.line} ${item.question}`;
+        if (strictGates) add('gate-scan', 'P1', msg);
+        else warnings.push(msg);
+      }
+    }
+  }
+}
+
 const result = {
   ok: findings.length === 0,
   branch,
   staged: staged.length,
   review,
+  gateWarnings: warnings,
   findings,
 };
 

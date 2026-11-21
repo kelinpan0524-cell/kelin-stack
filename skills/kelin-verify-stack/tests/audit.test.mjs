@@ -38,6 +38,14 @@ test('audit-check rejects a missing coverage table and not-assessed claims of no
   const missing = await write('audit.md', '# Audit\n\n## 必须修\n- none\n');
   assert.equal(run(auditCheck, missing).status, 1);
 
+  const spoofedNote = await write('audit.md', [
+    '## 覆盖声明',
+    '| 面 | 状态 | 范围 |',
+    '| --- | --- | --- |',
+    '| 安全 | 未审 | notes mention audited only |',
+  ].join('\n'));
+  assert.equal(run(auditCheck, spoofedNote).status, 1);
+
   const contradictory = await write('audit.md', [
     '## 覆盖声明',
     '| 面 | 状态 | 范围 |',
@@ -69,4 +77,119 @@ test('decision-check accepts pointer evidence and rejects prose or invalid field
   const result = run(decisionCheck, badPhase);
   assert.equal(result.status, 1);
   assert.match(result.stdout, /invalid phase/);
+
+  const startOnly = await write('decisions-start.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-11-11T00:00:00Z\tstart\t开启新会话\t接续上次断点\tagent-123\tstart',
+  ].join('\n'));
+  const startOnlyRes = run(decisionCheck, startOnly);
+  assert.equal(startOnlyRes.status, 1);
+  assert.match(startOnlyRes.stdout, /no substantive decision rows/);
+
+  const startWithDecision = await write('decisions-start-plus.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-11-11T00:00:00Z\tstart\t开启新会话\t接续上次断点\tagent-123\tstart',
+    '2026-11-11T00:05:00Z\t设计\t选 A\tB 更贵\tREADME.md:10\t待验证',
+  ].join('\n'));
+  assert.equal(run(decisionCheck, startWithDecision).status, 0);
+});
+
+test('audit-check handles fences, header schema and escaped pipes; decision-check validates ts and URL hosts', async () => {
+  const fenced = await write('audit-fenced.md', [
+    '```markdown',
+    '## 覆盖声明',
+    '| 面 | 状态 | 范围 |',
+    '| --- | --- | --- |',
+    '| 正确性 | 已审 | src/fake.ts |',
+    '```',
+  ].join('\n'));
+  assert.equal(run(auditCheck, fenced).status, 1);
+
+  const wrongHeader = await write('audit-header.md', [
+    '## 覆盖声明',
+    '| 模块 | 负责人 | 备注 |',
+    '| --- | --- | --- |',
+    '| core | 已审 | note |',
+  ].join('\n'));
+  const wrongRes = run(auditCheck, wrongHeader);
+  assert.equal(wrongRes.status, 1);
+  assert.match(wrongRes.stdout, /状态\/status/);
+
+  const noSep = await write('audit-nosep.md', [
+    '## 覆盖声明',
+    '| 面 | 状态 | 范围 |',
+    '| core | 已审 | note |',
+  ].join('\n'));
+  assert.equal(run(auditCheck, noSep).status, 1);
+
+  const escapedPipe = await write('audit-escaped.md', [
+    '## 覆盖声明',
+    '| 面 | 状态 | 范围',
+    '| --- | --- | ---',
+    '| 安全 | 已审 | a \\| b',
+  ].join('\n'));
+  assert.equal(run(auditCheck, escapedPipe).status, 0);
+
+  const badTs = await write('decisions-bad-ts.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    'not-a-timestamp\t设计\t选 A\t理由\tREADME.md:10\t待验证',
+  ].join('\n'));
+  const badTsRes = run(decisionCheck, badTs);
+  assert.equal(badTsRes.status, 1);
+  assert.equal(JSON.parse(badTsRes.stdout).substantiveRows, 0);
+
+  const bareUrl = await write('decisions-bare-url.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-02-30T00:05:00Z\t设计\t选 A\t理由\thttps://.\t待验证',
+  ].join('\n'));
+  const bareUrlOut = run(decisionCheck, bareUrl);
+  assert.equal(bareUrlOut.status, 1);
+  assert.match(bareUrlOut.stdout, /invalid ISO ts/);
+  assert.match(bareUrlOut.stdout, /parseable pointer/);
+
+  const outerPipeless = await write('audit-pipeless.md', [
+    '<!--',
+    '## 覆盖声明',
+    'ignored html comment table',
+    '-->',
+    '## 覆盖声明',
+    '面 | 状态 | 范围',
+    '--- | --- | ---',
+    '正确性 | 已审 | src/a.ts',
+  ].join('\n'));
+  assert.equal(run(auditCheck, outerPipeless).status, 0);
+});
+
+test('audit-check preserves block boundaries; decision-check rejects substring hex and accepts internal single-label hosts', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-audit-boundary-'));
+  const writeLocal = async (name, body) => {
+    const file = path.join(dir, name);
+    await writeFile(file, body);
+    return file;
+  };
+
+  const phantomTable = await writeLocal('phantom.md', [
+    '## 覆盖声明',
+    '面 | 状态 | 范围',
+    '```',
+    'fenced block separating header and separator',
+    '```',
+    '--- | --- | ---',
+    '正确性 | 已审 | src/a.ts',
+  ].join('\n'));
+  assert.equal(run(auditCheck, phantomTable).status, 1);
+
+  const feedbackProse = await writeLocal('feedback.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-11-21T09:00:00Z\t设计\t选 A\t理由\tfeedback was positive\t待验证',
+  ].join('\n'));
+  const fbRes = run(decisionCheck, feedbackProse);
+  assert.equal(fbRes.status, 1);
+  assert.match(fbRes.stdout, /parseable pointer/);
+
+  const internalHost = await writeLocal('internal.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-11-21T09:00:00Z\t设计\t选 A\t理由\thttp://buildsrv/report\t待验证',
+  ].join('\n'));
+  assert.equal(run(decisionCheck, internalHost).status, 0);
 });

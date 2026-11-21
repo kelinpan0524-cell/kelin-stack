@@ -44,6 +44,12 @@ export async function listFiles(root, rel = '') {
   const out = [];
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     if (ignored.has(entry.name)) continue;
+    if (rel === '' && entry.name === '.kelin') {
+      if (entry.isDirectory() && await pathExists(path.join(root, '.kelin', 'ci'))) {
+        out.push(...(await listFiles(root, '.kelin/ci')));
+      }
+      continue;
+    }
     const next = rel ? `${rel}/${entry.name}` : entry.name;
     if (entry.isDirectory()) out.push(...(await listFiles(root, next)));
     else if (entry.isFile()) out.push(next);

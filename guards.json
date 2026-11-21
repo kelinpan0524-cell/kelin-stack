@@ -9,6 +9,7 @@
         "location": "skills/kelin-verify-stack/tests/mode.test.mjs",
         "command": "node --test skills/kelin-verify-stack/tests/mode.test.mjs"
       },
+      "enforcedIn": [".github/workflows/ci.yml"],
       "proof": {
         "command": "revert the reflect phase, then node --test skills/kelin-verify-stack/tests/mode.test.mjs",
         "expected": "fail-on-old"
@@ -21,10 +22,26 @@
       "guard": {
         "type": "ci",
         "location": "skills/kelin-verify-stack/scripts/catalog.mjs",
-        "command": "node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --no-live"
+        "command": "node skills/kelin-verify-stack/scripts/offline-check.mjs"
       },
+      "enforcedIn": [".github/workflows/ci.yml"],
       "proof": {
         "command": "revert agents-check, rerun static; kelin-agents:accepts must fail",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "ratchet-host-and-hook-hygiene",
+      "bug": "skills hardcoded [ZCode] commit prefixes, used repo-relative node skills/ paths, or risked console.log corrupting hook JSON stdout",
+      "rootCause": "prose conventions lacked automated lint checks",
+      "guard": {
+        "type": "lint",
+        "location": "skills/kelin-guard/scripts/ratchet-check.mjs",
+        "command": "node skills/kelin-guard/scripts/ratchet-check.mjs ratchet.json --check"
+      },
+      "enforcedIn": [".github/workflows/ci.yml"],
+      "proof": {
+        "command": "add bare console.log in hooks/ or git commit -m \"[ZCode]\" in a SKILL.md, then run ratchet-check.mjs ratchet.json --check",
         "expected": "fail-on-old"
       }
     }

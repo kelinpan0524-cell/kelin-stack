@@ -22,8 +22,10 @@ const templates = path.join(skillDir, 'templates');
 const vendored = [
   ['agents-check.mjs', path.resolve(skillDir, '..', 'kelin-agents', 'scripts', 'agents-check.mjs')],
   ['map-check.mjs', path.resolve(skillDir, '..', 'kelin-map', 'scripts', 'map-check.mjs')],
+  ['fingerprint.mjs', path.resolve(skillDir, '..', 'kelin-review', 'scripts', 'fingerprint.mjs')],
   ['run-acceptance.mjs', path.resolve(skillDir, '..', 'kelin-verify', 'scripts', 'run-acceptance.mjs')],
   ['guard-check.mjs', path.resolve(skillDir, '..', 'kelin-guard', 'scripts', 'guard-check.mjs')],
+  ['ratchet-check.mjs', path.resolve(skillDir, '..', 'kelin-guard', 'scripts', 'ratchet-check.mjs')],
 ];
 
 const wrote = [];

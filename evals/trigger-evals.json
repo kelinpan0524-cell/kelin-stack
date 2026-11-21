@@ -8,6 +8,13 @@
       ]
     },
     {
+      "query": "我不懂配置，帮我 kelin mode setup 把这个新仓库接进 kelin-stack",
+      "expect": "kelin-mode",
+      "cues": [
+        "kelin mode setup"
+      ]
+    },
+    {
       "query": "这次到底要做到什么程度，定个目标",
       "expect": "kelin-goal",
       "cues": [

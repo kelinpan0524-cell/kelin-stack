@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { sha256 } from './io.mjs';
 
 const IGNORED = new Set(['.v2c', '.video_agent', '.DS_Store', 'node_modules']);
@@ -25,23 +26,30 @@ async function waitFor(file, timeoutMs = 8000) {
   return existsSync(file);
 }
 
-async function readRollout(file) {
+export function parseTranscript(text, label = 'transcript') {
+  const rawToolCalls = [];
   const toolCalls = [];
   const responses = [];
-  const lines = (await readFile(file, 'utf8')).split('\n');
-  for (const line of lines) {
+  for (const line of String(text || '').split('\n')) {
     if (!line.trim()) continue;
     let row;
     try {
       row = JSON.parse(line);
     } catch {
-      continue;
+      throw new Error(`Malformed transcript line in ${label}`);
     }
-    const response = row.response || {};
-    for (const call of response.toolCalls || []) toolCalls.push({ name: call.name, input: call.input ?? {} });
+    const response = row?.response || {};
+    for (const call of response.toolCalls || []) {
+      rawToolCalls.push(call);
+      toolCalls.push({ name: call.name, input: call.input ?? {} });
+    }
     if (typeof response.text === 'string' && response.text.trim()) responses.push(response.text.trim());
   }
-  return { toolCalls, responses };
+  return { rawToolCalls, toolCalls, responses };
+}
+
+async function readRollout(file) {
+  return parseTranscript(await readFile(file, 'utf8'), file);
 }
 
 export async function runSession({ zcodeRef, prompt, fixtureDir, sessionDir, timeoutMs = 300_000, env = {} }) {
@@ -80,7 +88,7 @@ export async function runSession({ zcodeRef, prompt, fixtureDir, sessionDir, tim
     if (await waitFor(candidate)) {
       rolloutFile = path.join(sessionDir, 'rollout.jsonl');
       await copyFile(candidate, rolloutFile);
-      rollout = await readRollout(candidate);
+      rollout = await readRollout(rolloutFile);
     }
   }
   return {
@@ -160,6 +168,52 @@ export async function evaluateAssertions(assertions, ctx) {
           note = ctx.response.slice(0, 120);
           break;
         }
+        case 'file_regex': {
+          const target = safeJoin(ctx.fixtureDir, rule.path);
+          const body = existsSync(target) ? await readFile(target, 'utf8') : '';
+          const re = new RegExp(value, rule.flags || 'm');
+          ok = re.test(body);
+          note = ok ? `matched ${value}` : `missing /${value}/`;
+          break;
+        }
+        case 'json_field': {
+          const target = safeJoin(ctx.fixtureDir, rule.path);
+          const raw = existsSync(target) ? await readFile(target, 'utf8') : '';
+          const parsed = JSON.parse(raw);
+          const actual = parsed?.[rule.field];
+          if (Array.isArray(actual)) {
+            ok = rule.regex
+              ? actual.some((item) => new RegExp(rule.regex).test(String(item)))
+              : actual.includes(value);
+          } else if (rule.regex) {
+            ok = new RegExp(rule.regex).test(String(actual ?? ''));
+          } else {
+            ok = actual === value;
+          }
+          note = `${rule.field}=${JSON.stringify(actual)}`.slice(0, 160);
+          break;
+        }
+        case 'plan_valid': {
+          const target = safeJoin(ctx.fixtureDir, rule.path);
+          const body = existsSync(target) ? await readFile(target, 'utf8') : '';
+          const fallbackChecker = path.resolve(import.meta.dirname, '..', '..', 'kelin-plan', 'scripts', 'check-plan.mjs');
+          let checker = fallbackChecker;
+          if (ctx.pluginRoot) {
+            const pluginPlanDir = path.resolve(ctx.pluginRoot, 'skills', 'kelin-plan');
+            const pluginChecker = path.resolve(pluginPlanDir, 'scripts', 'check-plan.mjs');
+            if (existsSync(pluginPlanDir)) {
+              if (!existsSync(pluginChecker)) {
+                throw new Error(`Missing kelin-plan validator in target plugin: ${pluginChecker}`);
+              }
+              checker = pluginChecker;
+            }
+          }
+          const { validatePlanMarkdown } = await import(pathToFileURL(checker).href);
+          const res = validatePlanMarkdown(body, rule.level || 'standard');
+          ok = res.ok;
+          note = res.ok ? `planHash=${res.planHash.slice(0, 12)}` : res.problems.join('; ');
+          break;
+        }
         default:
           note = `unknown assertion type: ${rule.type}`;
       }
@@ -167,12 +221,13 @@ export async function evaluateAssertions(assertions, ctx) {
       ok = false;
       note = caught.message;
     }
-    results.push({ id, type: rule.type, ok, detail: note.slice(0, 400) });
+    const extra = rule.type === 'skill_called' || rule.type === 'tool_called' ? { value } : {};
+    results.push({ id, type: rule.type, ok, ...extra, detail: note.slice(0, 400) });
   }
   return results;
 }
 
-export async function collectArtifacts(fixtureDir, sessionDir) {
+export async function collectArtifacts(fixtureDir, sessionDir, runRoot = sessionDir) {
   const artifacts = [];
   const base = path.join(sessionDir, 'artifacts');
   async function walk(dir, rel = '') {
@@ -187,7 +242,7 @@ export async function collectArtifacts(fixtureDir, sessionDir) {
         const target = path.join(base, nextRel);
         await mkdir(path.dirname(target), { recursive: true });
         await copyFile(absolute, target);
-        artifacts.push({ path: `artifacts/${nextRel}`, sha256: sha256(body), bytes: body.length });
+        artifacts.push({ path: path.relative(runRoot, target), sha256: sha256(body), bytes: body.length });
       }
     }
   }

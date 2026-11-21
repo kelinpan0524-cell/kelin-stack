@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,37 +47,83 @@ const detectPort = (text, fallback) => {
   return match ? Number(match[1]) : fallback;
 };
 
+const slugify = (value) => value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'item';
+
+const makeFeatureId = (kind, method, routeOrName, seen) => {
+  const fullHash = createHash('sha256').update(`${kind}:${method}:${routeOrName}`).digest('hex');
+  const rawSlug = slugify(
+    kind === 'cli' ? routeOrName : routeOrName === '/' ? (kind === 'api' ? 'root' : 'home') : routeOrName,
+  );
+  const boundedSlug = rawSlug.slice(0, 48).replace(/-+$/g, '') || 'item';
+  const prefix = kind === 'cli' ? 'cli' : kind === 'api' ? `api-${method.toLowerCase()}` : 'page';
+  let id = `${prefix}-${boundedSlug}-${fullHash.slice(0, 6)}`;
+  let suffix = 2;
+  while (seen.has(id)) {
+    id = `${prefix}-${boundedSlug}-${fullHash.slice(0, 8)}-${suffix}`;
+    suffix += 1;
+  }
+  seen.add(id);
+  return id;
+};
+
+const detectHarnesses = (dir, files, deps, scripts) => {
+  const found = new Set();
+  if (deps.playwright || deps['@playwright/test'] || files.some((f) => /^playwright\.config\.[cm]?[jt]s$/.test(f))) found.add('playwright');
+  if (deps.cypress || files.some((f) => /^cypress\.config\.[cm]?[jt]s$/.test(f))) found.add('cypress');
+  if (deps.vitest || files.some((f) => /^vitest\.config\.[cm]?[jt]s$/.test(f))) found.add('vitest');
+  if (deps.jest || files.some((f) => /^jest\.config\.[cm]?[jt]s$/.test(f))) found.add('jest');
+  if ((scripts.test && /node\s+--test/.test(scripts.test)) || files.some((f) => /\.test\.[cm]?js$/.test(f))) found.add('node-test');
+  if (existsSync(path.join(dir, 'pytest.ini')) || files.some((f) => /^tests?\/.*test_.*\.py$/.test(f))) found.add('pytest');
+  if (existsSync(path.join(dir, 'go.mod')) && files.some((f) => /_test\.go$/.test(f))) found.add('go-test');
+  if (existsSync(path.join(dir, 'Cargo.toml')) && files.some((f) => /^tests\/.*\.rs$/.test(f))) found.add('cargo-test');
+  return [...found].sort();
+};
+
 const routesFromFiles = (files) => {
-  const routes = new Set();
+  const byKey = new Map();
+  const put = (route, source) => {
+    const key = `page:GET:${route}`;
+    if (!byKey.has(key)) byKey.set(key, { kind: 'page', method: 'GET', path: route, source });
+  };
   for (const file of files) {
     const appRoute = /^app\/(.+?)\/page\.[cm]?[jt]sx?$/.exec(file);
     if (appRoute) {
-      const route = `/${appRoute[1]}`.replace(/\/index$/, '/');
-      routes.add(route);
+      put(`/${appRoute[1]}`.replace(/\/index$/, '/'), file);
       continue;
     }
-    if (/^app\/page\.[cm]?[jt]sx?$/.test(file)) routes.add('/');
+    if (/^app\/page\.[cm]?[jt]sx?$/.test(file)) put('/', file);
     const pageRoute = /^pages\/(.+?)\.[cm]?[jt]sx?$/.exec(file);
     if (pageRoute && !/^pages\/(_app|_document|api\/)/.test(file)) {
-      routes.add(`/${pageRoute[1]}`.replace(/\/index$/, '/'));
+      put(`/${pageRoute[1]}`.replace(/\/index$/, '/'), file);
     }
   }
-  return [...routes];
+  return [...byKey.values()];
 };
 
 const routesFromSource = async (root, files) => {
-  const routes = new Set();
+  const byKey = new Map();
+  const put = (method, route, source) => {
+    const upper = String(method || 'GET').toUpperCase();
+    const key = `api:${upper}:${route}`;
+    if (!byKey.has(key)) byKey.set(key, { kind: 'api', method: upper, path: route, source });
+  };
   for (const file of files.filter((entry) => /\.(?:[cm]?[jt]sx?|py|go)$/.test(entry)).slice(0, 800)) {
     const text = await readText(path.join(root, file));
-    for (const match of text.matchAll(/(?:app|router)\.(?:get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]/g)) routes.add(match[1]);
-    for (const match of text.matchAll(/@(?:app|router)\.(?:get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]/g)) routes.add(match[1]);
-    for (const match of text.matchAll(/@(?:app|router)\.route\(\s*['"]([^'"]+)['"]/g)) routes.add(match[1]);
+    for (const match of text.matchAll(/(?:app|router)\.(get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]/g)) put(match[1], match[2], file);
+    for (const match of text.matchAll(/@(?:app|router)\.(get|post|put|delete|patch)\(\s*['"]([^'"]+)['"]/g)) put(match[1], match[2], file);
+    for (const match of text.matchAll(/@(?:app|router)\.route\(\s*['"]([^'"]+)['"]([^)]*)/g)) {
+      const methods = [...match[2].matchAll(/['"](GET|POST|PUT|DELETE|PATCH)['"]/gi)].map((m) => m[1].toUpperCase());
+      for (const method of methods.length ? methods : ['GET']) put(method, match[1], file);
+    }
   }
-  return [...routes];
+  return [...byKey.values()];
 };
 
-export const scanApp = async (root) => {
+export const scanApp = async (root, options = {}) => {
   const dir = path.resolve(root);
+  const limit = options.limit === Infinity
+    ? Infinity
+    : (Number.isInteger(options.limit) && options.limit > 0 ? options.limit : 30);
   const files = await walk(dir);
   const pkg = await readJson(path.join(dir, 'package.json'));
   const scripts = pkg?.scripts || {};
@@ -93,6 +140,7 @@ export const scanApp = async (root) => {
   const scriptText = Object.values(scripts).join('\n');
   const defaultPort = stack.includes('next') || stack.includes('react') || stack.includes('vite') ? 3000 : 8000;
   const port = detectPort(`${envText}\n${scriptText}`, defaultPort);
+  const harnesses = detectHarnesses(dir, files, deps, scripts);
 
   let launch = '';
   if (scripts.dev) launch = 'npm run dev';
@@ -108,22 +156,41 @@ export const scanApp = async (root) => {
   else if (stack.includes('go')) test = 'go test ./...';
   else if (stack.includes('rust')) test = 'cargo test';
 
-  const fileRoutes = routesFromFiles(files);
-  const sourceRoutes = await routesFromSource(dir, files);
-  const routes = [...new Set([...fileRoutes, ...sourceRoutes])].sort().slice(0, 8);
   const bin = pkg?.bin && typeof pkg?.bin === 'object' ? Object.keys(pkg.bin) : [];
+  const cliCount = Math.min(bin.length, 4, limit);
+  const routeLimit = Math.max(0, limit - cliCount);
+  const discoveredRoutes = [...routesFromFiles(files), ...(await routesFromSource(dir, files))]
+    .sort((a, b) => `${a.kind}:${a.path}:${a.method}`.localeCompare(`${b.kind}:${b.path}:${b.method}`))
+    .slice(0, routeLimit);
 
+  const seenIds = new Set();
   const features = [];
-  for (const route of routes) {
+  for (const route of discoveredRoutes) {
+    const id = makeFeatureId(route.kind, route.method, route.path, seenIds);
+    const isApi = route.kind === 'api';
     features.push({
-      name: `页面或接口 ${route}`,
-      howToReach: `启动后访问 ${route}`,
-      drive: '先走一条真实用户路径，记录请求或点击步骤；不要用内部 setter 或测试专用端点。',
-      endState: '页面显示预期内容、接口返回 2xx，并且相关副作用（文件、数据库行、消息）能在证据里看到。',
+      id,
+      kind: route.kind,
+      method: route.method,
+      entrypoint: isApi ? `${route.method} ${route.path}` : route.path,
+      source: route.source,
+      name: isApi ? `接口 ${route.method} ${route.path}` : `页面 ${route.path}`,
+      howToReach: isApi ? `启动后调用 ${route.method} ${route.path}` : `启动后访问 ${route.path}`,
+      drive: isApi
+        ? '构造真实最小载荷发起请求，核对响应状态与返回结构；不要用内部 setter 或测试专用端点。'
+        : '走一条真实用户路径，记录请求或点击步骤；不要用内部 setter 或测试专用端点。',
+      endState: isApi
+        ? '接口返回预期 2xx 状态码，响应字段与持久化副作用（文件或数据库行）可在证据里核对。'
+        : '页面显示预期内容、无未捕获报错，相关副作用（文件、数据库行、消息）能在证据里看到。',
     });
   }
-  for (const name of bin.slice(0, 4)) {
+  for (const name of bin.slice(0, cliCount)) {
+    const id = makeFeatureId('cli', 'CLI', name, seenIds);
     features.push({
+      id,
+      kind: 'cli',
+      method: 'CLI',
+      entrypoint: name,
       name: `CLI 命令 ${name}`,
       howToReach: `运行 ${name} --help，再跑一条最小真实命令`,
       drive: '在隔离目录里运行，不要动用户真实数据。',
@@ -132,6 +199,10 @@ export const scanApp = async (root) => {
   }
   if (!features.length) {
     features.push({
+      id: 'main-flow',
+      kind: 'flow',
+      method: 'FLOW',
+      entrypoint: '待确认',
       name: '主流程（待确认）',
       howToReach: '先问用户：这个项目最重要的用户操作是什么',
       drive: '确认入口后再写驱动步骤；不要猜。',
@@ -143,6 +214,7 @@ export const scanApp = async (root) => {
     root: dir,
     name: pkg?.name || path.basename(dir),
     stack,
+    harnesses,
     launch: launch || null,
     readyHint: launch ? `端口 ${port} 可访问，或启动日志出现 ready` : '未识别启动命令；先问用户',
     test: test || null,
@@ -152,10 +224,12 @@ export const scanApp = async (root) => {
   };
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   const rootIndex = args.indexOf('--root');
+  const limitIndex = args.indexOf('--limit');
   const root = rootIndex >= 0 && args[rootIndex + 1] ? args[rootIndex + 1] : process.cwd();
-  const result = await scanApp(root);
+  const limit = limitIndex >= 0 && args[limitIndex + 1] ? Number(args[limitIndex + 1]) : undefined;
+  const result = await scanApp(root, { limit });
   console.log(JSON.stringify(result, null, 2));
 }
