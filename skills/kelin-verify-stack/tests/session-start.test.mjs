@@ -137,3 +137,24 @@ test('SessionStart rejects untrusted state fields and malformed verify skill nam
   assert.match(text, /未初始化/);
   assert.match(text, /verify-good-1/);
 });
+
+test('SessionStart recognizes audit phase, injects companion skills and onboarding state', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-session-audit-'));
+  await mkdir(path.join(dir, '.kelin'), { recursive: true });
+  await writeFile(path.join(dir, '.kelin', 'state.json'), JSON.stringify({ mode: 'audit', phase: 'audit' }));
+
+  const first = run({ hook_event_name: 'SessionStart' }, { ZCODE_PROJECT_DIR: dir });
+  assert.equal(first.status, 0, first.stderr);
+  const firstCtx = JSON.parse(first.stdout).hookSpecificOutput.additionalContext;
+  assert.match(firstCtx, /mode=audit phase=audit/);
+  assert.match(firstCtx, /kelin-audit/);
+  assert.match(firstCtx, /未检测到工作流规则块/);
+  assert.match(firstCtx, /kelin mode setup/);
+
+  await writeFile(path.join(dir, 'AGENTS.md'), '# Rules\n<!-- kelin:workflow:start -->\n- test\n<!-- kelin:workflow:end -->\n');
+  const second = run({ hook_event_name: 'SessionStart' }, { ZCODE_PROJECT_DIR: dir });
+  assert.equal(second.status, 0, second.stderr);
+  const secondCtx = JSON.parse(second.stdout).hookSpecificOutput.additionalContext;
+  assert.match(secondCtx, /AGENTS\.md 已就绪/);
+  assert.doesNotMatch(secondCtx, /未检测到工作流规则块/);
+});

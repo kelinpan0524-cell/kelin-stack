@@ -9,8 +9,8 @@
   },
   "repository": "https://github.com/kelinpan0524-cell/kelin-stack",
   "suggestedPrompts": [
+    "用 kelin mode setup 一键接入当前项目并检查环境",
     "用 kelin-mode 规划并实现这个需求",
-    "用 kelin-review 审查当前改动并给出 file:line 证据",
-    "用 kelin-neat 对齐仓库文档与代码事实"
+    "用 kelin-review 审查当前改动并给出 file:line 证据"
   ]
 }

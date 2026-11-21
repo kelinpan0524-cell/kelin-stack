@@ -2,13 +2,14 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { PHASE_TABLE, phaseMeta } from '../skills/kelin-mode/scripts/mode.mjs';
 
 const hostIndex = process.argv.indexOf('--host');
 const hostArg = hostIndex >= 0 ? process.argv[hostIndex + 1] || '' : '';
 const explicitAgy = hostArg === 'antigravity';
 
 const VALID_MODES = new Set(['feature', 'fix', 'legacy', 'audit', 'light']);
-const VALID_PHASES = new Set(['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done']);
+const VALID_PHASES = new Set(Object.keys(PHASE_TABLE));
 const VALID_SKILL = /^verify-[a-z0-9][a-z0-9-]{0,62}$/;
 const VALID_SAFETY = new Set(['off', 'relaxed', 'strict']);
 
@@ -113,19 +114,37 @@ const mode = readSafetyMode();
 const state = readState();
 const verifySkills = findVerifySkills();
 const frozen = Boolean(projectDir) && existsSync(path.join(projectDir, '.kelin', 'freeze.json'));
+const agentsOnboarded = Boolean(projectDir)
+  && existsSync(path.join(projectDir, 'AGENTS.md'))
+  && readFileSync(path.join(projectDir, 'AGENTS.md'), 'utf8').includes('<!-- kelin:workflow:start -->');
+
+const stateLine = (() => {
+  if (!state) {
+    return projectDir
+      ? '当前流程：未初始化；直接用 kelin mode 或说“kelin mode setup”一键接入项目。'
+      : '当前流程：未打开工作区；打开项目后用 kelin-mode init。';
+  }
+  const active = phaseMeta(state.phase, state.mode).activeSkills;
+  return active.length
+    ? `当前流程：mode=${state.mode} phase=${state.phase}（本阶段配套：${active.join('、')}）。`
+    : `当前流程：mode=${state.mode} phase=${state.phase}。`;
+})();
+
+const verifyLine = verifySkills.length
+  ? `本地验证：${verifySkills.join('、')}；验证阶段优先按它的启动/体检/驱动/留证/清理执行。`
+  : '本地验证：未发现 verify-*；需要时用 kelin-verify-app 生成。';
 
 const lines = [
   `[kelin-stack ${version}] 已自动启用，用户不需要点名 skill。`,
   '入口：非平凡任务（跨 2 个文件、多步、产品/交付/审计）先加载 kelin-mode，按阶段调用；单文件小修直接做 + kelin-verify 快速档。',
   `自动：PreToolUse 安全钩子模式=${mode}（KELIN_SAFETY 或 ~/.kelin/safety.mode）；编辑冻结${frozen ? '已开启' : '未开启'}。`,
-  state
-    ? `当前流程：mode=${state.mode} phase=${state.phase}。`
-    : projectDir
-      ? '当前流程：未初始化；任务开始时用 kelin-mode init。'
-      : '当前流程：未打开工作区；打开项目后用 kelin-mode init。',
-  verifySkills.length
-    ? `本地验证：${verifySkills.join('、')}；验证阶段优先按它的启动/体检/驱动/留证/清理执行。`
-    : '本地验证：未发现 verify-*；需要时用 kelin-verify-app 生成。',
+  stateLine,
+  ...(projectDir
+    ? [agentsOnboarded
+      ? '项目接入：AGENTS.md 已就绪（可用 kelin mode setup 查看环境与验证配置）。'
+      : '项目接入：未检测到工作流规则块，可随时说“kelin mode setup”一键预览并接入 AGENTS.md/边界策略。']
+    : []),
+  verifyLine,
   '纪律：先证明再说完成；部署要人点头；真实数据不入库；秘密不落盘。不要等用户说“用 kelin-*”。',
 ];
 
