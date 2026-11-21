@@ -20,7 +20,7 @@ const SESSION_LIMIT = 12;
 
 const isIgnoredRuntimePath = (filePath) => /^\.kelin\/(?!ci\/)/.test(filePath);
 
-function hasNonRuntimeChanges(porcelainZStdout) {
+export function hasNonRuntimeChanges(porcelainZStdout) {
   const tokens = String(porcelainZStdout || '').split('\0');
   for (let i = 0; i < tokens.length; i += 1) {
     const entry = tokens[i];

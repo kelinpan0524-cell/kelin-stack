@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { hashTree, sha256 } from '../scripts/io.mjs';
 import { collectArtifacts } from '../scripts/harness.mjs';
-import { publish } from '../scripts/verify-stack.mjs';
+import { publish, hasNonRuntimeChanges } from '../scripts/verify-stack.mjs';
 
 const releaseScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-release', 'scripts', 'release.mjs');
 
@@ -366,7 +366,6 @@ test('release, verify-stack dirty rename, parseTranscript, directory artifact, g
   const { chmodSync, rmSync } = await import('node:fs');
   const { readFile } = await import('node:fs/promises');
   const { parseTranscript, evaluateAssertions } = await import('../scripts/harness.mjs');
-  const verifyStackScript = path.resolve(import.meta.dirname, '..', 'scripts', 'verify-stack.mjs');
 
   // P1-1 & P2-1: dry-run skips gh by default, --check-ci queries -R owner/repo and enforces expected workflows + exact headSha
   const { dir, head, git } = await initPluginGitRepo();
@@ -440,19 +439,24 @@ test('release, verify-stack dirty rename, parseTranscript, directory artifact, g
     rmSync(binDir, { recursive: true, force: true });
   }
 
-  // P1-3: staged rename to .kelin/ triggers dirty detection
+  // P1-3: staged rename to .kelin/ triggers dirty detection cleanly without zcode CLI
+  assert.equal(hasNonRuntimeChanges('?? .kelin/state.json\0'), false);
+  const preMoveHead = git(['rev-parse', 'HEAD']);
+  const preMoveTree = await hashTree(dir);
   await mkdir(path.join(dir, '.kelin'), { recursive: true });
   git(['mv', 'extra.txt', '.kelin/moved.txt']);
+  const porcelainZ = execFileSync('git', ['status', '--porcelain=v1', '-z'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(hasNonRuntimeChanges(porcelainZ), true);
   const outVs = await mkdtemp(path.join(tmpdir(), 'kelin-vs-mv-'));
-  const vsRun = spawnSync(
-    process.execPath,
-    [verifyStackScript, 'run', '--output', outVs, '--plugin', dir, '--no-live', '--feature', 'zcode:manifest'],
-    { encoding: 'utf8' },
-  );
-  assert.equal(vsRun.status, 0, vsRun.stderr);
-  const vsReceipt = JSON.parse(await readFile(path.join(outVs, 'receipt.json'), 'utf8'));
-  assert.equal(vsReceipt.plugin.dirty, true);
-  await assert.rejects(() => publish({ confirm: true, repo: 'acme/demo', pr: 1, run: outVs }), /dirty checkout/);
+  await writeFile(path.join(outVs, 'art.json'), '{"ok":true}\n');
+  await writeFile(path.join(outVs, 'receipt.json'), JSON.stringify({
+    ok: true,
+    plugin: { name: 'demo', version: '0.1.0', root: dir, gitHead: preMoveHead, dirty: false, treeHash: preMoveTree.hash, treeHashAfter: preMoveTree.hash },
+    features: ['zcode:manifest'],
+    expectedCases: [{ feature: 'zcode:manifest', caseId: 'c1' }],
+    observations: [{ feature: 'zcode:manifest', case: 'c1', kind: 'static', ok: true, assertions: [{ id: 'a', ok: true }], artifacts: [{ path: 'art.json', sha256: sha256('{"ok":true}\n') }] }],
+  }));
+  await assert.rejects(() => publish({ confirm: true, repo: 'acme/demo', pr: 1, run: outVs }), /uncommitted modifications/);
   git(['reset', '--hard', '-q', 'HEAD']);
 
   // P1-4: shared parseTranscript fails on corrupt JSONL lines
