@@ -111,6 +111,24 @@ export function evaluateRatchet(spec, { root, baseSpec = null, today = new Date(
       const refRule = baseRules.get(rule.id);
       const refCounts = new Map();
       if (refRule) {
+        const refFlags = [...new Set(String(refRule.flags || '').replace(/[gy]/g, '').split(''))].sort().join('');
+        const curFlags = [...new Set(flags.split(''))].sort().join('');
+        const refIncludes = new Set(Array.isArray(refRule.include) ? refRule.include : []);
+        const curIncludes = new Set(Array.isArray(rule.include) ? rule.include : []);
+        const refExcludes = new Set(Array.isArray(refRule.exclude) ? refRule.exclude : []);
+        const curExcludes = new Set(Array.isArray(rule.exclude) ? rule.exclude : []);
+        const droppedInclude = [...refIncludes].some((p) => !curIncludes.has(p));
+        const addedExclude = [...curExcludes].some((p) => !refExcludes.has(p));
+        if (String(refRule.pattern || '') !== String(rule.pattern || '') || refFlags !== curFlags || droppedInclude || addedExclude) {
+          baselineRegressions.push({
+            rule: rule.id,
+            file: 'ratchet.json',
+            match: String(rule.pattern || '').slice(0, 120),
+            baseCount: (refRule.baseline || []).length,
+            currentCount: (rule.baseline || []).length,
+            kind: 'changed-rule-definition',
+          });
+        }
         for (const entry of refRule.baseline || []) {
           const key = `${entry.file}\0${normalizeLine(entry.match)}`;
           refCounts.set(key, (refCounts.get(key) || 0) + (Number.isInteger(entry.count) && entry.count > 0 ? entry.count : 1));

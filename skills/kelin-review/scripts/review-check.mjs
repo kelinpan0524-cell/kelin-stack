@@ -8,29 +8,77 @@ import { computeWorktreeFingerprint } from './fingerprint.mjs';
 const stripFenced = (text) => {
   const lines = String(text || '').split(/\r?\n/);
   const out = [];
-  let fence = '';
-  for (const line of lines) {
-    const trimmed = line.trim();
-    const match = /^(`{3,}|~{3,})/.exec(trimmed);
-    if (match) {
-      if (!fence) fence = match[1][0];
-      else if (fence === match[1][0] && trimmed.length >= 3) fence = '';
-      continue;
+  let fenceChar = '';
+  let fenceLen = 0;
+  let inComment = false;
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (!inComment) {
+      const fenceMatch = /^(`{3,}|~{3,})/.exec(trimmed);
+      if (!fenceChar && fenceMatch) {
+        fenceChar = fenceMatch[1][0];
+        fenceLen = fenceMatch[1].length;
+        out.push('');
+        continue;
+      }
+      if (fenceChar) {
+        const closeMatch = new RegExp(`^${fenceChar === '~' ? '~' : '`'}{${fenceLen},}\\s*$`);
+        if (closeMatch.test(trimmed)) {
+          fenceChar = '';
+          fenceLen = 0;
+        }
+        out.push('');
+        continue;
+      }
     }
-    if (!fence) out.push(line);
+    let line = rawLine;
+    let rebuilt = '';
+    while (line.length) {
+      if (inComment) {
+        const end = line.indexOf('-->');
+        if (end < 0) {
+          line = '';
+          break;
+        }
+        inComment = false;
+        line = line.slice(end + 3);
+      } else {
+        const start = line.indexOf('<!--');
+        if (start < 0) {
+          rebuilt += line;
+          line = '';
+          break;
+        }
+        rebuilt += line.slice(0, start);
+        const end = line.indexOf('-->', start + 4);
+        if (end < 0) {
+          inComment = true;
+          line = '';
+          break;
+        }
+        line = line.slice(end + 3);
+      }
+    }
+    if (!inComment || rebuilt.trim()) out.push(rebuilt);
+    else out.push('');
   }
   return out.join('\n');
 };
 
 export function hasUnresolvedHighSeverity(markdown) {
   const clean = stripFenced(markdown);
-  const explicitClosureRe = /(?:(?:\(|\[|【|\|\s*)(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)(?:\s*\)|\s*\]|】|\s*\||$)|(?:状态|status)\s*[:：]\s*(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)(?=$|[\s|,.;:!?。；，]))/i;
+  const explicitTableCellRe = /^\|.*\|\s*(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)\s*\|/i;
+  const explicitStatusFieldRe = /(?:^|[\s|;；,，(（\[【])(?:状态|status)\s*[:：]\s*(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)(?=$|[\s|;；,，)）\]】.。])/i;
+  const leadingTagRe = /^(?:[-*+]|\d+\.)\s*(?:\[|【)\s*(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)\s*(?:\]|】)(?:\s|$|:|：)/i;
   for (const rawLine of clean.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || /^\|?[\s:-]+\|[\s|:-]*$/.test(line)) continue;
     if (/\bP[01]\s*[:=]\s*[1-9]\d*\b/i.test(line)) return true;
     if (/^[-*+]\s*\[[xX]\]/.test(line)) continue;
-    if (!/^[-*+]\s*\[\s\]/.test(line) && explicitClosureRe.test(line)) continue;
+    const isClosedItem =
+      !/^[-*+]\s*\[\s\]/.test(line)
+      && (explicitTableCellRe.test(line) || explicitStatusFieldRe.test(line) || leadingTagRe.test(line));
+    if (isClosedItem) continue;
 
     const scrubbed = line
       .replace(/\bP0\s*[-–—~]\s*P[123]\b/gi, '')
@@ -64,8 +112,8 @@ const main = () => {
     process.exit(2);
   }
 
-  const stampFile = path.join(wt.repo, '.kelin', 'review.json');
-  const defaultReviewFile = path.join(wt.repo, '.kelin', 'review.md');
+  const stampFile = path.join(root, '.kelin', 'review.json');
+  const defaultReviewFile = path.join(root, '.kelin', 'review.md');
   const inspectMode = !args.includes('--write') && !args.includes('--print');
   let stampData = null;
   if (inspectMode && !reviewFile && existsSync(stampFile)) {
@@ -77,8 +125,16 @@ const main = () => {
   }
 
   const repoReal = realpathSync(wt.repo);
-  const isInsideRepo = (candidateReal) => candidateReal === repoReal || candidateReal.startsWith(`${repoReal}${path.sep}`);
+  const isInsideRepo = (candidatePath) => candidatePath === repoReal || candidatePath.startsWith(`${repoReal}${path.sep}`);
+  const canonicalizeParent = (targetPath) => {
+    try {
+      return path.join(realpathSync(path.dirname(targetPath)), path.basename(targetPath));
+    } catch {
+      return path.resolve(targetPath);
+    }
+  };
   let activeReviewPath = '';
+  let storedReportFile = '';
   let missingStampedReport = false;
   if (reviewFile) {
     const rawTarget = path.resolve(root, reviewFile);
@@ -86,10 +142,18 @@ const main = () => {
       console.error(`${reviewFile}: not found`);
       process.exit(2);
     }
-    activeReviewPath = realpathSync(rawTarget);
+    const canonicalRaw = canonicalizeParent(rawTarget);
+    const targetReal = realpathSync(rawTarget);
+    if (!isInsideRepo(canonicalRaw) || !isInsideRepo(targetReal)) {
+      console.error(`${reviewFile}: must be inside git repository ${repoReal}`);
+      process.exit(2);
+    }
+    activeReviewPath = targetReal;
+    storedReportFile = path.relative(repoReal, canonicalRaw);
   } else if (inspectMode && stampData && typeof stampData.reportFile === 'string' && stampData.reportFile) {
     const candidate = path.resolve(repoReal, stampData.reportFile);
-    if (!existsSync(candidate)) {
+    const canonicalCandidate = canonicalizeParent(candidate);
+    if (!isInsideRepo(canonicalCandidate) || !existsSync(candidate)) {
       missingStampedReport = true;
     } else {
       const candidateReal = realpathSync(candidate);
@@ -100,7 +164,14 @@ const main = () => {
       }
     }
   } else if (existsSync(defaultReviewFile)) {
-    activeReviewPath = realpathSync(defaultReviewFile);
+    const canonicalDefault = canonicalizeParent(defaultReviewFile);
+    const defaultReal = realpathSync(defaultReviewFile);
+    if (isInsideRepo(canonicalDefault) && isInsideRepo(defaultReal)) {
+      activeReviewPath = defaultReal;
+      storedReportFile = path.relative(repoReal, canonicalDefault);
+    } else {
+      missingStampedReport = true;
+    }
   }
 
   let reportHash = null;
@@ -119,7 +190,7 @@ const main = () => {
     files: wt.files,
     verdict: reportVerdict,
     reportHash,
-    ...(activeReviewPath ? { reportFile: isInsideRepo(activeReviewPath) ? path.relative(repoReal, activeReviewPath) : activeReviewPath } : {}),
+    ...(storedReportFile ? { reportFile: storedReportFile } : {}),
     createdAt: new Date().toISOString(),
   };
 

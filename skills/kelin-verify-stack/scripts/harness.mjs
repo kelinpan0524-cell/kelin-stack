@@ -26,23 +26,30 @@ async function waitFor(file, timeoutMs = 8000) {
   return existsSync(file);
 }
 
-async function readRollout(file) {
+export function parseTranscript(text, label = 'transcript') {
+  const rawToolCalls = [];
   const toolCalls = [];
   const responses = [];
-  const lines = (await readFile(file, 'utf8')).split('\n');
-  for (const line of lines) {
+  for (const line of String(text || '').split('\n')) {
     if (!line.trim()) continue;
     let row;
     try {
       row = JSON.parse(line);
     } catch {
-      continue;
+      throw new Error(`Malformed transcript line in ${label}`);
     }
-    const response = row.response || {};
-    for (const call of response.toolCalls || []) toolCalls.push({ name: call.name, input: call.input ?? {} });
+    const response = row?.response || {};
+    for (const call of response.toolCalls || []) {
+      rawToolCalls.push(call);
+      toolCalls.push({ name: call.name, input: call.input ?? {} });
+    }
     if (typeof response.text === 'string' && response.text.trim()) responses.push(response.text.trim());
   }
-  return { toolCalls, responses };
+  return { rawToolCalls, toolCalls, responses };
+}
+
+async function readRollout(file) {
+  return parseTranscript(await readFile(file, 'utf8'), file);
 }
 
 export async function runSession({ zcodeRef, prompt, fixtureDir, sessionDir, timeoutMs = 300_000, env = {} }) {
@@ -81,7 +88,7 @@ export async function runSession({ zcodeRef, prompt, fixtureDir, sessionDir, tim
     if (await waitFor(candidate)) {
       rolloutFile = path.join(sessionDir, 'rollout.jsonl');
       await copyFile(candidate, rolloutFile);
-      rollout = await readRollout(candidate);
+      rollout = await readRollout(rolloutFile);
     }
   }
   return {
@@ -189,11 +196,18 @@ export async function evaluateAssertions(assertions, ctx) {
         case 'plan_valid': {
           const target = safeJoin(ctx.fixtureDir, rule.path);
           const body = existsSync(target) ? await readFile(target, 'utf8') : '';
-          const pluginChecker = ctx.pluginRoot
-            ? path.resolve(ctx.pluginRoot, 'skills', 'kelin-plan', 'scripts', 'check-plan.mjs')
-            : '';
           const fallbackChecker = path.resolve(import.meta.dirname, '..', '..', 'kelin-plan', 'scripts', 'check-plan.mjs');
-          const checker = pluginChecker && existsSync(pluginChecker) ? pluginChecker : fallbackChecker;
+          let checker = fallbackChecker;
+          if (ctx.pluginRoot) {
+            const pluginPlanDir = path.resolve(ctx.pluginRoot, 'skills', 'kelin-plan');
+            const pluginChecker = path.resolve(pluginPlanDir, 'scripts', 'check-plan.mjs');
+            if (existsSync(pluginPlanDir)) {
+              if (!existsSync(pluginChecker)) {
+                throw new Error(`Missing kelin-plan validator in target plugin: ${pluginChecker}`);
+              }
+              checker = pluginChecker;
+            }
+          }
           const { validatePlanMarkdown } = await import(pathToFileURL(checker).href);
           const res = validatePlanMarkdown(body, rule.level || 'standard');
           ok = res.ok;

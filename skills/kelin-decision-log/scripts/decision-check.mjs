@@ -21,7 +21,7 @@ const warnings = [];
 const header = 'ts\tphase\tdecision\twhy\tevidence\tresult';
 const phases = /^(设计|实现|验证|发布|复盘|start|design|build|verify|release|retro)$/i;
 const results = /^(待验证|有效|有害|pending|valid|harmful|ok|start)$/i;
-const nonUrlPointer = /(?:[0-9a-f]{7,40}|[\w./-]+:\d+|[\w./-]+\.(?:json|md|log|txt|tsv|xlsx|png|jpe?g|pdf)\b|PR\s*#?\d+|#\d+|agent-[\w-]+|session-[\w-]+)/i;
+const nonUrlPointer = /(?:\b[0-9a-f]{7,40}\b|[\w./-]+:\d+|[\w./-]+\.(?:json|md|log|txt|tsv|xlsx|png|jpe?g|pdf)\b|PR\s*#?\d+|#\d+|agent-[\w-]+|session-[\w-]+)/i;
 const isoTsRe = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
 
 const isValidIsoTimestamp = (ts) => {
@@ -43,7 +43,11 @@ const isTraceableEvidence = (text) => {
       const u = new URL(cleaned);
       const h = u.hostname;
       if (!h || h.startsWith('.') || h.endsWith('.')) return false;
-      return h === 'localhost' || /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(h) || /^\[[0-9a-f:]+\]$/i.test(h);
+      return (
+        h === 'localhost'
+        || /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/.test(h)
+        || /^\[[0-9a-f:]+\]$/i.test(h)
+      );
     } catch {
       return false;
     }

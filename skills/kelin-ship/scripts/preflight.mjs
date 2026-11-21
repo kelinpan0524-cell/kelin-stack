@@ -4,10 +4,15 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
+const option = (name, fallback = '') => {
+  const index = args.indexOf(name);
+  return index >= 0 && args[index + 1] ? args[index + 1] : fallback;
+};
+const root = path.resolve(option('--root', process.cwd()));
 const noReview = args.includes('--no-review');
 const requireReview = args.includes('--require-review');
 const strictGates = args.includes('--strict-gates');
-const git = (argv) => spawnSync('git', argv, { encoding: 'utf8' });
+const git = (argv) => spawnSync('git', ['-C', root, ...argv], { encoding: 'utf8' });
 const must = (argv) => {
   const result = git(argv);
   if (result.status !== 0) {
@@ -30,14 +35,14 @@ if (['main', 'master'].includes(branch)) {
 }
 
 let review = null;
-const reviewFile = path.join(process.cwd(), '.kelin', 'review.json');
+const reviewFile = path.join(root, '.kelin', 'review.json');
 if (!noReview) {
   if (existsSync(reviewFile)) {
     const script = path.resolve(import.meta.dirname, '..', '..', '..', 'skills', 'kelin-review', 'scripts', 'review-check.mjs');
     if (!existsSync(script)) {
       add('review-check-missing', 'P0', 'review stamp exists but review-check.mjs is unavailable');
     } else {
-      const check = spawnSync(process.execPath, [script], { cwd: process.cwd(), encoding: 'utf8' });
+      const check = spawnSync(process.execPath, [script, '--root', root], { cwd: root, encoding: 'utf8' });
       let payload = null;
       try {
         payload = JSON.parse(check.stdout);
@@ -82,7 +87,7 @@ if (staged.length > 0) {
   if (!existsSync(gateScript)) {
     add('gate-scan-error', strictGates ? 'P0' : 'P1', 'gate-scan.mjs is missing');
   } else {
-    const scan = spawnSync(process.execPath, [gateScript, '--staged'], { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const scan = spawnSync(process.execPath, [gateScript, '--root', root, '--staged'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
     let scanPayload = null;
     try {
       scanPayload = scan.stdout ? JSON.parse(scan.stdout) : null;

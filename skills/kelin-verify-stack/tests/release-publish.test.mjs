@@ -361,3 +361,148 @@ test('publish() rejects invalid gitHead & missing Skill transcript call; release
     process.env.PATH = prevPath;
   }
 });
+
+test('release, verify-stack dirty rename, parseTranscript, directory artifact, gate.md tamper & plan_valid pluginRoot checks', async () => {
+  const { chmodSync, rmSync } = await import('node:fs');
+  const { readFile } = await import('node:fs/promises');
+  const { parseTranscript, evaluateAssertions } = await import('../scripts/harness.mjs');
+  const verifyStackScript = path.resolve(import.meta.dirname, '..', 'scripts', 'verify-stack.mjs');
+
+  // P1-1 & P2-1: dry-run skips gh by default, --check-ci queries -R owner/repo and enforces expected workflows + exact headSha
+  const { dir, head, git } = await initPluginGitRepo();
+  git(['remote', 'add', 'origin', 'https://github.com/acme/demo.git']);
+  await mkdir(path.join(dir, '.github', 'workflows'), { recursive: true });
+  await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), 'name: CI\non: [push]\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n');
+  git(['add', '-A']);
+  git(['commit', '-qm', 'add ci']);
+  const head2 = git(['rev-parse', 'HEAD']);
+
+  const drySkipped = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir], { encoding: 'utf8' }).stdout);
+  assert.equal(drySkipped.gates.ci.skipped, true);
+
+  const binDir = await mkdtemp(path.join(tmpdir(), 'kelin-rel-gh-'));
+  const ghBin = path.join(binDir, 'gh');
+  const ghLog = path.join(binDir, 'argv.txt');
+  const mockJson = path.join(binDir, 'runs.json');
+  await writeFile(ghBin, `#!/bin/sh\necho "$*" >> ${JSON.stringify(ghLog)}\ncat ${JSON.stringify(mockJson)}\n`);
+  chmodSync(ghBin, 0o755);
+  const prevPath = process.env.PATH || '';
+  process.env.PATH = `${binDir}:${prevPath}`;
+  try {
+    await writeFile(mockJson, JSON.stringify([{ name: 'Docs', workflowName: 'Docs', status: 'completed', conclusion: 'success', headSha: head2 }]));
+    const unrelatedWf = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--check-ci'], { encoding: 'utf8' }).stdout);
+    assert.equal(unrelatedWf.gates.ci.ok, false);
+    assert.match(unrelatedWf.gates.ci.reason, /CI/);
+
+    await writeFile(mockJson, JSON.stringify([{ name: 'CI', workflowName: 'CI', status: 'completed', conclusion: 'success', headSha: head }]));
+    const wrongSha = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--check-ci'], { encoding: 'utf8' }).stdout);
+    assert.equal(wrongSha.gates.ci.ok, false);
+
+    await writeFile(mockJson, JSON.stringify([{ name: 'CI', workflowName: 'CI', status: 'completed', conclusion: 'success', headSha: head2 }]));
+    const okCi = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--check-ci'], { encoding: 'utf8' }).stdout);
+    assert.equal(okCi.gates.ci.ok, true);
+    const logged = await (await import('node:fs/promises')).readFile(ghLog, 'utf8');
+    assert.match(logged, /-R acme\/demo/);
+
+    // P2-2: directory artifact returns structured error without throwing unhandled EISDIR
+    const dirArtRoot = await mkdtemp(path.join(tmpdir(), 'kelin-rel-dirart-'));
+    await mkdir(path.join(dirArtRoot, 'subdir'), { recursive: true });
+    const dirTree = await hashTree(dir);
+    const dirRec = path.join(dirArtRoot, 'receipt.json');
+    await writeFile(dirRec, JSON.stringify({
+      ok: true,
+      tool: 'kelin-verify-stack',
+      plugin: { name: 'demo', version: '0.1.0', gitHead: head2, dirty: false, treeHash: dirTree.hash, treeHashAfter: dirTree.hash },
+      features: ['zcode:manifest'],
+      expectedCases: [{ feature: 'zcode:manifest', caseId: 'c1' }],
+      observations: [{ feature: 'zcode:manifest', case: 'c1', kind: 'static', ok: true, assertions: [{ id: 'a', ok: true }], artifacts: [{ path: 'subdir', sha256: '0'.repeat(64) }] }],
+    }));
+    const dirArtRes = spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', dirRec], { encoding: 'utf8' });
+    assert.equal(dirArtRes.status, 0);
+    assert.equal(JSON.parse(dirArtRes.stdout).gates.receipt.ok, false);
+
+    // P1-2: pre-staged unrelated file aborts --publish --confirm without mutating manifests (offline mock gh)
+    await writeFile(path.join(dir, 'extra.txt'), 'unreleased\n');
+    git(['add', 'extra.txt']);
+    git(['commit', '-qm', 'baseline extra']);
+    const head3 = git(['rev-parse', 'HEAD']);
+    await writeFile(mockJson, JSON.stringify([{ name: 'CI', workflowName: 'CI', status: 'completed', conclusion: 'success', headSha: head3 }]));
+    await writeFile(path.join(dir, 'extra.txt'), 'staged change\n');
+    git(['add', 'extra.txt']);
+    const preStagedRel = spawnSync(process.execPath, [releaseScript, '--root', dir, '--publish', '--confirm'], { encoding: 'utf8' });
+    assert.notEqual(preStagedRel.status, 0);
+    const manifestVer = JSON.parse(await readFile(path.join(dir, '.zcode-plugin', 'plugin.json'), 'utf8')).version;
+    assert.equal(manifestVer, '0.1.0', 'aborted release must not bump manifest');
+    git(['reset', '--quiet']);
+    git(['checkout', '--', 'extra.txt']);
+  } finally {
+    process.env.PATH = prevPath;
+    rmSync(binDir, { recursive: true, force: true });
+  }
+
+  // P1-3: staged rename to .kelin/ triggers dirty detection
+  await mkdir(path.join(dir, '.kelin'), { recursive: true });
+  git(['mv', 'extra.txt', '.kelin/moved.txt']);
+  const outVs = await mkdtemp(path.join(tmpdir(), 'kelin-vs-mv-'));
+  const vsRun = spawnSync(
+    process.execPath,
+    [verifyStackScript, 'run', '--output', outVs, '--plugin', dir, '--no-live', '--feature', 'zcode:manifest'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(vsRun.status, 0, vsRun.stderr);
+  const vsReceipt = JSON.parse(await readFile(path.join(outVs, 'receipt.json'), 'utf8'));
+  assert.equal(vsReceipt.plugin.dirty, true);
+  await assert.rejects(() => publish({ confirm: true, repo: 'acme/demo', pr: 1, run: outVs }), /dirty checkout/);
+  git(['reset', '--hard', '-q', 'HEAD']);
+
+  // P1-4: shared parseTranscript fails on corrupt JSONL lines
+  assert.throws(() => parseTranscript('{"response":{"text":"ok"}}\n{broken\n', 'r.jsonl'), /Malformed transcript/);
+
+  // P2-4: plan_valid requires target plugin's check-plan.mjs when skills/kelin-plan exists
+  const badPlug = await mkdtemp(path.join(tmpdir(), 'kelin-badplan-'));
+  const fixDir = await mkdtemp(path.join(tmpdir(), 'kelin-fixplan-'));
+  await mkdir(path.join(badPlug, 'skills', 'kelin-plan'), { recursive: true });
+  await writeFile(path.join(fixDir, 'plan.md'), '# 目标\nok\n');
+  const planEval = await evaluateAssertions(
+    [{ id: 'p1', type: 'plan_valid', path: 'plan.md', level: 'light' }],
+    { fixtureDir: fixDir, pluginRoot: badPlug, toolCalls: [], modelTexts: [], response: '' },
+  );
+  assert.equal(planEval[0].ok, false);
+  assert.match(planEval[0].detail, /Missing kelin-plan validator/);
+
+  // P2-3: tampered gate.md does not alter published PR comment body
+  const pubRun = await mkdtemp(path.join(tmpdir(), 'kelin-pub-tamper-'));
+  const cleanHead = git(['rev-parse', 'HEAD']);
+  const cleanTree = await hashTree(dir);
+  const sDir = path.join(pubRun, 'sessions', 's1');
+  const fDir = path.join(sDir, 'fixture');
+  await mkdir(fDir, { recursive: true });
+  await writeFile(path.join(fDir, 'ok.txt'), 'ok\n');
+  const arts = await collectArtifacts(fDir, sDir, pubRun);
+  const goodTx = '{"response":{"toolCalls":[{"name":"Skill","input":{"skill":"demo:kelin-plan"}}]}}\n';
+  await writeFile(path.join(sDir, 'rollout.jsonl'), goodTx);
+  await writeFile(path.join(pubRun, 'gate.md'), 'SPOOFED COMMENT BODY\n');
+  await writeFile(path.join(pubRun, 'receipt.json'), JSON.stringify({
+    ok: true,
+    plugin: { name: 'demo', version: '0.1.0', root: dir, gitHead: cleanHead, dirty: false, treeHash: cleanTree.hash, treeHashAfter: cleanTree.hash },
+    features: ['zcode:manifest'],
+    expectedCases: [{ feature: 'zcode:manifest', caseId: 'c1' }],
+    sessionsRun: 0,
+    zcodeVersion: '1.0',
+    observations: [{ feature: 'zcode:manifest', case: 'c1', kind: 'static', ok: true, transcript: 'sessions/s1/rollout.jsonl', transcriptHash: sha256(goodTx), assertions: [{ id: 'a', ok: true }], artifacts: arts }],
+  }));
+  const mockBin = await mkdtemp(path.join(tmpdir(), 'kelin-gh-body-'));
+  const postedBodyFile = path.join(mockBin, 'posted.txt');
+  await writeFile(path.join(mockBin, 'gh'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(postedBodyFile)}\necho '{"html_url":"https://example.invalid/c/2"}'\n`);
+  chmodSync(path.join(mockBin, 'gh'), 0o755);
+  process.env.PATH = `${mockBin}:${prevPath}`;
+  try {
+    await publish({ confirm: true, repo: 'acme/demo', pr: 2, run: pubRun });
+    const argsCaptured = await (await import('node:fs/promises')).readFile(postedBodyFile, 'utf8');
+    assert.doesNotMatch(argsCaptured, /SPOOFED COMMENT BODY/);
+    assert.match(argsCaptured, /kelin-verify-stack evidence/);
+  } finally {
+    process.env.PATH = prevPath;
+    rmSync(mockBin, { recursive: true, force: true });
+  }
+});

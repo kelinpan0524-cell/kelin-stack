@@ -144,7 +144,10 @@ test('mode.mjs design phase enforces check-plan and plan-gate when structured ar
   await writeFile(path.join(dir, '.kelin', 'scope.md'), 'src/export.mjs\n');
   execFileSync(process.execPath, [modeScript, 'advance', '--root', dir]);
 
-  await writeFile(path.join(dir, '.kelin', 'goal.md'), '# 目标\n加速导出\n');
+  await writeFile(
+    path.join(dir, '.kelin', 'goal.md'),
+    '# 目标\n加速导出\n\n# 完成条件\n- [ ] `node -e "process.exit(0)"` 通过\n\n# 约束\n- 保持兼容\n\n# 检查点\n- 设计审核\n',
+  );
   await writeFile(path.join(dir, '.kelin', 'plan.md'), '# 目标\n加速导出\n');
   const badPlanAdv = run(modeScript, ['advance', '--root', dir], dir);
   assert.equal(badPlanAdv.status, 1);
@@ -278,4 +281,36 @@ test('check-plan ignores fenced code blocks, rejects empty checkboxes and bare b
   );
   assert.equal(weirdRes.ok, false);
   assert.ok(weirdRes.problems.some((p) => p.code === 'lens-not-approved'));
+});
+
+test('check-plan ignores 4-space indented code blocks inside acceptance section while keeping nested list checkboxes', async () => {
+  const { validatePlanMarkdown } = await import(pathToFileURL(checkPlan).href);
+  const codeBlockOnlyPlan = [
+    '# 目标',
+    '小修验证。',
+    '',
+    '# 验收标准',
+    '示例格式：',
+    '',
+    '    - [ ] `node -e "process.exit(0)"`',
+    '',
+    '# 下一步',
+    '实施后跑单测。',
+  ].join('\n');
+  const rejected = validatePlanMarkdown(codeBlockOnlyPlan, 'light');
+  assert.equal(rejected.ok, false);
+  assert.ok(rejected.problems.some((p) => p.includes('no checkbox')));
+
+  const nestedListPlan = [
+    '# 目标',
+    '小修验证。',
+    '',
+    '# 验收标准',
+    '- 主要功能：',
+    '    - [ ] `node -e "process.exit(0)"` 通过',
+    '',
+    '# 下一步',
+    '实施后跑单测。',
+  ].join('\n');
+  assert.equal(validatePlanMarkdown(nestedListPlan, 'light').ok, true);
 });

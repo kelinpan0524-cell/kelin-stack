@@ -9,6 +9,20 @@ import test from 'node:test';
 const script = path.resolve(import.meta.dirname, '..', '..', 'kelin-mode', 'scripts', 'mode.mjs');
 const runAcceptance = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify', 'scripts', 'run-acceptance.mjs');
 
+const validGoal = [
+  '# 目标',
+  '实现功能并通过验收。',
+  '',
+  '# 完成条件',
+  '- [ ] `node -e "process.exit(0)"` 退出 0',
+  '',
+  '# 约束',
+  '- 不破坏既有接口。',
+  '',
+  '# 检查点',
+  '- 设计评审与单测通过。',
+].join('\n');
+
 const validStandardPlan = [
   '# 目标',
   '实现功能并通过验收。',
@@ -74,7 +88,13 @@ test('mode walks every phase and enforces real artifact gates', async () => {
   assert.match(run(['status'], root).stdout, /"phase": "design"/);
 
   assert.equal(run(['advance'], root).code, 1);
-  await artifact(root, 'goal.md', '# 目标\n完成开发\n');
+  await artifact(root, 'goal.md', '# 目标\n只有标题没有完成条件\n');
+  await artifact(root, 'plan.md', validStandardPlan);
+  const badGoalAdv = run(['advance'], root);
+  assert.equal(badGoalAdv.code, 1, 'incomplete goal.md must be blocked in design');
+  assert.match(badGoalAdv.stdout, /goal\.md/);
+
+  await artifact(root, 'goal.md', validGoal);
   await artifact(root, 'plan.md', 'no headings bypass attempt\n');
   assert.equal(run(['advance'], root).code, 1, 'headingless plan.md must be blocked');
   await artifact(root, 'plan.md', validStandardPlan);
@@ -140,7 +160,7 @@ test('light mode skips map and review', async () => {
   assert.equal(run(['init', '--mode', 'light'], root).code, 0);
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "design"/);
-  await artifact(root, 'goal.md', '# 目标\n小改\n');
+  await artifact(root, 'goal.md', validGoal);
   await artifact(root, 'plan.md', validLightPlan);
   assert.equal(run(['advance'], root).code, 0);
   await artifact(root, 'build.md', '完成修改\n');
@@ -221,7 +241,7 @@ test('mode verify rejects stale acceptance receipts when verify.json or worktree
 
   assert.equal(run(['init', '--mode', 'light'], root).code, 0);
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'goal.md', '# 目标\n验证\n');
+  await artifact(root, 'goal.md', validGoal);
   await artifact(root, 'plan.md', validLightPlan);
   assert.equal(run(['advance'], root).code, 0);
   await artifact(root, 'build.md', '完成实现\n');
@@ -254,7 +274,7 @@ test('mode emits phase activeSkills/humanSummary, archives all done artifacts in
   assert.ok(initJson.humanSummary.length > 0);
 
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'goal.md', '# 目标\n验证归档\n');
+  await artifact(root, 'goal.md', validGoal);
   await artifact(root, 'plan.md', validLightPlan);
   assert.equal(run(['advance'], root).code, 0);
   await artifact(root, 'build.md', '完成\n');
@@ -413,7 +433,7 @@ test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P
   assert.equal(run(['advance'], cmRoot).code, 0);
   await artifact(cmRoot, 'scope.md', '影响模块：auth, billing\n');
   assert.equal(run(['advance'], cmRoot).code, 0);
-  await artifact(cmRoot, 'goal.md', '# 目标\n跨模块\n');
+  await artifact(cmRoot, 'goal.md', validGoal);
   await artifact(cmRoot, 'plan.md', validStandardPlan);
   const missingGate = run(['advance'], cmRoot);
   assert.equal(missingGate.code, 1);
@@ -433,7 +453,7 @@ test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P
   assert.equal(run(['advance'], revRepo).code, 0);
   await artifact(revRepo, 'scope.md', 'src/a.mjs\n');
   assert.equal(run(['advance'], revRepo).code, 0);
-  await artifact(revRepo, 'goal.md', '# 目标\n完成\n');
+  await artifact(revRepo, 'goal.md', validGoal);
   await artifact(revRepo, 'plan.md', validStandardPlan);
   assert.equal(run(['advance'], revRepo).code, 0);
   await artifact(revRepo, 'build.md', '完成\n');
@@ -483,7 +503,7 @@ test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P
   await writeFile(path.join(shipGateDir, 'verify.json'), readFile(path.join(shipGateDir, 'sub', 'verify.json'), 'utf8') ? await readFile(path.join(shipGateDir, 'sub', 'verify.json'), 'utf8') : '');
   assert.equal(run(['init', '--mode', 'light'], shipGateDir).code, 0);
   assert.equal(run(['advance'], shipGateDir).code, 0);
-  await artifact(shipGateDir, 'goal.md', '# 目标\n验证\n');
+  await artifact(shipGateDir, 'goal.md', validGoal);
   await artifact(shipGateDir, 'plan.md', validLightPlan);
   assert.equal(run(['advance'], shipGateDir).code, 0);
   await artifact(shipGateDir, 'build.md', '完成\n');
@@ -511,9 +531,93 @@ test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P
   await artifact(
     escapeMapRoot,
     'feature-map.json',
-    JSON.stringify({ base: path.relative(escapeMapRoot, otherMapSrc), roots: ['src'], owners: [{ pattern: 'src/**', feature: 'x', verify: 'true' }] }),
+    JSON.stringify({ base: path.relative(path.join(escapeMapRoot, '.kelin'), otherMapSrc), roots: ['src'], owners: [{ pattern: 'src/**', feature: 'x', verify: 'true' }] }),
   );
   const mapEscAdv = run(['advance'], escapeMapRoot);
   assert.equal(mapEscAdv.code, 1);
   assert.match(mapEscAdv.stdout, /unsafe base/);
+});
+
+test('mode ship enforces preflight in Git repos across subdirs; route handles English read-only review; map-check enforces boundaries cleanly', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const reviewCheckScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-review', 'scripts', 'review-check.mjs');
+  const mapCheckScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-map', 'scripts', 'map-check.mjs');
+
+  // P2-17: explicit English read-only review routes to audit
+  const rtDir = await mkdtemp(path.join(tmpdir(), 'kelin-route-en-'));
+  const enReview = JSON.parse(run(['route', '--task', 'Perform an independent read-only code review'], rtDir).stdout);
+  assert.equal(enReview.mode, 'audit');
+
+  // P1-9 & P1-10: monorepo pkg subdir ship blocks on main branch, passes on feature branch with pkg review stamp
+  const mono = await mkdtemp(path.join(tmpdir(), 'kelin-mode-mono-'));
+  const gitIn = (args) => execFileSync('git', args, { cwd: mono, encoding: 'utf8' });
+  gitIn(['init', '-q', '-b', 'main']);
+  gitIn(['config', 'user.email', 'm@example.invalid']);
+  gitIn(['config', 'user.name', 'm']);
+  const pkg = path.join(mono, 'pkg');
+  await mkdir(pkg, { recursive: true });
+  await writeFile(path.join(mono, '.gitignore'), '.kelin/\n**/.kelin/\n');
+  await writeFile(path.join(pkg, 'app.mjs'), 'export const x = 1;\n');
+  gitIn(['add', '-A']);
+  gitIn(['commit', '-qm', 'init']);
+
+  assert.equal(run(['init', '--mode', 'feature'], pkg).code, 0);
+  assert.equal(run(['advance'], pkg).code, 0);
+  await artifact(pkg, 'scope.md', 'app.mjs\n');
+  assert.equal(run(['advance'], pkg).code, 0);
+  await artifact(pkg, 'goal.md', validGoal);
+  await artifact(pkg, 'plan.md', validStandardPlan);
+  assert.equal(run(['advance'], pkg).code, 0);
+  await artifact(pkg, 'build.md', '完成\n');
+  assert.equal(run(['advance'], pkg).code, 0);
+  await writeValidAcceptance(pkg);
+  assert.equal(run(['advance'], pkg).code, 0);
+
+  await artifact(pkg, 'review.md', '# Review\n结论：无 P0/P1\n');
+  execFileSync(process.execPath, [reviewCheckScript, '--root', pkg, '--write'], { cwd: mono });
+  assert.equal(existsSync(path.join(pkg, '.kelin', 'review.json')), true);
+  assert.equal(run(['advance'], pkg).code, 0);
+
+  await artifact(pkg, 'refine.md', 'clean\n');
+  await writeValidAcceptance(pkg);
+  assert.equal(run(['advance'], pkg).code, 0);
+  assert.match(run(['status'], pkg).stdout, /"phase": "ship"/);
+
+  await artifact(pkg, 'ship.md', 'ready\n');
+  const mainBlocked = run(['advance'], pkg);
+  assert.equal(mainBlocked.code, 1);
+  assert.match(mainBlocked.stdout, /default-branch/);
+
+  gitIn(['checkout', '-qb', 'feat/pkg']);
+  await writeValidAcceptance(pkg);
+  execFileSync(process.execPath, [reviewCheckScript, '--root', pkg, '--write'], { cwd: mono });
+  assert.equal(run(['advance'], pkg).code, 0);
+  assert.match(run(['status'], pkg).stdout, /"phase": "reflect"/);
+
+  // P2-10 & P2-11: map-check supports .kelin/feature-map.json base:"..", blocks escape without --root, handles owners:[null]
+  const mapRepo = await mkdtemp(path.join(tmpdir(), 'kelin-map-rel-'));
+  const extDir = await mkdtemp(path.join(tmpdir(), 'kelin-map-ext-'));
+  await mkdir(path.join(mapRepo, '.kelin'), { recursive: true });
+  await mkdir(path.join(mapRepo, 'src'), { recursive: true });
+  await mkdir(path.join(extDir, 'src'), { recursive: true });
+  await writeFile(path.join(mapRepo, 'src', 'a.mjs'), 'export const a = 1;\n');
+  await writeFile(path.join(extDir, 'src', 'x.mjs'), 'export const x = 1;\n');
+
+  const okMap = path.join(mapRepo, '.kelin', 'feature-map.json');
+  await writeFile(okMap, JSON.stringify({ base: '..', roots: ['src'], owners: [{ pattern: 'src/**', feature: 'a', verify: 'true' }] }));
+  const noRootOk = spawnSync(process.execPath, [mapCheckScript, '.kelin/feature-map.json'], { cwd: mapRepo, encoding: 'utf8' });
+  assert.equal(noRootOk.status, 0, noRootOk.stdout + noRootOk.stderr);
+  const withRootOk = spawnSync(process.execPath, [mapCheckScript, okMap, '--root', mapRepo], { cwd: mapRepo, encoding: 'utf8' });
+  assert.equal(withRootOk.status, 0, withRootOk.stdout + withRootOk.stderr);
+
+  const escMap = path.join(mapRepo, 'feature-map.json');
+  await writeFile(escMap, JSON.stringify({ base: path.relative(mapRepo, extDir), roots: ['src'], owners: [{ pattern: 'src/**', feature: 'x', verify: 'true' }] }));
+  const escNoRoot = spawnSync(process.execPath, [mapCheckScript, 'feature-map.json'], { cwd: mapRepo, encoding: 'utf8' });
+  assert.equal(escNoRoot.status, 1);
+  assert.match(escNoRoot.stdout, /unsafe base/);
+
+  await writeFile(escMap, JSON.stringify({ roots: ['src'], owners: [null] }));
+  const nullOwner = spawnSync(process.execPath, [mapCheckScript, 'feature-map.json'], { cwd: mapRepo, encoding: 'utf8' });
+  assert.equal(nullOwner.status, 1);
+  assert.equal(JSON.parse(nullOwner.stdout).ok, false);
 });

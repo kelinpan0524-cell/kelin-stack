@@ -305,3 +305,92 @@ test('guard-check rejects disabled CI steps/echoes/basename collisions and ratch
   assert.equal(ciBypassRes.status, 1);
   assert.equal(JSON.parse(ciBypassRes.stdout).problems.length, 2);
 });
+
+test('guard-check rejects exit suppression/cat/echoed scalars and accepts find .; ratchet-check detects changed rule definitions', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-guard-hardening2-'));
+  await mkdir(path.join(dir, '.github', 'workflows'), { recursive: true });
+  await mkdir(path.join(dir, 'src'), { recursive: true });
+  await mkdir(path.join(dir, 'other'), { recursive: true });
+  await mkdir(path.join(dir, 'skills', 'sub'), { recursive: true });
+  await writeFile(path.join(dir, 'src', 'rule.mjs'), 'export const ok = true;\n');
+  await writeFile(path.join(dir, 'other', 'rule.mjs'), 'export const decoy = true;\n');
+  await writeFile(path.join(dir, 'skills', 'sub', 'a.test.mjs'), 'test("ok", () => {});\n');
+
+  const gFile = path.join(dir, 'guards.json');
+  await writeFile(gFile, JSON.stringify({
+    guards: [
+      {
+        id: 'lint-strict',
+        bug: 'bypass',
+        rootCause: 'ci bypass',
+        guard: { type: 'lint', location: 'src/rule.mjs', command: 'node src/rule.mjs' },
+        enforcedIn: ['.github/workflows/ci.yml'],
+        proof: { command: 'revert', expected: 'fail-on-old' },
+      },
+      {
+        id: 'find-dot-suite',
+        bug: 'find dot',
+        rootCause: 'relative glob',
+        guard: { type: 'test', location: 'skills/sub/a.test.mjs', command: 'node --test skills/sub/a.test.mjs' },
+        enforcedIn: ['.github/workflows/ci.yml'],
+        proof: { command: 'revert', expected: 'fail-on-old' },
+      },
+    ],
+  }));
+
+  await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), [
+    'jobs:',
+    '  t:',
+    '    steps:',
+    '      - run: node --test $(find . -name \'*.test.mjs\')',
+    '      - run: node src/rule.mjs || true',
+    '      - run: node other/rule.mjs',
+    '      - run: "echo node src/rule.mjs"',
+    '      - run: cat src/rule.mjs',
+    '      - run: |',
+    '          set +e',
+    '          node src/rule.mjs',
+  ].join('\n'));
+  const badRes = run(guardCheck, [gFile], dir);
+  assert.equal(badRes.status, 1);
+  const problems = JSON.parse(badRes.stdout).problems;
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /lint-strict/);
+
+  await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), [
+    'jobs:',
+    '  t:',
+    '    steps:',
+    '      - run: node --test $(find . -name \'*.test.mjs\')',
+    '      - run: "node src/rule.mjs"',
+  ].join('\n'));
+  assert.equal(run(guardCheck, [gFile], dir).status, 0);
+
+  const repo = await mkdtemp(path.join(tmpdir(), 'kelin-ratchet-rulechg-'));
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  execFileSync('git', ['config', 'user.email', 'r@example.invalid'], { cwd: repo });
+  execFileSync('git', ['config', 'user.name', 'r'], { cwd: repo });
+  await mkdir(path.join(repo, 'src'), { recursive: true });
+  await writeFile(path.join(repo, 'src', 'a.mjs'), 'console.log(1);\n');
+  const rFile = path.join(repo, 'ratchet.json');
+  const baseRule = {
+    id: 'no-console',
+    pattern: 'console\\.log\\(',
+    include: ['src/**/*.mjs'],
+    exclude: [],
+    baseline: [{ file: 'src/a.mjs', match: 'console.log(1);', count: 1 }],
+  };
+  await writeFile(rFile, JSON.stringify({ version: 1, rules: [baseRule] }));
+  execFileSync('git', ['add', '-A'], { cwd: repo });
+  execFileSync('git', ['commit', '-qm', 'init'], { cwd: repo });
+
+  await writeFile(rFile, JSON.stringify({
+    version: 1,
+    rules: [{ ...baseRule, exclude: ['src/**/*.mjs'], baseline: [] }],
+  }));
+  const defChg = run(ratchetCheck, [rFile, '--check', '--base-ref', 'HEAD'], repo);
+  assert.equal(defChg.status, 1);
+  const defPayload = JSON.parse(defChg.stdout);
+  assert.ok(defPayload.baselineRegressions.some((r) => r.kind === 'changed-rule-definition'));
+});

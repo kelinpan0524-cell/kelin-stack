@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -18,6 +18,7 @@ const receiptPath = option('--receipt', '');
 const verifyPathOpt = option('--verify', '');
 const allowBranch = flag('--allow-branch');
 const skipReceipt = flag('--skip-receipt');
+const checkCi = flag('--check-ci');
 const publish = flag('--publish');
 const confirm = flag('--confirm');
 
@@ -208,7 +209,20 @@ const evaluateReceipt = async () => {
       if (typeof rel !== 'string' || !rel.trim()) return null;
       const target = path.resolve(runDir, rel);
       if (target !== runDir && !target.startsWith(`${runDir}${path.sep}`)) return null;
-      return existsSync(target) ? realpathSync(target) : null;
+      if (!existsSync(target)) return null;
+      try {
+        const real = realpathSync(target);
+        return statSync(real).isFile() ? real : null;
+      } catch {
+        return null;
+      }
+    };
+    const sha256File = (filePath) => {
+      try {
+        return { ok: true, hash: createHash('sha256').update(readFileSync(filePath)).digest('hex') };
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
     };
     for (const obs of receipt.observations || []) {
       if (obs?.ok !== true) {
@@ -219,8 +233,11 @@ const evaluateReceipt = async () => {
         if (!artFile || !artFile.startsWith(`${runDir}${path.sep}`)) {
           return { ok: false, provided: true, reason: `missing or unsafe receipt artifact: ${art?.path || 'unknown'}` };
         }
-        const actualSha = createHash('sha256').update(readFileSync(artFile)).digest('hex');
-        if (actualSha !== art.sha256) {
+        const hashed = sha256File(artFile);
+        if (!hashed.ok) {
+          return { ok: false, provided: true, reason: `unreadable receipt artifact ${art.path}: ${hashed.error}` };
+        }
+        if (hashed.hash !== art.sha256) {
           return { ok: false, provided: true, reason: `receipt artifact modified: ${art.path}` };
         }
       }
@@ -229,8 +246,11 @@ const evaluateReceipt = async () => {
         if (!txFile || !txFile.startsWith(`${runDir}${path.sep}`)) {
           return { ok: false, provided: true, reason: `missing or unsafe receipt transcript: ${obs.transcript}` };
         }
-        const actualTxSha = createHash('sha256').update(readFileSync(txFile)).digest('hex');
-        if (actualTxSha !== obs.transcriptHash) {
+        const hashedTx = sha256File(txFile);
+        if (!hashedTx.ok) {
+          return { ok: false, provided: true, reason: `unreadable receipt transcript ${obs.transcript}: ${hashedTx.error}` };
+        }
+        if (hashedTx.hash !== obs.transcriptHash) {
           return { ok: false, provided: true, reason: `receipt transcript modified: ${obs.transcript}` };
         }
       }
@@ -247,32 +267,84 @@ const evaluateReceipt = async () => {
   return { ok: false, provided: true, reason: 'unrecognized receipt schema' };
 };
 
+const parseOriginRepo = (remoteUrl) => {
+  const trimmed = String(remoteUrl || '').trim();
+  const match = /(?:^https?:\/\/[^/]+\/|^ssh:\/\/[^/]+\/|^[^@:\s]+@[^:]+:)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i.exec(trimmed);
+  return match ? match[1] : null;
+};
+
+const expectedWorkflows = () => {
+  const wfDir = path.join(root, '.github', 'workflows');
+  if (!existsSync(wfDir)) return [];
+  const names = [];
+  for (const entry of readdirSync(wfDir).sort()) {
+    if (!/\.ya?ml$/i.test(entry)) continue;
+    const raw = readFileSync(path.join(wfDir, entry), 'utf8');
+    const onMatch = /^on:\s*(.*)$/m.exec(raw);
+    let triggersPush = !onMatch;
+    if (onMatch) {
+      const inline = onMatch[1].trim();
+      if (inline) triggersPush = /\bpush\b/.test(inline);
+      else {
+        const afterOn = raw.slice(onMatch.index + onMatch[0].length);
+        const block = [];
+        for (const line of afterOn.split(/\r?\n/)) {
+          if (line.trim() && !/^\s/.test(line)) break;
+          block.push(line);
+        }
+        triggersPush = /^\s{1,4}push\s*:/m.test(block.join('\n'));
+      }
+    }
+    if (!triggersPush) continue;
+    const nameMatch = /^name:\s*["']?(.+?)["']?\s*$/m.exec(raw);
+    names.push(nameMatch ? nameMatch[1].trim() : `.github/workflows/${entry}`);
+  }
+  return names;
+};
+
 const evaluateCi = () => {
   if (!head) return { ok: false, reason: 'no HEAD commit for CI lookup' };
   const origin = git(['remote', 'get-url', 'origin'], true);
   if (!origin) return { ok: false, reason: 'no git origin remote configured' };
+  const repoSlug = parseOriginRepo(origin);
+  if (!repoSlug) return { ok: false, reason: `cannot parse OWNER/REPO from origin remote: ${origin}` };
   try {
     const raw = execFileSync(
       'gh',
-      ['run', 'list', '--commit', head, '--json', 'name,status,conclusion,headSha'],
+      ['run', 'list', '-R', repoSlug, '--commit', head, '--json', 'name,workflowName,status,conclusion,headSha,createdAt'],
       { cwd: root, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] },
     );
-    const runs = JSON.parse(raw).filter((r) => !r.headSha || r.headSha === head);
+    const runs = JSON.parse(raw).filter((r) => r.headSha === head);
     if (!runs.length) return { ok: false, reason: `no GitHub Actions runs found for commit ${head.slice(0, 12)}` };
     const incomplete = runs.filter((r) => r.status !== 'completed');
     if (incomplete.length) return { ok: false, reason: `CI still running on ${head.slice(0, 12)}: ${incomplete.map((r) => r.name).join(', ')}` };
     const failed = runs.filter((r) => !['success', 'neutral', 'skipped'].includes(r.conclusion));
     if (failed.length) return { ok: false, reason: `CI failed on ${head.slice(0, 12)}: ${failed.map((r) => `${r.name}(${r.conclusion})`).join(', ')}` };
+    const required = expectedWorkflows();
+    if (required.length) {
+      const latestByWf = new Map();
+      const ordered = [...runs].sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+      for (const runItem of ordered) {
+        if (runItem.workflowName) latestByWf.set(runItem.workflowName, runItem);
+        if (runItem.name) latestByWf.set(runItem.name, runItem);
+      }
+      const missingWf = required.filter((wf) => latestByWf.get(wf)?.conclusion !== 'success');
+      if (missingWf.length) {
+        return { ok: false, reason: `missing passing required CI workflow(s) on ${head.slice(0, 12)}: ${missingWf.join(', ')}` };
+      }
+    }
     const passed = runs.filter((r) => r.conclusion === 'success');
     if (!passed.length) return { ok: false, reason: `no passing CI runs on ${head.slice(0, 12)}` };
-    return { ok: true, commit: head, runs: runs.length };
+    return { ok: true, repo: repoSlug, commit: head, runs: runs.length };
   } catch (error) {
     return { ok: false, reason: `gh run list failed: ${String(error.message || error).slice(0, 160)}` };
   }
 };
 
 const receiptCheck = await evaluateReceipt();
-const ciCheck = evaluateCi();
+const ciCheck = (publish || checkCi)
+  ? evaluateCi()
+  : { ok: null, skipped: true, reason: 'skipped in offline dry-run (pass --check-ci or --publish)' };
 const branchAllowed = allowBranch || ['main', 'master'].includes(branch);
 
 const plan = {
@@ -322,6 +394,15 @@ if (!ciCheck.ok) {
   process.exit(1);
 }
 
+const liveHead = git(['rev-parse', 'HEAD'], true) || null;
+const liveBranch = git(['rev-parse', '--abbrev-ref', 'HEAD'], true);
+const liveStatus = git(['status', '--porcelain'], true);
+const liveStaged = git(['diff', '--cached', '--name-only'], true);
+if (liveHead !== head || liveBranch !== branch || liveStatus !== '' || liveStaged !== '') {
+  console.error('Repository state changed before commit; aborting release');
+  process.exit(1);
+}
+
 const steps = [];
 const run = (label, command, commandArgs) => {
   execFileSync(command, commandArgs, { cwd: root, stdio: 'pipe' });
@@ -348,12 +429,25 @@ if (existsSync(changelog)) {
 }
 steps.push('write changelog');
 
+const releaseFiles = [...withVersion.map((file) => path.relative(root, file)), 'CHANGELOG.md'];
+const releaseRepo = parseOriginRepo(git(['remote', 'get-url', 'origin'], true));
+const assertState = (expectedHead, msg) => {
+  if (git(['rev-parse', 'HEAD'], true) !== expectedHead || git(['rev-parse', '--abbrev-ref', 'HEAD'], true) !== branch) {
+    throw new Error(msg);
+  }
+};
+
 try {
-  run('commit', 'git', ['add', ...withVersion.map((file) => path.relative(root, file)), 'CHANGELOG.md']);
-  run('commit', 'git', ['commit', '-m', `chore(release): v${next}`]);
+  run('commit', 'git', ['add', '--', ...releaseFiles]);
+  assertState(head, 'HEAD or branch changed before commit');
+  run('commit', 'git', ['commit', '--only', '-m', `chore(release): v${next}`, '--', ...releaseFiles]);
+  assertState(git(['rev-parse', 'HEAD'], true), 'branch changed before tag');
+  if (git(['rev-parse', 'HEAD^'], true) !== head) {
+    throw new Error('release commit parent does not match verified HEAD');
+  }
   run('tag', 'git', ['tag', `v${next}`]);
   run('push tag', 'git', ['push', 'origin', `v${next}`]);
-  run('github release', 'gh', ['release', 'create', `v${next}`, '--title', `v${next}`, '--notes', entry]);
+  run('github release', 'gh', ['release', 'create', `v${next}`, ...(releaseRepo ? ['-R', releaseRepo] : []), '--title', `v${next}`, '--notes', entry]);
 } catch (error) {
   console.log(JSON.stringify({ ok: false, version: next, steps, error: String(error.message || error).slice(0, 800) }, null, 2));
   process.exit(1);

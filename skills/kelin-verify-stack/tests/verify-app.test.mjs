@@ -229,3 +229,37 @@ test('generate handles ambiguous legacy API headings, table-footer splicing, and
   const newRows = mixReadme.trim().split('\n').slice(3);
   assert.ok(newRows.every((r) => r.split('|').length - 2 === 5), `compact 5-col table must emit 5-col rows: ${mixReadme}`);
 });
+
+test('verify-app disambiguates long route collisions and stops feature table scan before subsequent headings', async () => {
+  const { readdir } = await import('node:fs/promises');
+  const generateScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify-app', 'scripts', 'generate.mjs');
+  const scanScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify-app', 'scripts', 'scan-app.mjs');
+  const runApp = (scriptFile, args, cwd) => spawnSync(process.execPath, [scriptFile, ...args], { cwd, encoding: 'utf8' });
+
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-app-table-stop-'));
+  await mkdir(path.join(dir, 'src'), { recursive: true });
+  await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', scripts: { test: 'true' }, dependencies: { express: '^4' } }));
+  const prefix = '/very/long/shared/prefix/segment/segment/segment/';
+  await writeFile(
+    path.join(dir, 'src', 'routes.ts'),
+    `app.get('${prefix}alpha', () => {});\napp.get('${prefix}beta', () => {});\n`,
+  );
+  const scanned = JSON.parse(runApp(scanScript, ['--root', dir], dir).stdout);
+  const ids = scanned.features.map((f) => f.id);
+  assert.equal(new Set(ids).size, ids.length);
+
+  await writeFile(path.join(dir, 'src', 'routes.ts'), `app.get('${prefix}alpha', () => {});\n`);
+  assert.equal(runApp(generateScript, ['--root', dir, '--write'], dir).status, 0);
+  const readmePath = path.join(dir, '.zcode', 'skills', 'verify-demo', 'features', 'README.md');
+  const before = await readFile(readmePath, 'utf8');
+  await writeFile(readmePath, `${before.trimEnd()}\n## Notes | Extra\nkeep below\n`);
+  await writeFile(path.join(dir, 'src', 'routes.ts'), `app.get('${prefix}alpha', () => {});\napp.get('${prefix}beta', () => {});\n`);
+  assert.equal(runApp(generateScript, ['--root', dir, '--write', '--sync'], dir).status, 0);
+  const after = await readFile(readmePath, 'utf8');
+  const lines = after.trim().split('\n');
+  const headingIdx = lines.findIndex((l) => l.startsWith('## Notes | Extra'));
+  const betaRowIdx = lines.findIndex((l) => l.includes(`${prefix}beta`));
+  assert.ok(betaRowIdx > 0 && betaRowIdx < headingIdx, `beta row must insert before heading:\n${after}`);
+  const featureFiles = await readdir(path.join(dir, '.zcode', 'skills', 'verify-demo', 'features'));
+  assert.ok(featureFiles.length >= 3);
+});

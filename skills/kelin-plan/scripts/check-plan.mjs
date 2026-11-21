@@ -71,7 +71,21 @@ export function validatePlanMarkdown(raw, level = 'standard') {
     return lines.slice(from + 1, next < 0 ? undefined : from + 1 + next);
   };
   const nonEmptyBody = (from) => sectionLines(from).filter((line) => line.trim() && !/^\s*<!--.*-->\s*$/.test(line));
-  const boxed = (from) => sectionLines(from).filter((line) => /^\s*- \[[ xX]\]/.test(line));
+  const boxed = (from) => {
+    const items = [];
+    let listActive = false;
+    for (const line of sectionLines(from)) {
+      if (/^ {0,3}(?:[-*+]|\d+\.)\s+/.test(line)) {
+        listActive = true;
+        if (/^ {0,3}- \[[ xX]\]/.test(line)) items.push(line);
+      } else if (/^(?: {4,}|\t)/.test(line)) {
+        if (listActive && /^\s*- \[[ xX]\]/.test(line)) items.push(line);
+      } else if (line.trim()) {
+        listActive = false;
+      }
+    }
+    return items;
+  };
   const boxText = (line) => line.replace(/^\s*- \[[ xX]\]\s*/, '').trim();
 
   const goalIdx = heading('目标');

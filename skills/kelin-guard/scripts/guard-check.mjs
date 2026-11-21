@@ -7,10 +7,17 @@ const TYPES = ['arch', 'test', 'type', 'lint', 'ci', 'agents'];
 
 const splitShellSegments = (cmdText, depth = 0) => {
   if (depth > 2) return [cmdText.trim()].filter(Boolean);
-  const segments = [];
+  const rawSegs = [];
   let cur = '';
   let quote = '';
   let escaped = false;
+  let parenDepth = 0;
+  let opBefore = '';
+  const pushSeg = (nextOp) => {
+    if (cur.trim()) rawSegs.push({ opBefore, text: cur.trim() });
+    cur = '';
+    opBefore = nextOp;
+  };
   for (let i = 0; i < cmdText.length; i += 1) {
     const ch = cmdText[i];
     const next = cmdText[i + 1];
@@ -34,37 +41,79 @@ const splitShellSegments = (cmdText, depth = 0) => {
       cur += ch;
       continue;
     }
-    if (ch === ';' || ch === '|') {
-      if (ch === '|' && next === '|') i += 1;
-      if (cur.trim()) segments.push(cur.trim());
-      cur = '';
+    if (ch === '(') {
+      parenDepth += 1;
+      cur += ch;
       continue;
     }
-    if (ch === '&' && next === '&') {
-      if (cur.trim()) segments.push(cur.trim());
-      cur = '';
+    if (ch === ')' && parenDepth > 0) {
+      parenDepth -= 1;
+      cur += ch;
+      continue;
+    }
+    if (parenDepth === 0 && (ch === ';' || ch === '|')) {
+      const op = ch === '|' && next === '|' ? '||' : ch;
+      if (op === '||') i += 1;
+      pushSeg(op);
+      continue;
+    }
+    if (parenDepth === 0 && ch === '&' && next === '&') {
+      pushSeg('&&');
       i += 1;
       continue;
     }
     cur += ch;
   }
-  if (cur.trim()) segments.push(cur.trim());
+  pushSeg('');
 
-  const out = [];
-  for (const seg of segments) {
-    let body = seg.replace(/^[\s({]+/, '').trim();
+  const prepared = rawSegs.map(({ opBefore: op, text }) => {
+    let body = text.replace(/^[\s({]+/, '').trim();
     while (/^(?:env\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]*)\s+/.test(body)) {
       body = body.replace(/^(?:env\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]*)\s+/, '');
     }
-    if (/^(?:echo|printf|true|:)(?:\s|$)/.test(body)) continue;
-    const subshell = /^(?:sh|bash|zsh)\s+(?:-[a-z]*c|-lc)\s+(['"])([\s\S]*)\1$/.exec(body);
+    const isNegated = /^!\s+/.test(body);
+    const isNoop = /^(?:echo|printf|true|:|exit\s+0)(?:\s|$)/.test(body);
+    const isPipeMask = isNoop || /^(?:cat|head|tail|grep|tee)(?:\s|$)/.test(body);
+    return { opBefore: op, body, isNegated, isNoop, isPipeMask };
+  });
+
+  const out = [];
+  let errexitOff = false;
+  for (let i = 0; i < prepared.length; i += 1) {
+    const item = prepared[i];
+    if (/^set\s+\+e(?:\s|$)/.test(item.body)) {
+      errexitOff = true;
+      continue;
+    }
+    if (/^set\s+-e(?:\s|$)/.test(item.body)) {
+      errexitOff = false;
+      continue;
+    }
+    if (errexitOff) continue;
+    const nextItem = prepared[i + 1];
+    if (item.isNegated) continue;
+    if (nextItem && ((nextItem.opBefore === '||' && nextItem.isNoop) || (nextItem.opBefore === '|' && nextItem.isPipeMask))) {
+      continue;
+    }
+    if (item.isNoop || !item.body) continue;
+    const subshell = /^(?:sh|bash|zsh)\s+(?:-[a-z]*c|-lc)\s+(['"])([\s\S]*)\1$/.exec(item.body);
     if (subshell) {
       out.push(...splitShellSegments(subshell[2], depth + 1));
-    } else if (body) {
-      out.push(body);
+    } else {
+      out.push(item.body);
     }
   }
   return out;
+};
+
+const unwrapYamlScalar = (rhs) => {
+  if (rhs.length >= 2 && rhs.startsWith("'") && rhs.endsWith("'")) {
+    return rhs.slice(1, -1).replace(/''/g, "'");
+  }
+  if (rhs.length >= 2 && rhs.startsWith('"') && rhs.endsWith('"')) {
+    return rhs.slice(1, -1).replace(/\\(.)/g, '$1');
+  }
+  return rhs;
 };
 
 const extractActiveLines = (rawText, filePath) => {
@@ -107,6 +156,7 @@ const extractActiveLines = (rawText, filePath) => {
         if (stepDisabled) continue;
         let inRunBlock = false;
         let runKeyIndent = -1;
+        let errexitDisabled = false;
         for (const rawLine of stepLines) {
           const stripped = rawLine.replace(/^(\s*)-\s+/, '$1  ');
           const indent = stripped.search(/\S/);
@@ -114,11 +164,23 @@ const extractActiveLines = (rawText, filePath) => {
           if (!trimmed) continue;
           if (inRunBlock) {
             if (indent > runKeyIndent) {
-              active.push(...splitShellSegments(trimmed));
+              const segs = splitShellSegments(trimmed);
+              const hasSetPlusE = /(?:^|[\s;|&])set\s+\+e(?=$|[\s;|&])/.test(trimmed);
+              const hasSetMinusE = /(?:^|[\s;|&])set\s+-e(?=$|[\s;|&])/.test(trimmed);
+              if (hasSetPlusE && !hasSetMinusE) {
+                errexitDisabled = true;
+                continue;
+              }
+              if (hasSetMinusE && !hasSetPlusE) {
+                errexitDisabled = false;
+                continue;
+              }
+              if (!errexitDisabled) active.push(...segs);
               continue;
             }
             inRunBlock = false;
             runKeyIndent = -1;
+            errexitDisabled = false;
           }
           const runMatch = /^run:\s*(.*)$/.exec(trimmed);
           if (runMatch) {
@@ -127,7 +189,7 @@ const extractActiveLines = (rawText, filePath) => {
               inRunBlock = true;
               runKeyIndent = indent;
             } else if (rhs) {
-              active.push(...splitShellSegments(rhs));
+              active.push(...splitShellSegments(unwrapYamlScalar(rhs)));
             }
           }
         }
@@ -197,7 +259,11 @@ const coversSuite = (activeLines, normLoc, locDir) => {
     const findMatch = /find\s+([^\s;|&)]+)\s+.*-name\s+['"]?\*\.test\.mjs['"]?/.exec(line);
     if (findMatch) {
       const findDir = path.posix.normalize(findMatch[1]).replace(/\/+$/, '');
-      if (normLoc === findDir || normLoc.startsWith(`${findDir}/`)) return true;
+      if (findDir === '.' || findDir === '') {
+        if (!normLoc.startsWith('../') && normLoc !== '..') return true;
+      } else if (normLoc === findDir || normLoc.startsWith(`${findDir}/`)) {
+        return true;
+      }
     }
   }
   return false;
@@ -239,8 +305,12 @@ export function validateGuards(spec, { base = process.cwd(), today = new Date().
       if (!targets.length || targets.some((t) => typeof t !== 'string' || !t.trim())) {
         problems.push(`${id}: enforcedIn must name non-empty file path(s)`);
       } else {
+        const normalizeExec = (tok) => path.posix.basename(String(tok || '').replace(/^["']|["']$/g, '')).toLowerCase();
         const cmd = String(guard.guard?.command || '').trim();
-        const scriptToken = (cmd.match(/[\w.-]+\.(?:mjs|js|sh|py)/) || [])[0] || '';
+        const cmdTokens = cmd.split(/[\s"'();&|]+/).filter(Boolean);
+        const cmdExec = normalizeExec(cmdTokens[0]);
+        const rawScriptPath = (cmd.match(/[^\s"'()]+\.(?:mjs|js|sh|py)\b/) || [])[0] || '';
+        const scriptPath = rawScriptPath ? path.posix.normalize(rawScriptPath) : '';
         for (const rel of targets) {
           const full = path.resolve(base, rel);
           if (!existsSync(full)) {
@@ -248,7 +318,6 @@ export function validateGuards(spec, { base = process.cwd(), today = new Date().
             continue;
           }
           const activeLines = extractActiveLines(readFileSync(full, 'utf8'), rel);
-          const activeBody = activeLines.join('\n');
           const normLoc = path.posix.normalize(String(location));
           const locDir = path.posix.dirname(normLoc);
           const coversTestSuite =
@@ -257,8 +326,16 @@ export function validateGuards(spec, { base = process.cwd(), today = new Date().
             coversSuite(activeLines, normLoc, locDir);
           const invokesCommand =
             Boolean(cmd) &&
-            (activeBody.includes(cmd) ||
-              (!(guard.guard?.type === 'test' && normLoc.endsWith('.test.mjs')) && scriptToken && activeBody.includes(scriptToken)));
+            activeLines.some((line) => {
+              const tokens = line.split(/[\s"'();&|]+/).filter(Boolean);
+              while (tokens.length && /^(?:then|do|else|elif)$/i.test(tokens[0])) tokens.shift();
+              if (cmdExec && normalizeExec(tokens[0]) !== cmdExec) return false;
+              if (line.includes(cmd)) return true;
+              if (guard.guard?.type === 'test' && normLoc.endsWith('.test.mjs')) return false;
+              if (!scriptPath) return false;
+              const lineTokens = tokens.map((tok) => (/[^\s]+\.(?:mjs|js|sh|py)\b/.test(tok) ? path.posix.normalize(tok) : tok));
+              return lineTokens.includes(scriptPath);
+            });
           if (!invokesCommand && !coversTestSuite) {
             problems.push(`${id}: enforcedIn ${rel} does not invoke "${cmd}"`);
           }

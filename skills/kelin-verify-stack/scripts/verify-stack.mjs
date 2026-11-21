@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { bodyNeedle, classify, completeEvidence, inventory, parseFrontmatter, readSkill, validateRegistry } from './core.mjs';
 import { staticCheck } from './catalog.mjs';
 import { runDoctor } from './doctor.mjs';
-import { collectArtifacts, evaluateAssertions, runSession } from './harness.mjs';
+import { collectArtifacts, evaluateAssertions, parseTranscript, runSession } from './harness.mjs';
 import { compareTrees, ensureFreshDir, hashTree, marker as makeMarker, nowIso, readJson, sanitizeText, sha256, writeJson } from './io.mjs';
 import { renderGate, renderReport } from './report.mjs';
 import { installedPluginRoot, pluginVisible, resolveZcode, run, zcode } from './zcode.mjs';
@@ -17,6 +17,25 @@ const SKILL_ROOT = path.join(import.meta.dirname, '..');
 const REGISTRY = path.join(SKILL_ROOT, 'features', 'registry.json');
 const RECIPES = path.join(SKILL_ROOT, 'features', 'recipes.json');
 const SESSION_LIMIT = 12;
+
+const isIgnoredRuntimePath = (filePath) => /^\.kelin\/(?!ci\/)/.test(filePath);
+
+function hasNonRuntimeChanges(porcelainZStdout) {
+  const tokens = String(porcelainZStdout || '').split('\0');
+  for (let i = 0; i < tokens.length; i += 1) {
+    const entry = tokens[i];
+    if (!entry) continue;
+    const xy = entry.slice(0, 2);
+    const filePath = entry.slice(3);
+    if (!isIgnoredRuntimePath(filePath)) return true;
+    if (xy.includes('R') || xy.includes('C')) {
+      const origPath = tokens[i + 1] ?? '';
+      i += 1;
+      if (!isIgnoredRuntimePath(origPath)) return true;
+    }
+  }
+  return false;
+}
 
 class Refused extends Error {}
 
@@ -268,9 +287,9 @@ async function runVerification(options) {
   const before = await hashTree(pluginRoot);
   const headProbe = await run('git', ['-C', pluginRoot, 'rev-parse', 'HEAD'], { timeoutMs: 20_000 });
   const gitHead = headProbe.code === 0 && /^[a-f0-9]{40}$/.test(headProbe.stdout.trim()) ? headProbe.stdout.trim() : null;
-  const statusProbe = gitHead ? await run('git', ['-C', pluginRoot, 'status', '--porcelain=v1'], { timeoutMs: 20_000 }) : { code: 0, stdout: '' };
+  const statusProbe = gitHead ? await run('git', ['-C', pluginRoot, 'status', '--porcelain=v1', '-z'], { timeoutMs: 20_000 }) : { code: 0, stdout: '' };
   const dirty = gitHead
-    ? statusProbe.code !== 0 || statusProbe.stdout.split('\n').some((line) => line && !/(^|\s)\.kelin\/(?!ci\/)/.test(line))
+    ? statusProbe.code !== 0 || hasNonRuntimeChanges(statusProbe.stdout)
     : false;
   let installedRoot = '';
   if (planned > 0) {
@@ -444,8 +463,8 @@ export async function publish(options) {
     }
   }
   if (receipt.plugin.root && existsSync(receipt.plugin.root)) {
-    const dirtyCheck = await run('git', ['-C', receipt.plugin.root, 'status', '--porcelain=v1'], { timeoutMs: 20_000 });
-    if (dirtyCheck.code === 0 && dirtyCheck.stdout.split('\n').some((line) => line && !/(^|\s)\.kelin\/(?!ci\/)/.test(line))) {
+    const dirtyCheck = await run('git', ['-C', receipt.plugin.root, 'status', '--porcelain=v1', '-z'], { timeoutMs: 20_000 });
+    if (dirtyCheck.code !== 0 || hasNonRuntimeChanges(dirtyCheck.stdout)) {
       throw new Refused('Refusing to publish: target checkout has uncommitted modifications');
     }
     const currentTree = await hashTree(receipt.plugin.root);
@@ -461,21 +480,16 @@ export async function publish(options) {
     if (observation.transcript) {
       const txText = await readFile(path.join(runDir, observation.transcript), 'utf8');
       if (sha256(Buffer.from(txText, 'utf8')) !== observation.transcriptHash) throw new Refused(`Transcript changed after acceptance: ${observation.transcript}`);
+      let parsedTx;
+      try {
+        parsedTx = parseTranscript(txText, observation.transcript);
+      } catch {
+        throw new Refused(`Malformed transcript line: ${observation.transcript}`);
+      }
       if (options.requireLive && observation.kind === 'live') {
         const skillName = observation.skill || (observation.feature?.startsWith('zcode:skill-invocation:') ? observation.feature.slice('zcode:skill-invocation:'.length) : '');
         const expectedSkill = skillName && receipt.plugin?.name ? `${receipt.plugin.name}:${skillName}` : '';
-        const calls = [];
-        for (const rawLine of txText.split('\n')) {
-          if (!rawLine.trim()) continue;
-          let row;
-          try {
-            row = JSON.parse(rawLine);
-          } catch {
-            throw new Refused(`Malformed transcript line under --require-live: ${observation.transcript}`);
-          }
-          for (const c of row?.response?.toolCalls || []) calls.push(c);
-        }
-        const matchedCall = calls.some(
+        const matchedCall = parsedTx.rawToolCalls.some(
           (call) => String(call?.name || '').toLowerCase() === 'skill'
             && (!expectedSkill || call?.input?.skill === expectedSkill || call?.input?.name === expectedSkill),
         );
@@ -501,7 +515,7 @@ export async function publish(options) {
   if (sha !== receipt.plugin.gitHead) {
     throw new Refused(`Receipt was verified at ${receipt.plugin.gitHead}, refusing to publish on ${sha}`);
   }
-  const body = await readFile(path.join(runDir, 'gate.md'), 'utf8');
+  const body = renderGate(receipt);
   const comment = await run('gh', ['api', '-X', 'POST', `repos/${options.repo}/issues/${options.pr}/comments`, '-f', `body=${body}`], { timeoutMs: 60_000 });
   if (comment.code !== 0) throw new Error(`gh api comment failed: ${comment.stderr.trim()}`);
   const payload = JSON.parse(comment.stdout);

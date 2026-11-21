@@ -50,13 +50,18 @@ const detectPort = (text, fallback) => {
 const slugify = (value) => value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'item';
 
 const makeFeatureId = (kind, method, routeOrName, seen) => {
-  const hash = createHash('sha256').update(`${kind}:${method}:${routeOrName}`).digest('hex').slice(0, 6);
+  const fullHash = createHash('sha256').update(`${kind}:${method}:${routeOrName}`).digest('hex');
   const rawSlug = slugify(
     kind === 'cli' ? routeOrName : routeOrName === '/' ? (kind === 'api' ? 'root' : 'home') : routeOrName,
   );
   const boundedSlug = rawSlug.slice(0, 48).replace(/-+$/g, '') || 'item';
   const prefix = kind === 'cli' ? 'cli' : kind === 'api' ? `api-${method.toLowerCase()}` : 'page';
-  const id = `${prefix}-${boundedSlug}-${hash}`;
+  let id = `${prefix}-${boundedSlug}-${fullHash.slice(0, 6)}`;
+  let suffix = 2;
+  while (seen.has(id)) {
+    id = `${prefix}-${boundedSlug}-${fullHash.slice(0, 8)}-${suffix}`;
+    suffix += 1;
+  }
   seen.add(id);
   return id;
 };

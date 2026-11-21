@@ -361,9 +361,11 @@ test('review & fingerprint hardening: unborn HEAD, JS regex literals, per-hunk e
   // P1-6: ordinary prose like "account is closed" and positive counts like "P1: 1 fixed" must stay BLOCKED
   await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: Requests fail when an account is closed\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 1);
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: Login fails when a ticket is marked (closed)\n');
+  assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 1);
   await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\nP1: 1 fixed in progress\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 1);
-  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: missing validation (fixed)\n结论：无问题\n');
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: missing validation (status: fixed)\n结论：无问题\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 0);
 
   // P2-11 & P2-12: --write --review custom.md honored by default check; chmod +x invalidates untracked receipt
@@ -421,4 +423,93 @@ test('review & fingerprint hardening: unborn HEAD, JS regex literals, per-hunk e
   ].join('\n'));
   const ctxRes = JSON.parse(run(gDir, gateScan, ['--file', ctxDiff]).stdout);
   assert.equal(ctxRes.findings[0]?.line, 4);
+});
+
+test('review-check & gate-scan close P1-6/7/10/13/14, P2-6/9, and P3-1 edge cases', async () => {
+  const { symlink, unlink, rm } = await import('node:fs/promises');
+  const outsideDir = await mkdtemp(path.join(tmpdir(), 'kelin-rev-out-'));
+  const outFile = path.join(outsideDir, 'ext.md');
+  await writeFile(outFile, '# External\n结论：无问题\n');
+
+  const mono = await mkdtemp(path.join(tmpdir(), 'kelin-rev-mono-'));
+  git(mono, ['init', '-q']);
+  git(mono, ['config', 'user.email', 'm@example.invalid']);
+  git(mono, ['config', 'user.name', 'm']);
+  await mkdir(path.join(mono, 'packages', 'app', '.kelin'), { recursive: true });
+  await mkdir(path.join(mono, 'docs'), { recursive: true });
+  await writeFile(path.join(mono, '.gitignore'), '.kelin/\n**/.kelin/\n');
+  await writeFile(path.join(mono, 'packages', 'app', 'index.mjs'), 'export const a = 1;\n');
+  await writeFile(path.join(mono, 'docs', 'r1.md'), '# Review 1\n结论：无问题\n');
+  git(mono, ['add', '-A']);
+  git(mono, ['commit', '-qm', 'init']);
+
+  // P1-7: 4-backtick fence containing 3-backtick closer keeps subsequent P1 active
+  const pkgRoot = path.join(mono, 'packages', 'app');
+  await writeFile(path.join(pkgRoot, '.kelin', 'review.md'), [
+    '````md',
+    'example fence',
+    '```',
+    'still inside 4-backtick fence',
+    '````',
+    '- P1: real bug after fence',
+  ].join('\n'));
+  assert.equal(run(pkgRoot, reviewCheck, ['--root', pkgRoot, '--write']).status, 1);
+
+  // P1-6: leading bracket tag & table cell close items; mid-sentence (closed) stays BLOCKED
+  await writeFile(path.join(pkgRoot, '.kelin', 'review.md'), '- P1: Login fails when a ticket is marked (closed)\n');
+  assert.equal(run(pkgRoot, reviewCheck, ['--root', pkgRoot, '--write']).status, 1);
+
+  // P1-10: --root pkg writes pkg/.kelin/review.json
+  await writeFile(path.join(pkgRoot, '.kelin', 'review.md'), '# Review\n- [fixed] P1: done\n| P1 | index.mjs:1 | fixed |\n结论：无 P0/P1\n');
+  const pkgWrite = run(mono, reviewCheck, ['--root', pkgRoot, '--write']);
+  assert.equal(pkgWrite.status, 0, pkgWrite.stdout + pkgWrite.stderr);
+  assert.equal(JSON.parse(run(mono, reviewCheck, ['--root', pkgRoot]).stdout).status, 'CURRENT');
+
+  // P2-6: outside-repo --review rejected consistently; retargeted symlink invalidates stamp
+  assert.equal(run(mono, reviewCheck, ['--root', pkgRoot, '--write', '--review', outFile]).status, 2);
+  const symRev = path.join(pkgRoot, '.kelin', 'link-rev.md');
+  await symlink(path.join(mono, 'docs', 'r1.md'), symRev);
+  assert.equal(run(mono, reviewCheck, ['--root', pkgRoot, '--write', '--review', symRev]).status, 0);
+  await unlink(symRev);
+  await symlink(outFile, symRev);
+  assert.equal(JSON.parse(run(mono, reviewCheck, ['--root', pkgRoot]).stdout).status, 'STALE');
+
+  // P1-13, P1-14, P2-9, P3-1 on gate-scan --file
+  const edgeDiff = path.join(mono, 'edge.diff');
+  await writeFile(edgeDiff, [
+    'diff --git a/.github/workflows/ci.yml b/tests/ci.yml',
+    'similarity index 100%',
+    'rename from .github/workflows/ci.yml',
+    'rename to tests/ci.yml',
+    'diff --git a/tests/empty.test.mjs b/tests/empty.test.mjs',
+    'deleted file mode 100644',
+    'index e69de29..0000000',
+    'diff --git a/tests/app.test.mjs b/tests/app.test.mjs',
+    '--- a/tests/app.test.mjs',
+    '+++ b/tests/app.test.mjs',
+    '@@ -1,2 +1,7 @@',
+    ' const a = 1;',
+    '+++ value',
+    "+test('str', { skip: 'reason' }, () => {});",
+    "+test('multi', {",
+    '+  skip: true',
+    '+}, () => {});',
+    ' const b = 2;',
+    'diff --git a/.github/workflows/gate.yml b/.github/workflows/gate.yml',
+    '--- a/.github/workflows/gate.yml',
+    '+++ b/.github/workflows/gate.yml',
+    '@@ -1,2 +1,4 @@',
+    ' steps:',
+    '+  - if: false',
+    '+    run: npm test',
+    '   - run: true',
+  ].join('\n'));
+  const scanOut = run(mono, gateScan, ['--file', edgeDiff]);
+  assert.equal(scanOut.status, 1);
+  const scanJson = JSON.parse(scanOut.stdout);
+  assert.ok(scanJson.findings.some((f) => f.tag === 'RH-14' && f.path === '.github/workflows/ci.yml' && f.kind === 'renamed'));
+  assert.ok(scanJson.findings.some((f) => f.tag === 'RH-1' && f.path === 'tests/empty.test.mjs' && f.kind === 'deleted'));
+  assert.equal(scanJson.findings.filter((f) => f.tag === 'RH-1' && f.path === 'tests/app.test.mjs').length, 2);
+  assert.ok(scanJson.findings.some((f) => f.tag === 'RH-14' && f.path === '.github/workflows/gate.yml'));
+  await rm(outsideDir, { recursive: true, force: true });
 });

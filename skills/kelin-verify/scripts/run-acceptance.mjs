@@ -400,7 +400,7 @@ async function main() {
       if (!isInside(anchorReal, resolved)) {
         throw new Error(`check "${check.id}" cwd escapes root: ${check.cwd}`);
       }
-      checkCwds.push(resolved);
+      checkCwds.push({ rawTarget: target, resolved });
     }
   } catch (error) {
     console.error(`${parsed.file}: ${error.message}`);
@@ -409,9 +409,29 @@ async function main() {
   }
 
   const computeWorktreeFingerprint = await loadComputeFingerprint();
+  const collectRepoFingerprints = () => {
+    const map = new Map();
+    if (!computeWorktreeFingerprint) return map;
+    for (const dirPath of [anchorReal, baseReal, ...checkCwds.map((c) => c.resolved)]) {
+      const fp = computeWorktreeFingerprint(dirPath);
+      if (fp?.isGit && fp.repo) {
+        const repoKey = realpathSync(fp.repo);
+        if (!map.has(repoKey)) map.set(repoKey, fp);
+      }
+    }
+    return map;
+  };
   const worktreeBefore = computeWorktreeFingerprint
-    ? computeWorktreeFingerprint(baseReal)
+    ? computeWorktreeFingerprint(anchorReal)
     : { isGit: false, fingerprint: null, head: null };
+  const reposBefore = collectRepoFingerprints();
+  const hasRepoMutation = (reposNow) => {
+    if (reposNow.size !== reposBefore.size) return true;
+    for (const [repoKey, beforeFp] of reposBefore) {
+      if (reposNow.get(repoKey)?.fingerprint !== beforeFp.fingerprint) return true;
+    }
+    return false;
+  };
   const checks = validated.checks;
 
   const state = { activeChild: null, interrupted: false };
@@ -421,10 +441,31 @@ async function main() {
   try {
     for (let i = 0; i < checks.length; i += 1) {
       if (state.interrupted) return;
-      rows.push(await runCheck(checks[i], checkCwds[i], state));
-      if (worktreeBefore.isGit && computeWorktreeFingerprint) {
-        const afterEach = computeWorktreeFingerprint(baseReal);
-        if (afterEach.fingerprint !== worktreeBefore.fingerprint) mutatedMidRun = true;
+      let liveCwd = '';
+      try {
+        liveCwd = realpathSync(checkCwds[i].rawTarget);
+      } catch {
+        liveCwd = '';
+      }
+      if (!liveCwd || !isInside(anchorReal, liveCwd)) {
+        rows.push({
+          id: checks[i].id,
+          cmd: checks[i].cmd,
+          cwd: checkCwds[i].rawTarget,
+          exit: -1,
+          durationMs: 0,
+          timedOut: false,
+          skipped: false,
+          error: `check "${checks[i].id}" cwd escaped root`,
+          output: '',
+        });
+        mutatedMidRun = true;
+        break;
+      }
+      rows.push(await runCheck(checks[i], liveCwd, state));
+      if (reposBefore.size > 0 && hasRepoMutation(collectRepoFingerprints())) {
+        mutatedMidRun = true;
+        break;
       }
     }
   } finally {
@@ -433,12 +474,13 @@ async function main() {
   if (state.interrupted) return;
 
   const worktreeAfter = computeWorktreeFingerprint
-    ? computeWorktreeFingerprint(baseReal)
+    ? computeWorktreeFingerprint(anchorReal)
     : { isGit: false, fingerprint: null, head: null };
   const worktreeMutated =
     mutatedMidRun
     || (Boolean(worktreeBefore.isGit || worktreeAfter.isGit)
-      && worktreeBefore.fingerprint !== worktreeAfter.fingerprint);
+      && worktreeBefore.fingerprint !== worktreeAfter.fingerprint)
+    || hasRepoMutation(collectRepoFingerprints());
 
   const isPassed = (row) => !row.skipped && row.exit === 0 && !row.timedOut && !row.error;
   const failed = rows.filter((row) => !isPassed(row));

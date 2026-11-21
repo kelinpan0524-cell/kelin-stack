@@ -15,6 +15,7 @@ const stripFenced = (raw) => {
       if (!fenceChar && fenceMatch) {
         fenceChar = fenceMatch[1][0];
         fenceLen = fenceMatch[1].length;
+        out.push('');
         continue;
       }
       if (fenceChar) {
@@ -23,6 +24,7 @@ const stripFenced = (raw) => {
           fenceChar = '';
           fenceLen = 0;
         }
+        out.push('');
         continue;
       }
     }
@@ -55,6 +57,7 @@ const stripFenced = (raw) => {
       }
     }
     if (!inComment || rebuilt.trim()) out.push(rebuilt);
+    else out.push('');
   }
   return out;
 };

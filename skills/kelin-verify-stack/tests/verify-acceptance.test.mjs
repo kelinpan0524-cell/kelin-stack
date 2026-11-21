@@ -343,3 +343,68 @@ test('run-acceptance detects mid-run worktree mutation and refuses check cwd esc
   assert.equal(escRes.status, 2);
   assert.equal(existsSync(sentinel), false);
 });
+
+test('run-acceptance revalidates check cwds before each check, halts on mutation, and fingerprints nested repos', async () => {
+  const { mkdir, symlink, rm } = await import('node:fs/promises');
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-acc-toctou-'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'kelin-acc-outside-'));
+  const sub1 = path.join(dir, 'sub1');
+  const sub2 = path.join(dir, 'sub2');
+  const sentinel = path.join(dir, 'c2-ran.txt');
+  await mkdir(sub1, { recursive: true });
+  await mkdir(sub2, { recursive: true });
+
+  const specFile = path.join(dir, 'verify.json');
+  await writeFile(specFile, JSON.stringify({
+    checks: [
+      { id: 'swap', cmd: `node -e 'const fs=require("fs");fs.rmSync(${JSON.stringify(sub2)},{recursive:true,force:true});fs.symlinkSync(${JSON.stringify(outside)},${JSON.stringify(sub2)})'` },
+      { id: 'escaped', cmd: `node -e 'require("fs").writeFileSync(${JSON.stringify(sentinel)},"1")'`, cwd: 'sub2' },
+    ],
+  }));
+  const swapRes = run([specFile, '--root', dir, '--json'], dir);
+  assert.equal(swapRes.status, 1);
+  const swapPayload = JSON.parse(swapRes.stdout);
+  assert.equal(existsSync(sentinel), false, 'escaped cwd must not execute');
+  assert.equal(swapPayload.verdict, 'INCONCLUSIVE');
+  assert.match(swapPayload.rows[1].error, /escaped root/);
+
+  // Mid-run mutation stops remaining checks in nested/parent git repos
+  const parentRepo = await mkdtemp(path.join(tmpdir(), 'kelin-acc-parent-'));
+  const subRepo = path.join(parentRepo, 'sub');
+  const gitIn = (cwd, args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+  gitIn(parentRepo, ['init', '-q']);
+  gitIn(parentRepo, ['config', 'user.email', 'p@example.invalid']);
+  gitIn(parentRepo, ['config', 'user.name', 'p']);
+  await writeFile(path.join(parentRepo, 'root.txt'), 'r1\n');
+  gitIn(parentRepo, ['add', 'root.txt']);
+  gitIn(parentRepo, ['commit', '-qm', 'init-parent']);
+
+  await mkdir(subRepo, { recursive: true });
+  gitIn(subRepo, ['init', '-q']);
+  gitIn(subRepo, ['config', 'user.email', 's@example.invalid']);
+  gitIn(subRepo, ['config', 'user.name', 's']);
+  await writeFile(path.join(subRepo, 'sub.txt'), 's1\n');
+  gitIn(subRepo, ['add', 'sub.txt']);
+  gitIn(subRepo, ['commit', '-qm', 'init-sub']);
+
+  const subSpec = path.join(parentRepo, 'verify.json');
+  const sentinel2 = path.join(parentRepo, 'c2-after-mut.txt');
+  await writeFile(subSpec, JSON.stringify({
+    cwd: 'sub',
+    checks: [
+      { id: 'c1', cmd: 'node -e "require(\'fs\').writeFileSync(\'sub.txt\', \'mutated\')"' },
+      { id: 'c2', cmd: `node -e 'require("fs").writeFileSync(${JSON.stringify(sentinel2)}, "1")'` },
+    ],
+  }));
+  const { computeWorktreeFingerprint } = await import(new URL('../../kelin-review/scripts/fingerprint.mjs', import.meta.url).href);
+  const parentFp = computeWorktreeFingerprint(parentRepo).fingerprint;
+  const subRes = run([subSpec, '--root', parentRepo, '--json'], parentRepo);
+  assert.equal(subRes.status, 1);
+  const subPayload = JSON.parse(subRes.stdout);
+  assert.equal(subPayload.worktreeFingerprint, parentFp);
+  assert.equal(subPayload.worktreeMutated, true);
+  assert.equal(subPayload.verdict, 'INCONCLUSIVE');
+  assert.equal(subPayload.rows.length, 1, 'remaining checks must halt immediately after mutation');
+  assert.equal(existsSync(sentinel2), false);
+  await rm(outside, { recursive: true, force: true });
+});

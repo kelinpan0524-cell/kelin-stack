@@ -242,16 +242,64 @@ const flushHunk = () => {
 };
 
 const flushRename = () => {
-  if (renameFrom && renameTo && isGatePath(renameFrom) && !isGatePath(renameTo)) {
-    if (isTest(renameFrom)) add('RH-1', renameFrom, 1, 'renamed', `renamed test out of gate: ${renameFrom} -> ${renameTo}`);
-    else if (isSnapshot(renameFrom)) add('RH-3', renameFrom, 1, 'renamed', `renamed snapshot out of gate: ${renameFrom} -> ${renameTo}`);
-    else add('RH-14', renameFrom, 1, 'renamed', `renamed gate file out of gate: ${renameFrom} -> ${renameTo}`);
+  if (renameFrom && renameTo) {
+    if (isTest(renameFrom) && !isTest(renameTo)) add('RH-1', renameFrom, 1, 'renamed', `renamed test out of gate: ${renameFrom} -> ${renameTo}`);
+    else if (isSnapshot(renameFrom) && !isSnapshot(renameTo)) add('RH-3', renameFrom, 1, 'renamed', `renamed snapshot out of gate: ${renameFrom} -> ${renameTo}`);
+    else if (isCI(renameFrom) && !isCI(renameTo)) add('RH-14', renameFrom, 1, 'renamed', `renamed CI file out of CI paths: ${renameFrom} -> ${renameTo}`);
+    else if (isOwnGate(renameFrom) && !isOwnGate(renameTo)) add('RH-14', renameFrom, 1, 'renamed', `renamed gate file out of gate: ${renameFrom} -> ${renameTo}`);
+    else if (isConfig(renameFrom) && !isConfig(renameTo)) add('RH-14', renameFrom, 1, 'renamed', `renamed config out of config paths: ${renameFrom} -> ${renameTo}`);
   }
   renameFrom = '';
   renameTo = '';
 };
 
+const parseDiffGitOldPath = (line) => {
+  const rest = line.slice('diff --git '.length);
+  if (rest.startsWith('"')) {
+    const endQuote = rest.search(/(?<!\\)" /);
+    if (endQuote > 0) {
+      const first = unquoteGitPath(rest.slice(0, endQuote + 1));
+      return first.startsWith('a/') ? first.slice(2) : first;
+    }
+  }
+  if ((rest.length - 1) % 2 === 0 && rest.startsWith('a/')) {
+    const half = (rest.length - 1) / 2;
+    if (rest[half] === ' ' && rest.slice(half + 1, half + 3) === 'b/' && rest.slice(2, half) === rest.slice(half + 3)) {
+      return rest.slice(2, half);
+    }
+  }
+  const mid = rest.indexOf(' b/');
+  if (mid > 2 && rest.startsWith('a/')) return rest.slice(2, mid);
+  return '';
+};
+
+let diffGitOld = '';
+let oldRemain = 0;
+let newRemain = 0;
+
 for (const line of diff.split('\n')) {
+  if (current && (oldRemain > 0 || newRemain > 0)) {
+    if (line.startsWith('+')) {
+      current.added.push({ text: line.slice(1), code: '', comments: '', line: newLine });
+      newLine += 1;
+      newRemain = Math.max(0, newRemain - 1);
+      continue;
+    }
+    if (line.startsWith('-')) {
+      current.removed.push({ text: line.slice(1), code: '', line: oldLine });
+      oldLine += 1;
+      oldRemain = Math.max(0, oldRemain - 1);
+      continue;
+    }
+    if (line.startsWith(' ')) {
+      oldLine += 1;
+      newLine += 1;
+      oldRemain = Math.max(0, oldRemain - 1);
+      newRemain = Math.max(0, newRemain - 1);
+      continue;
+    }
+    if (line.startsWith('\\')) continue;
+  }
   if (line.startsWith('diff --git ')) {
     flushHunk();
     flushRename();
@@ -259,6 +307,20 @@ for (const line of diff.split('\n')) {
     newFile = '';
     activeFile = '';
     isDeletedFile = false;
+    oldRemain = 0;
+    newRemain = 0;
+    diffGitOld = parseDiffGitOldPath(line);
+    continue;
+  }
+  if (line.startsWith('deleted file mode ')) {
+    isDeletedFile = true;
+    const deletedPath = oldFile || diffGitOld;
+    if (deletedPath) {
+      oldFile = deletedPath;
+      activeFile = deletedPath;
+      changedFiles.add(deletedPath);
+      deletedFiles.add(deletedPath);
+    }
     continue;
   }
   if (line.startsWith('rename from ')) {
@@ -283,11 +345,13 @@ for (const line of diff.split('\n')) {
     if (isDeletedFile && oldFile) deletedFiles.add(oldFile);
     continue;
   }
-  const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+  const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
   if (hunk) {
     flushHunk();
     oldLine = Number(hunk[1]);
-    newLine = Number(hunk[2]);
+    oldRemain = hunk[2] !== undefined ? Number(hunk[2]) : 1;
+    newLine = Number(hunk[3]);
+    newRemain = hunk[4] !== undefined ? Number(hunk[4]) : 1;
     current = { file: activeFile, deleted: isDeletedFile, added: [], removed: [] };
     hunks.push(current);
     continue;
@@ -359,20 +423,48 @@ for (const hunk of hunks) {
     if (isSnapshot(changedFile) && !snapshotHasOwner(changedFile)) {
       add('RH-3', changedFile, hunk.added[0]?.line ?? 1, 'changed', 'snapshot changed without an owning test file');
     }
-    for (const entry of hunk.added) {
+    const fileCtx = isCodeFile(changedFile) ? getFileContext(changedFile) : null;
+    const afterLines = fileCtx?.afterRaw ? fileCtx.afterRaw.split(/\r?\n/) : null;
+    const stripLineComment = (raw) => raw.replace(/(?<!:)\/\/.*$/, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const truthySkipRe = /\bskip\s*:\s*(?=\S)(?!false\b|0\b|null\b|undefined\b|['"]{2}(?:\s*[,})\n]|$)|``(?:\s*[,})\n]|$))[^\n,}]+/;
+    const testCallStartRe = /(?:^|[^\w.$])(?:it|test|describe)\s*\(/;
+    const ciDisabled = isCI(changedFile);
+    const flaggedSkipLines = new Set();
+
+    for (let idx = 0; idx < hunk.added.length; idx += 1) {
+      const entry = hunk.added[idx];
       if (/\bnot implemented\b|expect\(true\)\.toBe\(true\)|expect\(1\)\.toBe\(1\)|\bassert True\b|\bpass\s*(#.*)?$/.test(entry.code) || /\b(TODO|FIXME)\b/.test(entry.comments)) {
         add('RH-4', changedFile, entry.line, 'added', entry.text);
       }
-      if (
-        /(\.skip\s*\(|\bxit\s*\(|\bxdescribe\s*\(|@pytest\.mark\.skip|unittest\.skip|\bt\.Skip\(|@Ignore\b)/.test(entry.code) ||
-        /(?:^|[^\w.$])(?:it|test|describe)\s*\([^)]*,\s*\{[^}]*\bskip\s*:\s*(?=\S)(?!false\b|0\b|null\b|undefined\b|['"]{2})[^,}]+/.test(entry.code)
-      ) {
+      let hasSkipCall = /(\.skip\s*\(|\bxit\s*\(|\bxdescribe\s*\(|@pytest\.mark\.skip|unittest\.skip|\bt\.Skip\(|@Ignore\b)/.test(entry.code);
+      if (!hasSkipCall && testCallStartRe.test(entry.code)) {
+        const rawSlice = afterLines
+          ? afterLines.slice(entry.line - 1, entry.line + 7)
+          : hunk.added.slice(idx, idx + 8).map((item) => item.text);
+        const headWindow = rawSlice.map(stripLineComment).join('\n').split(/(?:\)|[A-Za-z_$][\w$]*)\s*=>|\bfunction\b|\)\s*\{/)[0];
+        if (truthySkipRe.test(headWindow)) {
+          hasSkipCall = true;
+          for (let k = idx + 1; k < Math.min(hunk.added.length, idx + 8); k += 1) {
+            if (truthySkipRe.test(stripLineComment(hunk.added[k].text))) flaggedSkipLines.add(k);
+          }
+        }
+      } else if (!hasSkipCall && !flaggedSkipLines.has(idx) && /^\s*skip\s*:/.test(entry.code) && truthySkipRe.test(stripLineComment(entry.text))) {
+        const prevLines = afterLines
+          ? afterLines.slice(Math.max(0, entry.line - 7), entry.line - 1)
+          : hunk.added.slice(Math.max(0, idx - 6), idx).map((item) => item.text);
+        const contextUp = prevLines.map(stripLineComment).join('\n');
+        if (testCallStartRe.test(contextUp)) hasSkipCall = true;
+      }
+      if (hasSkipCall) {
         add('RH-1', changedFile, entry.line, 'added', entry.text);
       }
       if (/process\.env\.(CI|NODE_ENV|GITHUB_ACTIONS|GITLAB_CI|BUILDKITE|CIRCLECI)\b/.test(entry.code)) {
         add('RH-12', changedFile, entry.line, 'added', entry.text);
       }
-      if (/--force\b|--no-verify\b|continue-on-error:\s*true|allow_failure:\s*true|if:\s*always\(\)/.test(entry.code)) {
+      if (
+        /--force\b|--no-verify\b|continue-on-error:\s*true|allow_failure:\s*true|if:\s*always\(\)/.test(entry.code)
+        || (ciDisabled && /^\s*(?:-\s*)?if:\s*(?:\$\{\{\s*)?false(?:\s*\}\})?(?:\s|$|#)/i.test(entry.text))
+      ) {
         add('RH-14', changedFile, entry.line, 'added', entry.text);
       }
     }

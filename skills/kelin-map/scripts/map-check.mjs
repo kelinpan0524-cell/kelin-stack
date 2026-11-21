@@ -58,20 +58,18 @@ const nonRuntime = Array.isArray(spec?.nonRuntime) ? spec.nonRuntime : [];
 const anchorReal = existsSync(anchor) ? realpathSync(anchor) : path.resolve(anchor);
 
 if (typeof spec?.base === 'string' && spec.base) {
-  if (explicitRoot) {
-    if (path.isAbsolute(spec.base)) {
-      problems.push(`unsafe base outside --root: ${spec.base}`);
-    } else {
-      const candidate = path.resolve(anchorReal, spec.base);
-      const candidateReal = existsSync(candidate) ? realpathSync(candidate) : candidate;
-      if (!isWithin(anchorReal, candidateReal)) {
-        problems.push(`unsafe base outside --root: ${spec.base}`);
-      } else {
-        base = candidateReal;
-      }
-    }
+  if (path.isAbsolute(spec.base)) {
+    problems.push(`unsafe base outside root: ${spec.base}`);
   } else {
-    base = path.resolve(configDir, spec.base);
+    const configReal = existsSync(configDir) ? realpathSync(configDir) : path.resolve(configDir);
+    const baseAnchor = isWithin(anchorReal, configReal) ? configReal : anchorReal;
+    const candidate = path.resolve(baseAnchor, spec.base);
+    const candidateReal = existsSync(candidate) ? realpathSync(candidate) : candidate;
+    if (!isWithin(anchorReal, candidateReal)) {
+      problems.push(`unsafe base outside root: ${spec.base}`);
+    } else {
+      base = candidateReal;
+    }
   }
 }
 if (!roots.length) problems.push('roots is empty');
@@ -96,7 +94,7 @@ for (const root of roots) {
   try {
     const targetDir = path.join(base, root);
     const targetReal = realpathSync(targetDir);
-    if (!isWithin(baseReal, targetReal) || (explicitRoot && !isWithin(anchorReal, targetReal))) {
+    if (!isWithin(baseReal, targetReal) || !isWithin(anchorReal, targetReal)) {
       problems.push(`unsafe root escaping base: ${root}`);
       continue;
     }
@@ -109,8 +107,10 @@ for (const root of roots) {
 
 const unmapped = [];
 const ambiguous = [];
-const runtimeOwners = owners.map((owner) => ({ ...owner, match: glob(owner.pattern) }));
-const runtimeFree = nonRuntime.map((pattern) => glob(pattern));
+const validOwners = owners.filter((owner) => typeof owner?.pattern === 'string' && owner.pattern && !owner.pattern.startsWith('/') && !owner.pattern.includes('..'));
+const validNonRuntime = nonRuntime.filter((pattern) => typeof pattern === 'string' && pattern && !pattern.startsWith('/') && !pattern.includes('..'));
+const runtimeOwners = validOwners.map((owner) => ({ ...owner, match: glob(owner.pattern) }));
+const runtimeFree = validNonRuntime.map((pattern) => glob(pattern));
 
 for (const rel of files) {
   const hits = runtimeOwners.filter((owner) => owner.match(rel));

@@ -115,3 +115,14 @@ test('rejects workHappened false or unexplained errors with directional verdict,
   });
   assert.equal(missingAlternating.status, 1);
 });
+
+test('handles 200000 raw samples without stack overflow in Math.min/Math.max spread', async () => {
+  const before = Array.from({ length: 200_000 }, (_, i) => [39, 41, 41, 41, 44][i % 5]);
+  const after = Array.from({ length: 200_000 }, (_, i) => [32, 33, 33, 33, 35][i % 5]);
+  const large = await check({
+    ...good,
+    runs: 200_000,
+    samples: { before, after, alternating: true },
+  });
+  assert.equal(large.status, 0, JSON.stringify(large.payload));
+});

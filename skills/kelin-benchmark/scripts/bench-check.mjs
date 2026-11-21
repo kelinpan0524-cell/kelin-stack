@@ -69,8 +69,12 @@ if (spec.samples !== undefined) {
       if (number(spec.median?.[side]) && Math.abs(computedMed - spec.median[side]) > 1e-6) {
         problems.push(`median.${side} (${spec.median[side]}) disagrees with samples median (${computedMed})`);
       }
-      const min = Math.min(...samples[side]);
-      const max = Math.max(...samples[side]);
+      let min = Infinity;
+      let max = -Infinity;
+      for (const sample of samples[side]) {
+        if (sample < min) min = sample;
+        if (sample > max) max = sample;
+      }
       const range = spec.range?.[side];
       if (Array.isArray(range) && range.length === 2 && (Math.abs(min - range[0]) > 1e-6 || Math.abs(max - range[1]) > 1e-6)) {
         problems.push(`range.${side} disagrees with samples [${min}, ${max}]`);

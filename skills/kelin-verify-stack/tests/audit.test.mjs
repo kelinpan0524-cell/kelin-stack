@@ -159,3 +159,37 @@ test('audit-check handles fences, header schema and escaped pipes; decision-chec
   ].join('\n'));
   assert.equal(run(auditCheck, outerPipeless).status, 0);
 });
+
+test('audit-check preserves block boundaries; decision-check rejects substring hex and accepts internal single-label hosts', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-audit-boundary-'));
+  const writeLocal = async (name, body) => {
+    const file = path.join(dir, name);
+    await writeFile(file, body);
+    return file;
+  };
+
+  const phantomTable = await writeLocal('phantom.md', [
+    '## 覆盖声明',
+    '面 | 状态 | 范围',
+    '```',
+    'fenced block separating header and separator',
+    '```',
+    '--- | --- | ---',
+    '正确性 | 已审 | src/a.ts',
+  ].join('\n'));
+  assert.equal(run(auditCheck, phantomTable).status, 1);
+
+  const feedbackProse = await writeLocal('feedback.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-11-21T09:00:00Z\t设计\t选 A\t理由\tfeedback was positive\t待验证',
+  ].join('\n'));
+  const fbRes = run(decisionCheck, feedbackProse);
+  assert.equal(fbRes.status, 1);
+  assert.match(fbRes.stdout, /parseable pointer/);
+
+  const internalHost = await writeLocal('internal.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-11-21T09:00:00Z\t设计\t选 A\t理由\thttp://buildsrv/report\t待验证',
+  ].join('\n'));
+  assert.equal(run(decisionCheck, internalHost).status, 0);
+});

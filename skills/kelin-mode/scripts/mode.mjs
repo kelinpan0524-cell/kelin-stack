@@ -27,6 +27,7 @@ const loadOptional = async (rel, exportName) => {
 };
 
 const validateAuditReport = await loadOptional('kelin-audit/scripts/audit-check.mjs', 'validateAuditReport');
+const validateGoalMarkdown = await loadOptional('kelin-goal/scripts/goal-check.mjs', 'validateGoalMarkdown');
 const validatePlanMarkdown = await loadOptional('kelin-plan/scripts/check-plan.mjs', 'validatePlanMarkdown');
 const validatePlanGate = await loadOptional('kelin-plan/scripts/plan-gate.mjs', 'validatePlanGate');
 const computeWorktreeFingerprint = await loadOptional('kelin-review/scripts/fingerprint.mjs', 'computeWorktreeFingerprint');
@@ -271,7 +272,11 @@ export function routeTask(task, projectRoot = process.cwd()) {
   if (/(\bsetup\b|初始化|接入\s*kelin|环境检查|新手引导|配置\s*kelin|一键接入)/i.test(text)) {
     mode = 'setup';
     reason = '需要初始化或检查项目的 kelin-stack 接入环境';
-  } else if (/(只审不改|全仓审查|体检报告|\baudit\b|接手体检|哪里最容易出事)/i.test(text)) {
+  } else if (
+    /(只审不改|全仓审查|体检报告|\baudit\b|接手体检|哪里最容易出事)/i.test(text)
+    || /(?:read[- ]?only\s+(?:code\s+)?review|(?:code\s+)?review\s+only|(?:only|just)\s+(?:do\s+a\s+)?(?:code\s+)?review|\b(?:review|inspect|check)\b.*\b(?:without|no)\s+(?:editing|changing|modifying|writing)\s+(?:code|files))/i.test(text)
+    || (/^\s*(?:please\s+)?(?:review|inspect)\b/i.test(text) && !/\b(?:implement|build|add|fix|edit|write|refactor|migrate|update|create|change|modify|patch)\b|修复|修改|新增|实现|改造/i.test(text))
+  ) {
     mode = 'audit';
     reason = '只做全仓只读审查并出覆盖声明，不直接改代码';
   } else if (/(老仓库|祖传|重构|迁移|\blegacy\b|跨仓|多仓库)/i.test(text)) {
@@ -681,8 +686,14 @@ const inspect = (root, dir, state) => {
     }
   }
   if (state.phase === 'design' && !missing.length) {
-    if (!readFileSync(path.join(dir, 'goal.md'), 'utf8').trim()) {
+    const goalRaw = readFileSync(path.join(dir, 'goal.md'), 'utf8');
+    if (!goalRaw.trim()) {
       missing.push('goal.md (empty)');
+    } else if (!validateGoalMarkdown) {
+      missing.push('goal.md (kelin-goal validator unavailable)');
+    } else {
+      const checkedGoal = validateGoalMarkdown(goalRaw);
+      if (!checkedGoal.ok) missing.push(`goal.md (${checkedGoal.problems.join('; ')})`);
     }
     const planFile = path.join(dir, 'plan.md');
     const planBody = readFileSync(planFile, 'utf8');
@@ -805,6 +816,33 @@ const inspect = (root, dir, state) => {
               }
             }
           }
+        }
+      }
+    }
+    if (isGitRepo(root)) {
+      const preflightScript = path.resolve(SKILLS_DIR, 'kelin-ship', 'scripts', 'preflight.mjs');
+      if (!existsSync(preflightScript)) {
+        missing.push('preflight.mjs (unavailable)');
+      } else {
+        const preflightArgs = [
+          preflightScript,
+          '--root',
+          root,
+          '--strict-gates',
+          state.mode === 'light' ? '--no-review' : '--require-review',
+        ];
+        const pre = spawnSync(process.execPath, preflightArgs, { cwd: root, encoding: 'utf8' });
+        let prePayload = null;
+        try {
+          prePayload = pre.stdout ? JSON.parse(pre.stdout) : null;
+        } catch {
+          prePayload = null;
+        }
+        if (pre.error || !prePayload || pre.status !== 0) {
+          const detail = Array.isArray(prePayload?.findings) && prePayload.findings.length
+            ? prePayload.findings.map((f) => `${f.code}: ${f.detail}`).join('; ')
+            : (pre.stderr || `exit ${pre.status}`).trim().slice(0, 160);
+          missing.push(`preflight (${detail})`);
         }
       }
     }

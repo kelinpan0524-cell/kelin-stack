@@ -350,8 +350,13 @@ const findFeatureTable = (doc) => {
       && /^(?:id|编号|功能)$/i.test(hCells[0])
     ) {
       const fiveCol = hCells.length >= 5 && /^(?:id|编号)$/i.test(hCells[0]);
+      const isRowLine = (line) => {
+        const trimmed = line.trim();
+        if (!trimmed || /^#{1,6}\s/.test(trimmed) || /^>|^(?:`{3,}|~{3,})|^<!--/.test(trimmed)) return false;
+        return trimmed.startsWith('|') || (!/^(?:[-*+]|\d+\.)\s/.test(trimmed) && splitHeaderCells(trimmed).length >= 2);
+      };
       let insertAt = i + 1;
-      while (insertAt + 1 < lines.length && lines[insertAt + 1].includes('|')) {
+      while (insertAt + 1 < lines.length && isRowLine(lines[insertAt + 1])) {
         insertAt += 1;
       }
       const tableCells = lines.slice(i + 2, insertAt + 1).map((row) => splitHeaderCells(row));
