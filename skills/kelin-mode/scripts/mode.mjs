@@ -1,18 +1,35 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { validateAuditReport } from '../../kelin-audit/scripts/audit-check.mjs';
-import { validatePlanMarkdown } from '../../kelin-plan/scripts/check-plan.mjs';
-import { validatePlanGate } from '../../kelin-plan/scripts/plan-gate.mjs';
-import { computeWorktreeFingerprint } from '../../kelin-review/scripts/fingerprint.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SKILLS_DIR = path.resolve(import.meta.dirname, '..', '..');
 const WORKFLOW_MARKER = '<!-- kelin:workflow:start -->';
 const VALID_HOSTS = new Set(['antigravity', 'codex', 'zcode']);
+const RUN_ARTIFACTS = [
+  'scope.md', 'feature-map.json', 'audit.md', 'goal.md', 'plan.md', 'plan-gate.json',
+  'build.md', 'verify.json', 'acceptance.json', 'review.md', 'review.json', 'refine.md',
+  'ship.md', 'reflect.md',
+];
+
+const loadOptional = async (rel, exportName) => {
+  const file = path.resolve(SKILLS_DIR, rel);
+  if (!existsSync(file)) return null;
+  try {
+    const mod = await import(pathToFileURL(file).href);
+    return mod[exportName] || null;
+  } catch {
+    return null;
+  }
+};
+
+const validateAuditReport = await loadOptional('kelin-audit/scripts/audit-check.mjs', 'validateAuditReport');
+const validatePlanMarkdown = await loadOptional('kelin-plan/scripts/check-plan.mjs', 'validatePlanMarkdown');
+const validatePlanGate = await loadOptional('kelin-plan/scripts/plan-gate.mjs', 'validatePlanGate');
+const computeWorktreeFingerprint = await loadOptional('kelin-review/scripts/fingerprint.mjs', 'computeWorktreeFingerprint');
 
 export const PHASE_TABLE = {
   intake: {
@@ -115,6 +132,36 @@ const parseJsonSafe = (raw) => {
   }
 };
 
+const quoteArg = (val) => (/^[A-Za-z0-9_./:-]+$/.test(val) ? val : JSON.stringify(val));
+
+const isWithinDir = (parentReal, childReal) => {
+  const rel = path.relative(parentReal, childReal);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
+const assertSafeWriteTarget = (baseDir, targetPath) => {
+  const baseReal = existsSync(baseDir) ? realpathSync(baseDir) : path.resolve(baseDir);
+  const rel = path.relative(path.resolve(baseDir), path.resolve(targetPath));
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`Refusing target outside project root: ${targetPath}`);
+  }
+  const parts = rel ? rel.split(path.sep).filter(Boolean) : [];
+  let cursor = path.resolve(baseDir);
+  for (let i = 0; i < parts.length; i += 1) {
+    cursor = path.join(cursor, parts[i]);
+    const st = lstatSync(cursor, { throwIfNoEntry: false });
+    if (!st) break;
+    if (st.isSymbolicLink()) {
+      throw new Error(`Refusing symlink target inside project write path: ${path.relative(baseDir, cursor)}`);
+    }
+    if (!isWithinDir(baseReal, realpathSync(cursor))) {
+      throw new Error(`Refusing path escaping project root: ${path.relative(baseDir, cursor)}`);
+    }
+  }
+};
+
+const modeCmd = (subArgs) => `node ${quoteArg(path.join(SKILLS_DIR, 'kelin-mode', 'scripts', 'mode.mjs'))} ${subArgs.join(' ')}`;
+
 const findVerifySkillsInRoot = (projectRoot) => {
   const found = [];
   for (const rel of ['.zcode/skills', '.agents/skills']) {
@@ -180,6 +227,7 @@ export function routeTask(task, projectRoot = process.cwd()) {
   }
 
   if (mode === 'setup') {
+    const setupArgs = ['setup', '--root', quoteArg(root)];
     return {
       ok: true,
       mode: 'setup',
@@ -192,7 +240,7 @@ export function routeTask(task, projectRoot = process.cwd()) {
       verifySkills,
       resume,
       reason,
-      nextCommand: 'node skills/kelin-mode/scripts/mode.mjs setup --root .',
+      nextCommand: modeCmd(setupArgs),
     };
   }
 
@@ -213,10 +261,10 @@ export function routeTask(task, projectRoot = process.cwd()) {
   const companionSkills = needsGrill ? ['kelin-grill', ...[...companions].filter((s) => s !== 'kelin-grill')] : [...companions];
 
   const nextCommand = resume
-    ? 'node skills/kelin-mode/scripts/mode.mjs status --root .'
+    ? modeCmd(['status', '--root', quoteArg(root)])
     : needsSetup
-      ? `node skills/kelin-mode/scripts/mode.mjs setup --root . && node skills/kelin-mode/scripts/mode.mjs init --mode ${mode} --root .`
-      : `node skills/kelin-mode/scripts/mode.mjs init --mode ${mode} --root .`;
+      ? `${modeCmd(['setup', '--root', quoteArg(root)])} && ${modeCmd(['init', '--mode', mode, '--root', quoteArg(root)])}`
+      : modeCmd(['init', '--mode', mode, '--root', quoteArg(root)]);
 
   return {
     ok: true,
@@ -247,13 +295,21 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   const pushCheck = (id, status, detail, extra = {}) => checks.push({ id, status, detail, ...extra });
 
   const agentsFile = path.join(dirRoot, 'AGENTS.md');
+  try {
+    assertSafeWriteTarget(dirRoot, agentsFile);
+  } catch (error) {
+    return { ok: false, error: error.message, applied: false, root: dirRoot, host: targetHost, checks, actions, nextSteps };
+  }
   const agentsExists = existsSync(agentsFile);
   const agentsText = agentsExists ? readFileSync(agentsFile, 'utf8') : '';
   const hasWorkflow = agentsExists && agentsText.includes(WORKFLOW_MARKER);
+  const ensureWfScript = path.join(SKILLS_DIR, 'kelin-agents', 'scripts', 'ensure-workflow.mjs');
   if (hasWorkflow) {
     pushCheck('agents-workflow', 'ready', 'AGENTS.md 已包含 kelin 工作流块');
+  } else if (!existsSync(ensureWfScript)) {
+    pushCheck('agents-workflow', 'unavailable', '未安装 kelin-agents（缺少 ensure-workflow.mjs）');
   } else if (apply) {
-    const res = spawnSync(process.execPath, [path.join(SKILLS_DIR, 'kelin-agents', 'scripts', 'ensure-workflow.mjs'), agentsFile], { encoding: 'utf8' });
+    const res = spawnSync(process.execPath, [ensureWfScript, agentsFile], { encoding: 'utf8' });
     const parsed = parseJsonSafe(res.stdout);
     const action = (parsed.ok && parsed.value?.action) || (res.status === 0 ? 'applied' : 'failed');
     pushCheck('agents-workflow', res.status === 0 ? 'applied' : 'error', res.status === 0 ? `已更新 AGENTS.md (${action})` : (res.stderr || res.stdout).trim().slice(0, 160));
@@ -263,24 +319,48 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
     actions.push({ step: 'ensure-workflow', file: 'AGENTS.md', action: agentsExists ? 'would-append' : 'would-create' });
   }
 
+  const isGit = spawnSync('git', ['-C', dirRoot, 'rev-parse', '--git-dir'], { encoding: 'utf8' }).status === 0;
   const gitignoreFile = path.join(dirRoot, '.gitignore');
+  try {
+    assertSafeWriteTarget(dirRoot, gitignoreFile);
+  } catch (error) {
+    return { ok: false, error: error.message, applied: false, root: dirRoot, host: targetHost, checks, actions, nextSteps };
+  }
   const giText = existsSync(gitignoreFile) ? readFileSync(gitignoreFile, 'utf8') : '';
-  const hasKelinIgnore = /^\s*\.kelin\/?\s*$/m.test(giText);
-  if (hasKelinIgnore) {
-    pushCheck('gitignore', 'ready', '.gitignore 已忽略 .kelin/');
+  const runtimeIgnored = isGit
+    ? spawnSync('git', ['-C', dirRoot, 'check-ignore', '-q', '.kelin/state.json'], { encoding: 'utf8' }).status === 0
+    : /^\s*\.kelin\/(?:\*)?\s*$/m.test(giText);
+  const ciUnignored = isGit
+    ? spawnSync('git', ['-C', dirRoot, 'check-ignore', '-q', '.kelin/ci/agents-check.mjs'], { encoding: 'utf8' }).status !== 0
+    : (!/^\s*\.kelin\/\s*$/m.test(giText) || /^\s*!\.kelin\/ci\/\s*$/m.test(giText));
+  const giReady = runtimeIgnored && ciUnignored;
+  if (giReady) {
+    pushCheck('gitignore', 'ready', '.gitignore 已忽略 .kelin/*（保留 !.kelin/ci/ 可追踪）');
   } else if (apply) {
-    const prefix = giText && !giText.endsWith('\n') ? `${giText}\n` : giText;
-    writeFileSync(gitignoreFile, `${prefix}.kelin/\n`);
-    pushCheck('gitignore', 'applied', '已向 .gitignore 添加 .kelin/');
+    let nextGi = giText.replace(/^\s*\.kelin\/\s*$/gm, '.kelin/*');
+    if (nextGi && !nextGi.endsWith('\n')) nextGi += '\n';
+    if (!/^\s*\.kelin\/\*\s*$/m.test(nextGi)) nextGi += '.kelin/*\n';
+    if (!/^\s*!\.kelin\/ci\/\s*$/m.test(nextGi)) nextGi += '!.kelin/ci/\n';
+    writeFileSync(gitignoreFile, nextGi);
+    pushCheck('gitignore', 'applied', '已配置 .gitignore 规则（.kelin/* 且保留 !.kelin/ci/）');
     actions.push({ step: 'gitignore', file: '.gitignore', action: 'added-kelin' });
   } else {
-    pushCheck('gitignore', 'missing', '.gitignore 尚未忽略 .kelin/');
+    pushCheck('gitignore', 'missing', runtimeIgnored ? '.gitignore 阻断了 .kelin/ci/ 追踪，建议改为 .kelin/* + !.kelin/ci/' : '.gitignore 尚未忽略 .kelin/*');
     actions.push({ step: 'gitignore', file: '.gitignore', action: 'would-add-kelin' });
   }
 
   const policyFile = path.join(dirRoot, 'kelin-policy.json');
+  try {
+    assertSafeWriteTarget(dirRoot, policyFile);
+  } catch (error) {
+    return { ok: false, error: error.message, applied: false, root: dirRoot, host: targetHost, checks, actions, nextSteps };
+  }
+  const policyCheckScript = path.join(SKILLS_DIR, 'kelin-mode', 'scripts', 'policy-check.mjs');
   if (existsSync(policyFile)) {
-    pushCheck('policy', 'ready', '已配置 kelin-policy.json');
+    const pCheck = spawnSync(process.execPath, [policyCheckScript, policyFile], { encoding: 'utf8' });
+    const parsedP = parseJsonSafe(pCheck.stdout);
+    const validPolicy = pCheck.status === 0 && parsedP.ok && parsedP.value?.ok === true;
+    pushCheck('policy', validPolicy ? 'ready' : 'error', validPolicy ? '已配置且校验通过 kelin-policy.json' : `kelin-policy.json 无效: ${(pCheck.stderr || parsedP.value?.problems?.join('; ') || 'parse error').slice(0, 140)}`);
   } else if (apply) {
     copyFileSync(path.join(SKILLS_DIR, 'kelin-mode', 'templates', 'kelin-policy.json'), policyFile);
     pushCheck('policy', 'applied', '已生成默认边界策略 kelin-policy.json');
@@ -291,22 +371,27 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   }
 
   const existingVerify = findVerifySkillsInRoot(dirRoot);
+  const genScript = path.join(SKILLS_DIR, 'kelin-verify-app', 'scripts', 'generate.mjs');
   if (withVerifyApp) {
-    const outDir = targetHost === 'zcode' ? path.join(dirRoot, '.zcode', 'skills') : path.join(dirRoot, '.agents', 'skills');
-    const genScript = path.join(SKILLS_DIR, 'kelin-verify-app', 'scripts', 'generate.mjs');
-    const genArgs = apply ? ['--root', dirRoot, '--out', outDir, '--write', '--sync'] : ['--root', dirRoot, '--out', outDir];
-    const res = spawnSync(process.execPath, [genScript, ...genArgs], { encoding: 'utf8' });
-    let detail = res.status === 0 ? (apply ? '已同步本地 verify-* 验证手册' : '可生成本地 verify-* 验证手册') : (res.stderr || res.stdout).trim().slice(0, 160);
-    pushCheck('verify-app', res.status === 0 ? (apply ? 'applied' : 'preview') : 'error', detail);
-    if (res.status === 0) actions.push({ step: 'verify-app', outDir: path.relative(dirRoot, outDir), action: apply ? 'synced' : 'would-sync' });
+    if (!existsSync(genScript)) {
+      pushCheck('verify-app', 'unavailable', '未安装 kelin-verify-app（缺少 generate.mjs）');
+    } else {
+      const outDir = targetHost === 'zcode' ? path.join(dirRoot, '.zcode', 'skills') : path.join(dirRoot, '.agents', 'skills');
+      const genArgs = apply ? ['--root', dirRoot, '--out', outDir, '--write', '--sync'] : ['--root', dirRoot, '--out', outDir];
+      const res = spawnSync(process.execPath, [genScript, ...genArgs], { encoding: 'utf8' });
+      const detail = res.status === 0 ? (apply ? '已同步本地 verify-* 验证手册' : '可生成本地 verify-* 验证手册') : (res.stderr || res.stdout).trim().slice(0, 160);
+      pushCheck('verify-app', res.status === 0 ? (apply ? 'applied' : 'preview') : 'error', detail);
+      if (res.status === 0) actions.push({ step: 'verify-app', outDir: path.relative(dirRoot, outDir), action: apply ? 'synced' : 'would-sync' });
+    }
   } else {
     pushCheck('verify-app', existingVerify.length ? 'ready' : 'optional', existingVerify.length ? `已发现本地验证: ${existingVerify.join(', ')}` : '尚未生成本地 verify-*（可加 --with-verify-app）');
   }
 
-  const isGit = spawnSync('git', ['-C', dirRoot, 'rev-parse', '--git-dir'], { encoding: 'utf8' }).status === 0;
   const precommitScript = path.join(SKILLS_DIR, 'kelin-ci', 'scripts', 'install-precommit.mjs');
   if (!isGit) {
     pushCheck('precommit', 'skipped', '当前目录不是 Git 仓库，跳过提交前检查');
+  } else if (!existsSync(precommitScript)) {
+    pushCheck('precommit', 'unavailable', '未安装 kelin-ci（缺少 install-precommit.mjs）');
   } else {
     const preCheck = spawnSync(process.execPath, [precommitScript, dirRoot, '--check'], { encoding: 'utf8' });
     const parsedPre = parseJsonSafe(preCheck.stdout);
@@ -343,9 +428,14 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   const delegateFile = path.join(homedir(), '.kelin', 'delegate.json');
   pushCheck('delegate', existsSync(delegateFile) ? 'ready' : 'optional', existsSync(delegateFile) ? '已配置 ~/.kelin/delegate.json 审查委托' : '未配置 ~/.kelin/delegate.json（可选）');
 
-  if (!apply && actions.length) nextSteps.push(`确认无误后执行：node skills/kelin-mode/scripts/mode.mjs setup --root . --host ${targetHost} --apply`);
+  const applyFlags = ['setup', '--root', quoteArg(dirRoot), '--host', targetHost, '--apply'];
+  if (withVerifyApp) applyFlags.push('--with-verify-app');
+  if (withPrecommit) applyFlags.push('--with-precommit');
+  const applyCommand = !apply && actions.length ? modeCmd(applyFlags) : null;
+  if (applyCommand) nextSteps.push(`确认无误后执行：${applyCommand}`);
   if (!existingVerify.length && !withVerifyApp) nextSteps.push('需要一键生成项目验收手册时可附带 --with-verify-app');
-  nextSteps.push('开始做任务前，直接描述你的目标或运行：node skills/kelin-mode/scripts/mode.mjs route --task "你的需求" --root .');
+  const routeSample = modeCmd(['route', '--task', '"你的需求"', '--root', quoteArg(dirRoot)]);
+  nextSteps.push(`开始做任务前，直接描述你的目标或运行：${routeSample}`);
 
   const readyCount = checks.filter((c) => c.status === 'ready' || c.status === 'applied').length;
   return {
@@ -355,20 +445,50 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
     host: targetHost,
     checks,
     actions,
+    applyCommand,
     nextSteps,
     summary: apply ? `接入配置已执行（${readyCount}/${checks.length} 项就绪）` : `预览完成（未改动文件，${actions.length} 项待应用）`,
   };
 }
+
+const normalizeState = (state, stateFile) => {
+  if (state?.mode === 'audit' && !PHASES_BY_MODE.audit.includes(state.phase)) {
+    const from = state.phase;
+    const mapped = from === 'ship' ? 'reflect' : 'audit';
+    state.phase = mapped;
+    if (!Array.isArray(state.history)) state.history = [];
+    state.history.push({ phase: mapped, migratedFrom: from, at: new Date().toISOString() });
+    writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+  }
+  return state;
+};
 
 const loadState = (root, stateFile) => {
   if (!existsSync(stateFile)) {
     console.error(`No .kelin/state.json under ${root}; run init first`);
     process.exit(2);
   }
-  return JSON.parse(readFileSync(stateFile, 'utf8'));
+  return normalizeState(JSON.parse(readFileSync(stateFile, 'utf8')), stateFile);
 };
 
 const checkAcceptance = (acceptanceFile, verifyFile, missing, root) => {
+  if (!existsSync(verifyFile)) {
+    missing.push('verify.json (missing)');
+    return;
+  }
+  let spec;
+  try {
+    spec = JSON.parse(readFileSync(verifyFile, 'utf8'));
+  } catch {
+    missing.push('verify.json (unreadable)');
+    return;
+  }
+  const specIds = Array.isArray(spec?.checks) ? spec.checks.map((c) => c?.id).filter((id) => typeof id === 'string' && id.trim()) : [];
+  if (!specIds.length) {
+    missing.push('verify.json (checks must be a non-empty array)');
+    return;
+  }
+
   let receipt;
   try {
     receipt = JSON.parse(readFileSync(acceptanceFile, 'utf8'));
@@ -380,46 +500,32 @@ const checkAcceptance = (acceptanceFile, verifyFile, missing, root) => {
     missing.push('acceptance.json (ok must be true)');
     return;
   }
-  if ('verdict' in receipt && receipt.verdict !== 'VERIFIED') {
-    missing.push(`acceptance.json (verdict is ${receipt.verdict}, expected VERIFIED)`);
+  if (receipt.verdict !== 'VERIFIED') {
+    missing.push(`acceptance.json (verdict is ${receipt.verdict || 'missing'}, expected VERIFIED)`);
     return;
   }
-  if (typeof receipt.specHash === 'string' && existsSync(verifyFile)) {
-    const currentSpecHash = createHash('sha256').update(readFileSync(verifyFile)).digest('hex');
-    if (currentSpecHash !== receipt.specHash) {
-      missing.push('acceptance.json (stale: verify.json changed)');
-      return;
-    }
+  const currentSpecHash = createHash('sha256').update(readFileSync(verifyFile)).digest('hex');
+  if (receipt.specHash !== currentSpecHash) {
+    missing.push('acceptance.json (stale: verify.json changed or specHash missing)');
+    return;
   }
-  if (Array.isArray(receipt.requiredIds) && existsSync(verifyFile)) {
-    try {
-      const spec = JSON.parse(readFileSync(verifyFile, 'utf8'));
-      const specIds = Array.isArray(spec.checks) ? spec.checks.map((c) => c?.id).filter(Boolean) : [];
-      const rowMap = new Map(Array.isArray(receipt.rows) ? receipt.rows.map((r) => [r.id, r]) : []);
-      const missingId = specIds.find((id) => !receipt.requiredIds.includes(id));
-      if (missingId) {
-        missing.push(`acceptance.json (missing required check: ${missingId})`);
-        return;
-      }
-      if (rowMap.size > 0) {
-        const failedOrSkipped = specIds.find((id) => {
-          const row = rowMap.get(id);
-          return !row || row.skipped || row.timedOut || row.error || row.exit !== 0;
-        });
-        if (failedOrSkipped) {
-          missing.push(`acceptance.json (required check not passing: ${failedOrSkipped})`);
-          return;
-        }
-      }
-    } catch {
-      missing.push('verify.json (unreadable)');
-      return;
-    }
+  if (!Array.isArray(receipt.requiredIds) || specIds.some((id) => !receipt.requiredIds.includes(id))) {
+    missing.push('acceptance.json (requiredIds missing or incomplete)');
+    return;
   }
-  if (typeof receipt.worktreeFingerprint === 'string') {
+  const rowMap = new Map(Array.isArray(receipt.rows) ? receipt.rows.map((r) => [r?.id, r]) : []);
+  const failedOrMissing = specIds.find((id) => {
+    const row = rowMap.get(id);
+    return !row || row.skipped || row.timedOut || row.error || row.exit !== 0;
+  });
+  if (failedOrMissing) {
+    missing.push(`acceptance.json (required check not passing: ${failedOrMissing})`);
+    return;
+  }
+  if (computeWorktreeFingerprint) {
     const wt = computeWorktreeFingerprint(root);
-    if (wt.isGit && wt.fingerprint !== receipt.worktreeFingerprint) {
-      missing.push('acceptance.json (stale: worktree changed)');
+    if (wt.isGit && receipt.worktreeFingerprint !== wt.fingerprint) {
+      missing.push('acceptance.json (stale: worktree changed or fingerprint missing)');
     }
   }
 };
@@ -430,42 +536,109 @@ const inspect = (root, dir, state) => {
   const verifyFile = path.join(dir, 'verify.json');
   const acceptanceFile = path.join(dir, 'acceptance.json');
 
+  if (state.phase === 'map' && !missing.length) {
+    if (state.mode === 'legacy' || state.mode === 'audit') {
+      const parsedMap = parseJsonSafe(readFileSync(path.join(dir, 'feature-map.json'), 'utf8'));
+      if (!parsedMap.ok || !parsedMap.value || typeof parsedMap.value !== 'object' || Array.isArray(parsedMap.value)) {
+        missing.push('feature-map.json (invalid JSON object)');
+      }
+    } else if (!readFileSync(path.join(dir, 'scope.md'), 'utf8').trim()) {
+      missing.push('scope.md (empty)');
+    }
+  }
   if (state.phase === 'audit' && !missing.length) {
-    const auditFile = path.join(dir, 'audit.md');
-    const result = validateAuditReport(readFileSync(auditFile, 'utf8'));
-    if (!result.ok) missing.push(`audit.md (${result.problems.join('; ')})`);
+    if (!validateAuditReport) {
+      missing.push('audit.md (kelin-audit validator unavailable)');
+    } else {
+      const result = validateAuditReport(readFileSync(path.join(dir, 'audit.md'), 'utf8'));
+      if (!result.ok) missing.push(`audit.md (${result.problems.join('; ')})`);
+    }
   }
   if (state.phase === 'design' && !missing.length) {
+    if (!readFileSync(path.join(dir, 'goal.md'), 'utf8').trim()) {
+      missing.push('goal.md (empty)');
+    }
     const planFile = path.join(dir, 'plan.md');
     const planBody = readFileSync(planFile, 'utf8');
-    if (/^#{1,3}\s+/m.test(planBody)) {
+    if (!validatePlanMarkdown) {
+      missing.push('plan.md (kelin-plan validator unavailable)');
+    } else {
       const level = state.mode === 'light' ? 'light' : 'standard';
       const checkedPlan = validatePlanMarkdown(planBody, level);
       if (!checkedPlan.ok) missing.push(`plan.md (${checkedPlan.problems.join('; ')})`);
     }
     const gateFile = path.join(dir, 'plan-gate.json');
     if (existsSync(gateFile)) {
-      try {
-        const gateSpec = JSON.parse(readFileSync(gateFile, 'utf8'));
-        const checkedGate = validatePlanGate(gateSpec, { baseDir: dir, planFile, requireResolved: true });
-        if (!checkedGate.ok) {
-          missing.push(`plan-gate.json (${checkedGate.problems.map((p) => `${p.code}: ${p.detail}`).join('; ')})`);
+      if (!validatePlanGate) {
+        missing.push('plan-gate.json (kelin-plan gate validator unavailable)');
+      } else {
+        const parsedGate = parseJsonSafe(readFileSync(gateFile, 'utf8'));
+        if (!parsedGate.ok) {
+          missing.push(`plan-gate.json (${parsedGate.error})`);
+        } else {
+          const checkedGate = validatePlanGate(parsedGate.value, { baseDir: dir, planFile, requireResolved: true });
+          if (!checkedGate.ok) {
+            missing.push(`plan-gate.json (${checkedGate.problems.map((p) => `${p.code}: ${p.detail}`).join('; ')})`);
+          }
         }
-      } catch (error) {
-        missing.push(`plan-gate.json (${error.message})`);
       }
+    }
+  }
+  if (state.phase === 'build' && !missing.length) {
+    if (!readFileSync(path.join(dir, 'build.md'), 'utf8').trim()) {
+      missing.push('build.md (empty)');
     }
   }
   if (state.phase === 'verify' && !missing.length) {
     checkAcceptance(acceptanceFile, verifyFile, missing, root);
   }
+  if (state.phase === 'review' && !missing.length) {
+    const reviewBody = readFileSync(path.join(dir, 'review.md'), 'utf8').trim();
+    if (!reviewBody || !/(P0|P1|P2|P3|结论|无问题|通过|none)/i.test(reviewBody)) {
+      missing.push('review.md (must summarize findings or explicit clean verdict)');
+    } else if (computeWorktreeFingerprint) {
+      const wt = computeWorktreeFingerprint(root);
+      if (wt.isGit) {
+        const stampFile = path.join(dir, 'review.json');
+        if (!existsSync(stampFile)) {
+          missing.push('review.json (missing: run review-check.mjs --write)');
+        } else {
+          const parsedStamp = parseJsonSafe(readFileSync(stampFile, 'utf8'));
+          if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
+            missing.push('review.json (stale: rerun review-check.mjs --write)');
+          }
+        }
+      }
+    }
+  }
   if (state.phase === 'refine') {
     const refineFile = path.join(dir, 'refine.md');
+    if (!existsSync(refineFile) || !readFileSync(refineFile, 'utf8').trim()) missing.push('refine.md (missing or empty)');
     if (!existsSync(acceptanceFile)) missing.push('acceptance.json (missing)');
     else if (existsSync(refineFile) && statSync(acceptanceFile).mtimeMs < statSync(refineFile).mtimeMs) {
       missing.push('acceptance.json (rerun after refine)');
     } else {
       checkAcceptance(acceptanceFile, verifyFile, missing, root);
+    }
+  }
+  if (state.phase === 'ship' && !missing.length) {
+    const shipBody = readFileSync(path.join(dir, 'ship.md'), 'utf8').trim();
+    if (!shipBody) {
+      missing.push('ship.md (empty)');
+    } else if (computeWorktreeFingerprint && state.mode !== 'light') {
+      const wt = computeWorktreeFingerprint(root);
+      if (wt.isGit) {
+        const stampFile = path.join(dir, 'review.json');
+        const parsedStamp = existsSync(stampFile) ? parseJsonSafe(readFileSync(stampFile, 'utf8')) : { ok: false };
+        if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
+          missing.push('review.json (stale before ship)');
+        }
+      }
+    }
+  }
+  if (state.phase === 'reflect' && !missing.length) {
+    if (!readFileSync(path.join(dir, 'reflect.md'), 'utf8').trim()) {
+      missing.push('reflect.md (empty)');
     }
   }
   return { files, missing, ready: missing.length === 0 };
@@ -520,20 +693,24 @@ function main(argv = process.argv.slice(2)) {
       const parsedExisting = parseJsonSafe(readFileSync(stateFile, 'utf8'));
       const existing = parsedExisting.ok ? parsedExisting.value : null;
       if (existing && existing.phase === 'done') {
-        const historyDir = path.join(dir, 'history');
-        mkdirSync(historyDir, { recursive: true });
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const archivePath = path.join(historyDir, `${stamp}-${existing.mode || 'run'}.json`);
-        writeFileSync(archivePath, `${JSON.stringify(existing, null, 2)}\n`);
-        archived = path.relative(root, archivePath);
+        const archiveDir = path.join(dir, 'history', `${stamp}-${existing.mode || 'run'}`);
+        mkdirSync(archiveDir, { recursive: true });
+        writeFileSync(path.join(archiveDir, 'state.json'), `${JSON.stringify(existing, null, 2)}\n`);
+        for (const name of RUN_ARTIFACTS) {
+          const src = path.join(dir, name);
+          if (existsSync(src)) renameSync(src, path.join(archiveDir, name));
+        }
+        archived = path.relative(root, archiveDir);
       } else {
         console.error(`Already initialized: ${stateFile}`);
         process.exit(1);
       }
     }
     mkdirSync(dir, { recursive: true });
+    assertSafeWriteTarget(root, stateFile);
     const now = new Date().toISOString();
-    const state = { mode, ...(taskArg ? { task: taskArg } : {}), phase: 'intake', started: now, history: [{ phase: 'intake', at: now }] };
+    const state = { runId: randomUUID(), mode, ...(taskArg ? { task: taskArg } : {}), phase: 'intake', started: now, history: [{ phase: 'intake', at: now }] };
     writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
     const phases = phasesFor(mode);
     const meta = phaseMeta('intake', mode);
@@ -630,6 +807,6 @@ function main(argv = process.argv.slice(2)) {
   process.exit(2);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   main();
 }

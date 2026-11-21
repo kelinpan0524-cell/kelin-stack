@@ -160,6 +160,12 @@ test('install.sh installs clean Antigravity plugin, guards unsafe targets, handl
     assert.equal(subsetSym.status, 0, subsetSym.stdout + subsetSym.stderr);
     const linkPath = path.join(fakeHome, '.gemini', 'config', 'skills', 'kelin-mode');
     assert.equal(lstatSync(linkPath).isSymbolicLink(), true);
+    // Subset install resolves runtime deps so kelin-mode works directly under --symlink too
+    const subsetProj = path.join(fakeHome, 'subset-proj');
+    await mkdir(subsetProj, { recursive: true });
+    const modeSub = spawnSync(process.execPath, [path.join(linkPath, 'scripts', 'mode.mjs'), 'init', '--mode', 'light', '--root', subsetProj], { encoding: 'utf8', env });
+    assert.equal(modeSub.status, 0, modeSub.stdout + modeSub.stderr);
+    assert.match(modeSub.stdout, /"phase": "intake"/);
     const subsetUninstall = spawnSync('bash', [installer, '--host', 'antigravity', '--scope', 'user', '--uninstall'], { encoding: 'utf8', env });
     assert.equal(subsetUninstall.status, 0, subsetUninstall.stdout + subsetUninstall.stderr);
     assert.equal(existsSync(linkPath), false);

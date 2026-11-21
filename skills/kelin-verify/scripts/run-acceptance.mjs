@@ -1,9 +1,20 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { computeWorktreeFingerprint } from '../../kelin-review/scripts/fingerprint.mjs';
+import { pathToFileURL } from 'node:url';
+
+const loadComputeFingerprint = async () => {
+  const candidates = [
+    path.join(import.meta.dirname, 'fingerprint.mjs'),
+    path.resolve(import.meta.dirname, '..', '..', 'kelin-review', 'scripts', 'fingerprint.mjs'),
+  ];
+  const hit = candidates.find((candidate) => existsSync(candidate));
+  if (!hit) return null;
+  const mod = await import(pathToFileURL(hit).href);
+  return mod.computeWorktreeFingerprint || null;
+};
 
 const DEFAULT_TIMEOUT_MS = 300_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -369,7 +380,10 @@ async function main() {
   const defaultBase = path.basename(specDir) === '.kelin' ? path.dirname(specDir) : specDir;
   const anchor = parsed.root ? path.resolve(parsed.root) : defaultBase;
   const base = validated.cwd ? path.resolve(anchor, validated.cwd) : anchor;
-  const worktree = computeWorktreeFingerprint(base);
+  const computeWorktreeFingerprint = await loadComputeFingerprint();
+  const worktree = computeWorktreeFingerprint
+    ? computeWorktreeFingerprint(base)
+    : { isGit: false, fingerprint: null, head: null };
   const checks = validated.checks;
 
   const state = { activeChild: null, interrupted: false };

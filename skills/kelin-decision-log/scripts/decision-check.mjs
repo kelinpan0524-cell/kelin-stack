@@ -23,6 +23,8 @@ const phases = /^(设计|实现|验证|发布|复盘|start|design|build|verify|r
 const results = /^(待验证|有效|有害|pending|valid|harmful|ok|start)$/i;
 const pointer = /(?:[0-9a-f]{7,40}|https?:\/\/|[\w./-]+:\d+|[\w./-]+\.(?:json|md|log|txt|tsv|xlsx|png|jpe?g|pdf)\b|PR\s*#?\d+|#\d+|agent-[\w-]+|session-[\w-]+)/i;
 
+let substantiveRows = 0;
+let startMarkers = 0;
 if (!lines.length) problems.push('file is empty');
 else {
   if (lines[0] !== header) problems.push(`header must be: ${header}`);
@@ -35,16 +37,27 @@ else {
       return;
     }
     const [, phase, decision, why, evidence, result] = cells;
+    const isStartPhase = /^start$/i.test(phase.trim());
+    const isStartResult = /^start$/i.test(result.trim());
     if (!phases.test(phase)) problems.push(`row ${index + 1}: invalid phase ${phase}`);
     if (!decision.trim()) problems.push(`row ${index + 1}: decision is empty`);
     if (!why.trim()) problems.push(`row ${index + 1}: why is empty`);
     if (!evidence.trim()) problems.push(`row ${index + 1}: evidence is empty`);
     else if (!pointer.test(evidence)) problems.push(`row ${index + 1}: evidence is not a parseable pointer (commit/PR/file:line/artifact)`);
     if (!results.test(result)) problems.push(`row ${index + 1}: invalid result ${result}`);
+    if (isStartPhase || isStartResult) {
+      if (!(isStartPhase && isStartResult)) problems.push(`row ${index + 1}: start marker must set both phase and result to start`);
+      else startMarkers += 1;
+    } else {
+      substantiveRows += 1;
+    }
     if (/[，。；]/.test(evidence) && evidence.length > 120) warnings.push(`row ${index + 1}: evidence looks like prose; use a pointer`);
   });
+  if (rows.length > 0 && substantiveRows === 0) {
+    problems.push('no substantive decision rows (only start markers)');
+  }
 }
 
-const result = { file, ok: problems.length === 0, rows: Math.max(0, lines.length - 1), problems, warnings };
+const result = { file, ok: problems.length === 0, rows: Math.max(0, lines.length - 1), substantiveRows, startMarkers, problems, warnings };
 console.log(JSON.stringify(result, null, 2));
 process.exit(result.ok ? 0 : 1);

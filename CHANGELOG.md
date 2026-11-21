@@ -4,7 +4,7 @@
 
 全面对齐上游 `pstack` / `open-pstack` 工程强约束，并落地 `kelin-mode` 零门槛自动化：
 
-- **可信证据与发布门禁绑定**：`kelin-verify/run-acceptance` 支持 `--root` 与多维哈希（`specHash` / `worktreeFingerprint` / `requiredIds` / 三值 `verdict`）；`kelin-audit` 强制覆盖声明表并接入 `audit` 只读状态机轨道；`kelin-verify-stack` 与 `kelin-release` 绑定 `gitHead`、`treeHash`、`verificationLevel` 与 `--require-live`；`kelin-benchmark` 与 `kelin-decision-log` 封堵零工作量定向结论与缺相漏验。
+- **可信证据与发布门禁绑定**：`kelin-verify/run-acceptance` 支持 `--root` 与多维哈希（`specHash` / `worktreeFingerprint` / `requiredIds` / 三值 `verdict`）；`kelin-audit` 强制覆盖声明表（校验状态列与已审计数）并接入 `audit` 只读状态机轨道；`kelin-verify-stack` 与 `kelin-release` 绑定 `gitHead`、`treeHash`、干净工作区校验、`verificationLevel` 与 `--require-live`；`kelin-benchmark` 与 `kelin-decision-log`（需至少一条实质决策记录，单独 `start` 标记会拒绝）封堵零工作量定向结论与无决策日志通过。
 - **门禁静态扫描补盲（`kelin-review` / `kelin-ship`）**：新增注释通道 `extractComments()`，精准捕获注释里的 `RH-13`、`try/catch {}` 跨行吞异常、整文件删除测例/快照、C 转义路径与无关快照篡改，同步修正字符串字面量与更严格超时收紧的误报；`preflight --strict-gates` 强制拦截。
 - **计划门禁与 Guard 棘轮机制**：`kelin-plan` 升级 `check-plan.mjs`（依赖环检测、单任务 `- verify:` 与 `planHash`）与 `plan-gate.mjs`（双镜头审查与决策哈希绑定）；`kelin-guard` 新增 `arch` 架构防线、`enforcedIn` 机制检查、例外到期校验与 `ratchet-check.mjs --strict-shrink` 只减不增计数棘轮；`kelin-refine` 等补齐注释审改分离与溯源规则。
 - **项目验证与跨宿主冒烟验证**：`kelin-verify-app` 保留 HTTP 方法、`limit` 提至 30、生成稳定 ID 与现有测试框架探测，并支持 `--write --sync` 增量同步不覆盖手改；`kelin-verify-stack` 支持多用例 `(feature, caseId)` 回执校验，并新增离线零 token `smoke --host antigravity|codex`。

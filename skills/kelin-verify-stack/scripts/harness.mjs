@@ -172,7 +172,7 @@ export async function evaluateAssertions(assertions, ctx) {
   return results;
 }
 
-export async function collectArtifacts(fixtureDir, sessionDir) {
+export async function collectArtifacts(fixtureDir, sessionDir, runRoot = sessionDir) {
   const artifacts = [];
   const base = path.join(sessionDir, 'artifacts');
   async function walk(dir, rel = '') {
@@ -187,7 +187,7 @@ export async function collectArtifacts(fixtureDir, sessionDir) {
         const target = path.join(base, nextRel);
         await mkdir(path.dirname(target), { recursive: true });
         await copyFile(absolute, target);
-        artifacts.push({ path: `artifacts/${nextRel}`, sha256: sha256(body), bytes: body.length });
+        artifacts.push({ path: path.relative(runRoot, target), sha256: sha256(body), bytes: body.length });
       }
     }
   }

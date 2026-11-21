@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,10 +20,11 @@ export function validatePlanGate(spec, { baseDir = process.cwd(), planFile = '',
     if (!Array.isArray(lens.findings)) add('lens-findings', `${lens.name}: findings must be an array`);
     if (requireResolved) {
       const hasSummary = typeof lens.summary === 'string' && lens.summary.trim().length > 0;
-      const hasVerdict = ['approved', 'changes-requested'].includes(lens.verdict);
-      const hasFindings = Array.isArray(lens.findings) && lens.findings.length > 0;
-      if (!hasSummary && !hasVerdict && !hasFindings) {
-        add('empty-lens-review', `${lens.name}: provide non-empty summary, verdict, or findings`);
+      if (!hasSummary) {
+        add('empty-lens-review', `${lens.name}: provide non-empty summary`);
+      }
+      if (lens.verdict !== 'approved') {
+        add('lens-not-approved', `${lens.name}: verdict must be approved (got ${lens.verdict || 'missing'})`);
       }
     }
   }
@@ -57,6 +58,8 @@ export function validatePlanGate(spec, { baseDir = process.cwd(), planFile = '',
         add('stale-plan-hash', `planHash ${spec.planHash.slice(0, 12)} does not match ${path.basename(candidatePlan)} (${actualPlanHash.slice(0, 12)})`);
       }
     }
+  } else if (requireResolved) {
+    add('missing-plan', 'plan file is missing or unreadable');
   }
 
   return {
@@ -68,7 +71,7 @@ export function validatePlanGate(spec, { baseDir = process.cwd(), planFile = '',
   };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   let file = '';
   let planFile = '';

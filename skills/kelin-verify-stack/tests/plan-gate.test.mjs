@@ -60,6 +60,21 @@ test('check-plan rejects empty sections, unverified tasks, and dependency cycles
   const cycle = run(checkPlan, [planFile], dir);
   assert.equal(cycle.status, 1);
   assert.ok(JSON.parse(cycle.stdout).problems.some((p) => p.includes('dependency cycle')));
+
+  await writeFile(planFile, validPlan.replace('验证：`node test/export.test.mjs`', '验证'));
+  const bareLabel = run(checkPlan, [planFile], dir);
+  assert.equal(bareLabel.status, 1);
+  assert.ok(JSON.parse(bareLabel.stdout).problems.some((p) => p.includes('no verification method')));
+
+  await writeFile(planFile, validPlan.replace('单元 2：接导出入口', '单元 1：重复单元'));
+  const dupId = run(checkPlan, [planFile], dir);
+  assert.equal(dupId.status, 1);
+  assert.ok(JSON.parse(dupId.stdout).problems.some((p) => p.includes('duplicate task id')));
+
+  await writeFile(planFile, validPlan.replace('依赖：单元 1', '依赖：单元 99'));
+  const unknownDep = run(checkPlan, [planFile], dir);
+  assert.equal(unknownDep.status, 1);
+  assert.ok(JSON.parse(unknownDep.stdout).problems.some((p) => p.includes('unknown dependency')));
 });
 
 test('plan-gate rejects empty template lenses, missing/stale planHash, duplicate/unresolved decisions', async () => {
@@ -103,6 +118,21 @@ test('plan-gate rejects empty template lenses, missing/stale planHash, duplicate
   const staleRes = run(planGate, [gateFile, '--require-resolved'], dir);
   assert.equal(staleRes.status, 1);
   assert.ok(JSON.parse(staleRes.stdout).problems.some((p) => p.code === 'stale-plan-hash'));
+
+  // Missing plan file & changes-requested verdict must fail --require-resolved
+  await writeFile(gateFile, JSON.stringify({
+    ...validGate,
+    plan: 'deleted-plan.md',
+    lenses: [
+      { name: 'product', reviewer: 'self', verdict: 'changes-requested', summary: 'needs work', findings: [] },
+      { name: 'engineering', reviewer: 'subagent', verdict: 'approved', summary: '边界明确', findings: [] },
+    ],
+  }));
+  const rejectedRes = run(planGate, [gateFile, '--require-resolved'], dir);
+  assert.equal(rejectedRes.status, 1);
+  const codes = JSON.parse(rejectedRes.stdout).problems.map((p) => p.code);
+  assert.ok(codes.includes('missing-plan'));
+  assert.ok(codes.includes('lens-not-approved'));
 });
 
 test('mode.mjs design phase enforces check-plan and plan-gate when structured artifacts exist', async () => {

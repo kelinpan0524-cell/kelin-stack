@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, realpathSync, statSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { scanApp } from './scan-app.mjs';
@@ -184,15 +184,75 @@ ${feature.endState}
   return { id, name: `${id}.md`, feature, body };
 });
 
+const rootReal = realpathSync(root);
+const isInsideRoot = (parentReal, childReal) => {
+  const rel = path.relative(parentReal, childReal);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+const assertSafeTarget = (targetPath) => {
+  const rel = path.relative(path.resolve(root), path.resolve(targetPath));
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`Refusing output outside project root: ${targetPath}`);
+  }
+  const parts = rel ? rel.split(path.sep).filter(Boolean) : [];
+  let cursor = path.resolve(root);
+  for (const part of parts) {
+    cursor = path.join(cursor, part);
+    const st = lstatSync(cursor, { throwIfNoEntry: false });
+    if (!st) break;
+    if (st.isSymbolicLink()) {
+      throw new Error(`Refusing symlink in output path: ${path.relative(root, cursor)}`);
+    }
+    if (!isInsideRoot(rootReal, realpathSync(cursor))) {
+      throw new Error(`Refusing path escaping project root: ${path.relative(root, cursor)}`);
+    }
+  }
+};
+
 const featuresDir = path.join(skillDir, 'features');
-const existingFeatures = existsSync(featuresDir)
+const existingFeatureFiles = existsSync(featuresDir)
   ? (await readdir(featuresDir)).filter((entry) => entry.endsWith('.md') && entry !== 'README.md').sort()
   : [];
-const plannedNames = new Set(featureFiles.map((entry) => entry.name));
+
+const existingMeta = [];
+for (const file of existingFeatureFiles) {
+  const full = path.join(featuresDir, file);
+  const st = lstatSync(full, { throwIfNoEntry: false });
+  if (!st || st.isSymbolicLink() || !st.isFile()) continue;
+  const raw = await readFile(full, 'utf8');
+  const ep = /^\s*-\s*entrypoint:\s*`([^`]+)`/m.exec(raw);
+  const fid = /^\s*-\s*feature_id:\s*`([^`]+)`/m.exec(raw);
+  const h1 = /^#\s+(.+)$/m.exec(raw);
+  existingMeta.push({
+    file,
+    entrypoint: ep ? ep[1].trim() : '',
+    featureId: fid ? fid[1].trim() : '',
+    heading: h1 ? h1[1].trim() : '',
+  });
+}
+
+const matchedExistingFiles = new Set();
+const added = [];
+const preserved = [];
+const matchedByPlannedName = new Map();
+for (const item of featureFiles) {
+  const ep = item.feature.entrypoint || '';
+  const match = existingMeta.find((meta) => ep && meta.entrypoint === ep)
+    || existingMeta.find((meta) => meta.heading === item.feature.name || (ep && meta.heading === `页面或接口 ${ep}`))
+    || existingMeta.find((meta) => meta.file === item.name && (!meta.entrypoint || meta.entrypoint === ep));
+  if (match) {
+    matchedExistingFiles.add(match.file);
+    matchedByPlannedName.set(item.name, match.file);
+    preserved.push(match.file);
+  } else {
+    added.push(item.name);
+  }
+}
+
 const diff = {
-  added: featureFiles.filter((entry) => !existingFeatures.includes(entry.name)).map((entry) => entry.name),
-  preserved: featureFiles.filter((entry) => existingFeatures.includes(entry.name)).map((entry) => entry.name),
-  orphaned: existingFeatures.filter((name) => !plannedNames.has(name)),
+  added,
+  preserved,
+  orphaned: existingFeatureFiles.filter((name) => !matchedExistingFiles.has(name)),
 };
 
 const files = [
@@ -214,6 +274,15 @@ if (!write) {
   process.exit(0);
 }
 
+try {
+  assertSafeTarget(outBase);
+  assertSafeTarget(skillDir);
+  for (const entry of files) assertSafeTarget(entry.path);
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}
+
 const conflicts = files.filter((entry) => existsSync(entry.path)).map((entry) => path.relative(root, entry.path));
 if (conflicts.length && !force && !sync) {
   console.log(JSON.stringify({ ok: false, reason: 'target exists; pass --force or --sync', conflicts, diff }, null, 2));
@@ -222,14 +291,14 @@ if (conflicts.length && !force && !sync) {
 
 if (sync && !force) {
   const written = [];
-  const preserved = [];
+  const preservedOut = [];
   for (const file of files) {
     await mkdir(path.dirname(file.path), { recursive: true });
     if (file.kind === 'index' && existsSync(file.path)) {
       const current = await readFile(file.path, 'utf8');
       const fiveCol = current.includes('| ID |');
       const missingRows = featureFiles
-        .filter((item) => !current.includes(`| ${item.id} |`) && !current.includes(`| ${item.feature.name} |`))
+        .filter((item) => !matchedByPlannedName.has(item.name) && !current.includes(`| ${item.id} |`) && !current.includes(`| ${item.feature.name} |`))
         .map((item) => (fiveCol
           ? featureRow(item.feature)
           : `| ${item.feature.name} | ${item.feature.howToReach} | ${item.feature.drive} | ${item.feature.endState} |`));
@@ -238,18 +307,22 @@ if (sync && !force) {
         await writeFile(file.path, next);
         written.push(path.relative(root, file.path));
       } else {
-        preserved.push(path.relative(root, file.path));
+        preservedOut.push(path.relative(root, file.path));
       }
       continue;
     }
+    if (file.kind === 'feature' && matchedByPlannedName.has(file.entry.name)) {
+      preservedOut.push(path.relative(root, path.join(featuresDir, matchedByPlannedName.get(file.entry.name))));
+      continue;
+    }
     if (existsSync(file.path)) {
-      preserved.push(path.relative(root, file.path));
+      preservedOut.push(path.relative(root, file.path));
       continue;
     }
     await writeFile(file.path, file.body);
     written.push(path.relative(root, file.path));
   }
-  console.log(JSON.stringify({ ok: true, preview: false, sync: true, skillDir, written, preserved, diff }, null, 2));
+  console.log(JSON.stringify({ ok: true, preview: false, sync: true, skillDir, written, preserved: preservedOut, diff }, null, 2));
   process.exit(0);
 }
 

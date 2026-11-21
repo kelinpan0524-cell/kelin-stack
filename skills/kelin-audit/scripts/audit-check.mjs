@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export function validateAuditReport(text) {
@@ -13,15 +14,22 @@ export function validateAuditReport(text) {
   } else {
     const end = lines.slice(start + 1).findIndex((line) => /^#{1,3}\s+/.test(line));
     const section = lines.slice(start + 1, end < 0 ? undefined : start + 1 + end);
-    rows = section.filter((line) => /^\|/.test(line) && !/^\|\s*-/.test(line)).slice(1);
+    const tableLines = section.filter((line) => /^\|/.test(line) && !/^\|\s*[-:|\s]+$/.test(line));
+    const headerCells = (tableLines[0] || '').split('|').slice(1, -1).map((c) => c.trim());
+    const statusCol = headerCells.findIndex((h) => /^(状态|status)$/i.test(h));
+    const statusIdx = statusCol >= 0 ? statusCol : 1;
+    rows = tableLines.slice(1);
     if (!rows.length) problems.push('覆盖声明 has no data rows');
-    const statuses = /已审|部分|未审|audited|partial|not assessed|n\/a/i;
+    const exactStatus = /^(已审|部分|未审|audited|partial|not assessed|n\/a)$/i;
     let audited = 0;
     for (const row of rows) {
-      if (row.split('|').length < 4) problems.push(`row has fewer than 3 columns: ${row.slice(0, 80)}`);
-      if (!statuses.test(row)) problems.push(`row has no audited/partial/not-assessed status: ${row.slice(0, 80)}`);
-      if (/已审|audited/i.test(row)) audited += 1;
-      if (/(未审|not assessed)/i.test(row) && /没问题|无问题/.test(row)) {
+      const cells = row.split('|').slice(1, -1).map((c) => c.trim());
+      if (cells.length < 3) problems.push(`row has fewer than 3 columns: ${row.slice(0, 80)}`);
+      const statusVal = cells[statusIdx] ?? '';
+      if (!exactStatus.test(statusVal)) problems.push(`row has invalid status "${statusVal}": ${row.slice(0, 80)}`);
+      if (/^(已审|audited)$/i.test(statusVal)) audited += 1;
+      const noteText = cells.filter((_, idx) => idx !== statusIdx).join(' ');
+      if (/^(未审|not assessed)$/i.test(statusVal) && /没问题|无问题/.test(noteText)) {
         problems.push(`not-assessed row cannot claim no problems: ${row.slice(0, 80)}`);
       }
     }
@@ -31,7 +39,7 @@ export function validateAuditReport(text) {
   return { ok: problems.length === 0, rows: rows.length, problems };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const file = process.argv[2];
   if (!file) {
     console.error('Usage: node audit-check.mjs <report.md>');

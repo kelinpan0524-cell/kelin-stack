@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,29 +11,28 @@ Options:
   --root DIR          Workspace root to scan (defaults to directory of ratchet.json)
   --check             Verify no new violations or expired exceptions (default)
   --strict-shrink     Fail when baseline entries disappeared and can be tightened
-  --update-baseline   Rewrite baseline entries in ratchet.json from current scan
+  --update-baseline   Tighten resolved baseline debt in ratchet.json (refuses if violations or expired exceptions exist)
   --today DATE        Override YYYY-MM-DD date for exception expiry checks
   -h, --help          Show this help message and exit`;
 
 const globToRegExp = (pattern) => {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-  const body = escaped
-    .replace(/\*\*\//g, '\u0000')
-    .replace(/\*\*/g, '.*')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\u0000/g, '(?:.*/)?');
+  const body = escaped.replace(/\*\*\/|\*\*|\*/g, (token) => {
+    if (token === '**/') return '(?:.*/)?';
+    if (token === '**') return '.*';
+    return '[^/]*';
+  });
   return new RegExp(`^${body}$`);
 };
 
 const walk = (root, rel = '', acc = []) => {
   const skip = new Set(['.git', 'node_modules', '.kelin']);
-  for (const entry of readdirSync(path.join(root, rel)).sort()) {
-    if (skip.has(entry)) continue;
-    const next = rel ? `${rel}/${entry}` : entry;
-    const full = path.join(root, next);
-    const st = statSync(full);
-    if (st.isDirectory()) walk(root, next, acc);
-    else if (st.isFile()) acc.push(next);
+  const dir = path.join(root, rel);
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (skip.has(entry.name) || entry.isSymbolicLink()) continue;
+    const next = rel ? `${rel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) walk(root, next, acc);
+    else if (entry.isFile()) acc.push(next);
   }
   return acc;
 };
@@ -41,13 +40,22 @@ const walk = (root, rel = '', acc = []) => {
 const normalizeLine = (line) => String(line).trim().replace(/\s+/g, ' ');
 
 export function evaluateRatchet(spec, { root, today = new Date().toISOString().slice(0, 10) } = {}) {
-  const rules = Array.isArray(spec?.rules) ? spec.rules : [];
-  const allFiles = walk(root);
   const violations = [];
   const staleBaseline = [];
   const expiredExceptions = [];
   const badConfig = [];
   const updatedRules = [];
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec) || !Array.isArray(spec.rules) || !spec.rules.length) {
+    return {
+      badConfig: ['ratchet rules must be a non-empty array'],
+      violations,
+      staleBaseline,
+      expiredExceptions,
+      updatedSpec: spec,
+    };
+  }
+  const rules = spec.rules;
+  const allFiles = walk(root);
 
   for (const rule of rules) {
     if (!rule?.id || !rule?.pattern || !Array.isArray(rule.include) || !rule.include.length) {
@@ -148,7 +156,7 @@ export function evaluateRatchet(spec, { root, today = new Date().toISOString().s
   };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   if (args.includes('-h') || args.includes('--help')) {
     console.log(USAGE);
@@ -198,14 +206,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exit(2);
   }
 
-  if (updateBaseline) {
+  const canUpdate = updateBaseline && evalResult.violations.length === 0 && evalResult.expiredExceptions.length === 0;
+  if (canUpdate) {
     writeFileSync(file, `${JSON.stringify(evalResult.updatedSpec, null, 2)}\n`);
   }
 
   const ok =
     evalResult.violations.length === 0 &&
     evalResult.expiredExceptions.length === 0 &&
-    (!strictShrink || evalResult.staleBaseline.length === 0);
+    (!strictShrink || canUpdate || evalResult.staleBaseline.length === 0);
 
   console.log(
     JSON.stringify(
@@ -214,9 +223,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         file,
         root,
         violations: evalResult.violations,
-        staleBaseline: evalResult.staleBaseline,
+        staleBaseline: canUpdate ? [] : evalResult.staleBaseline,
         expiredExceptions: evalResult.expiredExceptions,
-        updated: updateBaseline,
+        updated: canUpdate,
       },
       null,
       2,

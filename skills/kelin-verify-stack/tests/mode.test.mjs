@@ -1,12 +1,44 @@
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
 const script = path.resolve(import.meta.dirname, '..', '..', 'kelin-mode', 'scripts', 'mode.mjs');
+const runAcceptance = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify', 'scripts', 'run-acceptance.mjs');
+
+const validStandardPlan = [
+  '# 目标',
+  '实现功能并通过验收。',
+  '',
+  '# 验收标准',
+  '- [ ] `node -e "process.exit(0)"` 退出 0',
+  '',
+  '# 方案与取舍',
+  '推荐最小切片方案。',
+  '',
+  '# 本期不做',
+  '- 不改无关模块',
+  '',
+  '# 任务拆解',
+  '- [ ] 单元 1：实现主逻辑 / 依赖：无 / 验证：`node -e "process.exit(0)"`',
+  '',
+  '# 风险与回滚',
+  '回滚：revert commit。',
+].join('\n');
+
+const validLightPlan = [
+  '# 目标',
+  '完成轻量化小改。',
+  '',
+  '# 验收标准',
+  '- [ ] `node -e "process.exit(0)"` 退出 0',
+  '',
+  '# 下一步',
+  '- 修改并运行验证命令',
+].join('\n');
 
 const run = (args, root) => {
   try {
@@ -22,49 +54,61 @@ const artifact = async (root, name, body = 'x\n') => {
   await writeFile(path.join(root, '.kelin', name), body);
 };
 
-test('mode walks every phase and enforces artifacts', async () => {
+const writeValidAcceptance = async (root) => {
+  await mkdir(path.join(root, '.kelin'), { recursive: true });
+  const verifyFile = path.join(root, '.kelin', 'verify.json');
+  await writeFile(verifyFile, JSON.stringify({ checks: [{ id: 'c1', cmd: 'node -e "process.exit(0)"' }] }));
+  const accOut = execFileSync(process.execPath, [runAcceptance, verifyFile, '--json'], { cwd: root, encoding: 'utf8' });
+  await writeFile(path.join(root, '.kelin', 'acceptance.json'), accOut);
+};
+
+test('mode walks every phase and enforces real artifact gates', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-'));
 
   assert.equal(run(['init', '--mode', 'feature'], root).code, 0);
   assert.equal(run(['advance'], root).code, 0);
   assert.equal(run(['advance'], root).code, 1);
 
-  await artifact(root, 'scope.md');
+  await artifact(root, 'scope.md', '影响范围：src/a.mjs\n');
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "design"/);
 
   assert.equal(run(['advance'], root).code, 1);
-  await artifact(root, 'goal.md');
-  await artifact(root, 'plan.md');
+  await artifact(root, 'goal.md', '# 目标\n完成开发\n');
+  await artifact(root, 'plan.md', 'no headings bypass attempt\n');
+  assert.equal(run(['advance'], root).code, 1, 'headingless plan.md must be blocked');
+  await artifact(root, 'plan.md', validStandardPlan);
   assert.equal(run(['advance'], root).code, 0);
 
   assert.equal(run(['advance'], root).code, 1);
-  await artifact(root, 'build.md');
+  await artifact(root, 'build.md', '实现单元 1 并加单测\n');
   assert.equal(run(['advance'], root).code, 0);
 
-  await artifact(root, 'verify.json', '{}\n');
-  await artifact(root, 'acceptance.json', '{"ok": false}\n');
-  assert.equal(run(['advance'], root).code, 1);
+  await artifact(root, 'verify.json', JSON.stringify({ checks: [{ id: 'c1', cmd: 'true' }] }));
   await artifact(root, 'acceptance.json', '{"ok": true}\n');
+  assert.equal(run(['advance'], root).code, 1, 'unbound {ok:true} receipt must be blocked');
+  await writeValidAcceptance(root);
   assert.equal(run(['advance'], root).code, 0);
 
-  await artifact(root, 'review.md');
+  await artifact(root, 'review.md', 'bad placeholder\n');
+  assert.equal(run(['advance'], root).code, 1, 'unsubstantiated review.md must be blocked');
+  await artifact(root, 'review.md', '审查结论：P0:0 / P1:0 无问题\n');
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "refine"/);
 
-  await artifact(root, 'refine.md');
+  await artifact(root, 'refine.md', '删掉冗余逻辑\n');
   assert.equal(run(['advance'], root).code, 1, 'refine must rerun acceptance before ship');
   await artifact(root, 'acceptance.json', '{"ok": false}\n');
   assert.equal(run(['advance'], root).code, 1, 'refine must reject ok:false acceptance');
-  await artifact(root, 'acceptance.json', '{"ok": true}\n');
+  await writeValidAcceptance(root);
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "ship"/);
 
-  await artifact(root, 'ship.md');
+  await artifact(root, 'ship.md', 'PR 已验证并附证据\n');
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "reflect"/);
 
-  await artifact(root, 'reflect.md');
+  await artifact(root, 'reflect.md', '沉淀护栏并收尾\n');
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "done"/);
   assert.equal(run(['advance'], root).code, 1);
@@ -79,7 +123,7 @@ test('legacy mode requires a feature map instead of scope', async () => {
   assert.equal(run(['advance'], root).code, 0);
   await artifact(root, 'scope.md');
   assert.equal(run(['advance'], root).code, 1);
-  await artifact(root, 'feature-map.json', '{}\n');
+  await artifact(root, 'feature-map.json', '{"modules":[{"id":"core"}]}\n');
   assert.equal(run(['advance'], root).code, 0);
 });
 
@@ -88,17 +132,16 @@ test('light mode skips map and review', async () => {
   assert.equal(run(['init', '--mode', 'light'], root).code, 0);
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "design"/);
-  await artifact(root, 'goal.md');
-  await artifact(root, 'plan.md');
+  await artifact(root, 'goal.md', '# 目标\n小改\n');
+  await artifact(root, 'plan.md', validLightPlan);
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'build.md');
+  await artifact(root, 'build.md', '完成修改\n');
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'verify.json');
-  await artifact(root, 'acceptance.json', '{"ok": true}\n');
+  await writeValidAcceptance(root);
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'ship.md');
+  await artifact(root, 'ship.md', '已验证通过\n');
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'reflect.md');
+  await artifact(root, 'reflect.md', '无新增坑\n');
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "done"/);
   const state = JSON.parse(await readFile(path.join(root, '.kelin', 'state.json'), 'utf8'));
@@ -162,10 +205,10 @@ test('mode verify rejects stale acceptance receipts when verify.json or worktree
 
   assert.equal(run(['init', '--mode', 'light'], root).code, 0);
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'goal.md');
-  await artifact(root, 'plan.md');
+  await artifact(root, 'goal.md', '# 目标\n验证\n');
+  await artifact(root, 'plan.md', validLightPlan);
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'build.md');
+  await artifact(root, 'build.md', '完成实现\n');
   assert.equal(run(['advance'], root).code, 0);
 
   const runAcc = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify', 'scripts', 'run-acceptance.mjs');
@@ -186,7 +229,7 @@ test('mode verify rejects stale acceptance receipts when verify.json or worktree
   assert.match(staleSpec.stdout, /verify\.json changed/);
 });
 
-test('mode emits phase activeSkills/humanSummary and archives done state on re-init with --task', async () => {
+test('mode emits phase activeSkills/humanSummary, archives all done artifacts into run dir, and migrates legacy audit states', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-archive-'));
   const initRes = run(['init', '--mode', 'light'], root);
   assert.equal(initRes.code, 0, initRes.stdout);
@@ -195,17 +238,16 @@ test('mode emits phase activeSkills/humanSummary and archives done state on re-i
   assert.ok(initJson.humanSummary.length > 0);
 
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'goal.md');
-  await artifact(root, 'plan.md');
+  await artifact(root, 'goal.md', '# 目标\n验证归档\n');
+  await artifact(root, 'plan.md', validLightPlan);
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'build.md');
+  await artifact(root, 'build.md', '完成\n');
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'verify.json');
-  await artifact(root, 'acceptance.json', '{"ok": true}\n');
+  await writeValidAcceptance(root);
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'ship.md');
+  await artifact(root, 'ship.md', '已验证\n');
   assert.equal(run(['advance'], root).code, 0);
-  await artifact(root, 'reflect.md');
+  await artifact(root, 'reflect.md', '已复盘\n');
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "done"/);
 
@@ -215,9 +257,19 @@ test('mode emits phase activeSkills/humanSummary and archives done state on re-i
   assert.equal(nextJson.mode, 'fix');
   assert.equal(nextJson.phase, 'intake');
   assert.match(nextJson.archived, /\.kelin\/history\//);
-  const historyFiles = readdirSync(path.join(root, '.kelin', 'history'));
-  assert.equal(historyFiles.length, 1);
-  assert.match(historyFiles[0], /-light\.json$/);
+  const historyDirs = readdirSync(path.join(root, '.kelin', 'history'));
+  assert.equal(historyDirs.length, 1);
+  assert.match(historyDirs[0], /-light$/);
+  const archivedDir = path.join(root, '.kelin', 'history', historyDirs[0]);
+  assert.equal(existsSync(path.join(archivedDir, 'state.json')), true);
+  assert.equal(existsSync(path.join(archivedDir, 'goal.md')), true);
+  assert.equal(existsSync(path.join(root, '.kelin', 'goal.md')), false, 'old run artifacts must be moved out');
+
+  // Legacy audit state at old 10-phase phase migrates onto current audit orbit cleanly
+  const migDir = await mkdtemp(path.join(tmpdir(), 'kelin-mode-migrate-'));
+  await artifact(migDir, 'state.json', JSON.stringify({ mode: 'audit', phase: 'build', history: [] }));
+  const migStatus = JSON.parse(run(['status'], migDir).stdout);
+  assert.equal(migStatus.phase, 'audit');
 });
 
 test('mode route classifies tasks, companions, needsGrill, needsSetup and active resume', async () => {
@@ -257,11 +309,13 @@ test('mode setup previews read-only, applies idempotently and supports --with-ve
   await mkdir(path.join(root, 'app'), { recursive: true });
   await writeFile(path.join(root, 'app', 'page.tsx'), 'export default function Page() { return null; }\n');
 
-  const preview = run(['setup', '--host', 'antigravity'], root);
+  const preview = run(['setup', '--host', 'antigravity', '--with-verify-app'], root);
   assert.equal(preview.code, 0, preview.stdout);
   const previewJson = JSON.parse(preview.stdout);
   assert.equal(previewJson.applied, false);
   assert.ok(previewJson.actions.length >= 3);
+  assert.match(previewJson.applyCommand || '', /--with-verify-app/);
+  assert.match(previewJson.applyCommand || '', new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.equal(existsSync(path.join(root, 'AGENTS.md')), false);
   assert.equal(existsSync(path.join(root, 'kelin-policy.json')), false);
 
@@ -270,10 +324,26 @@ test('mode setup previews read-only, applies idempotently and supports --with-ve
   const appliedJson = JSON.parse(applied.stdout);
   assert.equal(appliedJson.applied, true);
   assert.match(await readFile(path.join(root, 'AGENTS.md'), 'utf8'), /<!-- kelin:workflow:start -->/);
-  assert.match(await readFile(path.join(root, '.gitignore'), 'utf8'), /^\.kelin\/$/m);
+  const gi = await readFile(path.join(root, '.gitignore'), 'utf8');
+  assert.match(gi, /^\.kelin\/\*$/m);
+  assert.match(gi, /^!\.kelin\/ci\/$/m);
   assert.equal(existsSync(path.join(root, 'kelin-policy.json')), true);
-  assert.equal(existsSync(path.join(root, '.agents', 'skills', 'verify-starter-app', 'SKILL.md')), true);
+  assert.equal(readdirSync(path.join(root, '.agents', 'skills')).some((n) => n.startsWith('verify-starter-app')), true);
 
   const second = JSON.parse(run(['setup', '--host', 'antigravity', '--apply'], root).stdout);
   assert.equal(second.actions.length, 0);
+
+  // Invalid policy JSON must fail setup instead of reporting ready
+  await writeFile(path.join(root, 'kelin-policy.json'), '{broken');
+  const badPolicy = run(['setup', '--host', 'antigravity'], root);
+  assert.equal(badPolicy.code, 2);
+
+  // Symlink .gitignore outside project must be refused
+  const symRoot = await mkdtemp(path.join(tmpdir(), 'kelin-mode-sym-'));
+  const outside = await mkdtemp(path.join(tmpdir(), 'kelin-outside-gi-'));
+  const targetGi = path.join(outside, 'secret.txt');
+  await writeFile(targetGi, 'keep\n');
+  await symlink(targetGi, path.join(symRoot, '.gitignore'));
+  assert.equal(run(['setup', '--host', 'antigravity', '--apply'], symRoot).code, 2);
+  assert.equal(await readFile(targetGi, 'utf8'), 'keep\n');
 });

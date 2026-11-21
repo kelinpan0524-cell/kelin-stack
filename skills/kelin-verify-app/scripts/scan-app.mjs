@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, realpathSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,17 +50,13 @@ const detectPort = (text, fallback) => {
 const slugify = (value) => value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'item';
 
 const makeFeatureId = (kind, method, routeOrName, seen) => {
-  const base = kind === 'cli'
+  const hash = createHash('sha256').update(`${kind}:${method}:${routeOrName}`).digest('hex').slice(0, 6);
+  const slug = kind === 'cli'
     ? `cli-${slugify(routeOrName)}`
     : kind === 'api'
       ? `api-${method.toLowerCase()}-${slugify(routeOrName === '/' ? 'root' : routeOrName)}`
       : `page-${slugify(routeOrName === '/' ? 'home' : routeOrName)}`;
-  let id = base;
-  let seq = 2;
-  while (seen.has(id)) {
-    id = `${base}-${seq}`;
-    seq += 1;
-  }
+  const id = `${slug}-${hash}`;
   seen.add(id);
   return id;
 };
@@ -220,7 +217,7 @@ export const scanApp = async (root, options = {}) => {
   };
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   const rootIndex = args.indexOf('--root');
   const limitIndex = args.indexOf('--limit');

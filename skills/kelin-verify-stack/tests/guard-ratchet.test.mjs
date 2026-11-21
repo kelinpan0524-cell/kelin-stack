@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -35,7 +35,7 @@ test('guard-check validates arch type, enforcedIn CI wiring, and exception expir
   assert.equal(expired.status, 1);
   assert.match(expired.stdout, /expired on 2026-12-31/);
 
-  await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), 'steps:\n  - run: echo ok\n');
+  await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), 'steps:\n  # - run: npm run typecheck\n  - run: echo ok\n');
   const unwired = run(guardCheck, [specFile, '--today', '2026-11-21'], dir);
   assert.equal(unwired.status, 1);
   assert.match(unwired.stdout, /does not invoke/);
@@ -103,4 +103,33 @@ test('ratchet-check catches relocated violations even at equal count, detects st
   const rejectedAfter = run(ratchetCheck, [configFile, '--check', '--today', '2026-11-21'], dir);
   assert.equal(rejectedAfter.status, 1);
   assert.equal(JSON.parse(rejectedAfter.stdout).expiredExceptions.length, 1);
+
+  // dir/** matches nested files, symlinks/dangling symlinks are skipped safely, and --update-baseline refuses when violations exist
+  const nestedDir = await mkdtemp(path.join(tmpdir(), 'kelin-ratchet-glob-'));
+  await mkdir(path.join(nestedDir, 'src', 'deep'), { recursive: true });
+  await mkdir(path.join(nestedDir, 'ignored', 'deep'), { recursive: true });
+  await writeFile(path.join(nestedDir, 'src', 'deep', 'ok.mjs'), 'console.log("bad");\n');
+  await writeFile(path.join(nestedDir, 'ignored', 'deep', 'skip.mjs'), 'console.log("ignored");\n');
+  await symlink(path.join(nestedDir, 'missing-target'), path.join(nestedDir, 'dangling-link'));
+
+  const globCfg = path.join(nestedDir, 'ratchet.json');
+  await writeFile(globCfg, JSON.stringify({
+    version: 1,
+    rules: [{
+      id: 'dir-star-star',
+      include: ['src/**'],
+      exclude: ['ignored/**'],
+      pattern: '\\bconsole\\.log\\(',
+      baseline: [],
+      exceptions: [],
+    }],
+  }, null, 2));
+  const globRes = run(ratchetCheck, [globCfg, '--check'], nestedDir);
+  assert.equal(globRes.status, 1);
+  assert.equal(JSON.parse(globRes.stdout).violations[0].file, 'src/deep/ok.mjs');
+
+  const refusedUpdate = run(ratchetCheck, [globCfg, '--update-baseline'], nestedDir);
+  assert.equal(refusedUpdate.status, 1);
+  assert.equal(JSON.parse(refusedUpdate.stdout).updated, false);
+  assert.equal(run(ratchetCheck, [globCfg, '--check'], nestedDir).status, 1);
 });

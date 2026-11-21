@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -45,13 +45,24 @@ export function validateGuards(spec, { base = process.cwd(), today = new Date().
             problems.push(`${id}: enforcedIn does not exist: ${rel}`);
             continue;
           }
-          const body = readFileSync(full, 'utf8');
+          const activeLines = readFileSync(full, 'utf8')
+            .split(/\r?\n/)
+            .map((line) => line.replace(/(?:^|\s)#.*$/, '').trim())
+            .filter(Boolean);
+          const activeBody = activeLines.join('\n');
+          const normLoc = path.posix.normalize(String(location));
+          const locDir = path.posix.dirname(normLoc);
           const coversTestSuite =
             guard.guard?.type === 'test' &&
-            String(location).startsWith('skills/') &&
-            String(location).endsWith('.test.mjs') &&
-            /node\s+--test[^\n]*(?:\*\.test\.mjs|find\s+skills\s+-name\s+['"]\*\.test\.mjs['"])/.test(body);
-          if (cmd && !body.includes(cmd) && (!scriptToken || !body.includes(scriptToken)) && !coversTestSuite) {
+            normLoc.endsWith('.test.mjs') &&
+            activeLines.some((line) => {
+              if (!/\bnode\s+--test\b/.test(line)) return false;
+              if (line.includes(normLoc) || line.includes(path.posix.basename(normLoc))) return true;
+              if (normLoc.startsWith('skills/') && /find\s+skills\s+-name\s+['"]\*\.test\.mjs['"]/.test(line)) return true;
+              return line.includes(`${locDir}/*.test.mjs`);
+            });
+          const invokesCommand = Boolean(cmd) && (activeBody.includes(cmd) || (scriptToken && activeBody.includes(scriptToken)));
+          if (!invokesCommand && !coversTestSuite) {
             problems.push(`${id}: enforcedIn ${rel} does not invoke "${cmd}"`);
           }
         }
@@ -80,7 +91,7 @@ export function validateGuards(spec, { base = process.cwd(), today = new Date().
   return { ok: problems.length === 0, guards: guards.length, problems };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   let file = '';
   let today = new Date().toISOString().slice(0, 10);

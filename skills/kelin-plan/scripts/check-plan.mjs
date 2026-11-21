@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export function validatePlanMarkdown(raw, level = 'standard') {
@@ -48,7 +49,9 @@ export function validatePlanMarkdown(raw, level = 'standard') {
       problems.push('任务拆解 has no checkbox');
     } else {
       tasks.forEach((line, index) => {
-        if (!/验证|验收|`[^`]+`/.test(line)) {
+        const hasNamedVerify = /(?:验证|验收|verify)\s*[:：]\s*\S+/i.test(line);
+        const hasCmdTick = /`\s*[^\s`][^`]*`/.test(line);
+        if (!hasNamedVerify && !hasCmdTick) {
           problems.push(`task ${index + 1} has no verification method`);
         }
       });
@@ -59,6 +62,10 @@ export function validatePlanMarkdown(raw, level = 'standard') {
         const body = line.replace(/^\s*- \[[ x]\]\s*/, '');
         const labelMatch = /^(?:(?:单元|任务|step|unit|pr)\s*[#-]?\s*\d+|[A-Za-z]+-\d+|T\d+|U\d+)/i.exec(body);
         const id = labelMatch ? normalizeId(labelMatch[0]) : `t${index + 1}`;
+        if (taskNodes.has(id)) {
+          problems.push(`duplicate task id: ${id}`);
+          return;
+        }
         const depMatch = /(?:依赖|depends(?:\s+on)?)\s*[:：]\s*([^/|;\n]+)/i.exec(body);
         const deps = depMatch
           ? depMatch[1]
@@ -68,6 +75,14 @@ export function validatePlanMarkdown(raw, level = 'standard') {
           : [];
         taskNodes.set(id, deps);
       });
+
+      for (const [id, deps] of taskNodes) {
+        for (const dep of deps) {
+          if (!taskNodes.has(dep)) {
+            problems.push(`unknown dependency ${dep} referenced by ${id}`);
+          }
+        }
+      }
 
       const state = new Map();
       const dfs = (node, trail) => {
@@ -104,7 +119,7 @@ export function validatePlanMarkdown(raw, level = 'standard') {
   };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
   const file = args[0];
   const levelIndex = args.indexOf('--level');

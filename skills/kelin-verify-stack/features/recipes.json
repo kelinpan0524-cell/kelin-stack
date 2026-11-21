@@ -21,7 +21,7 @@
   "zcode:skill-invocation:kelin-plan": [
     {
       "id": "behavioral-structured-plan",
-      "prompt": "/skill {qualified} 读完这个 skill 与当前目录里的 .verify-marker。按本 skill 的格式写一份最小规划到 ./plan.md：第一行写 `.verify-marker` 的原文，并包含 `## 目标`、`## 验收标准`、`## 单元`（至少一条 `- verify:` 验证命令）。完成后只回复 DONE。",
+      "prompt": "/skill {qualified} 读完这个 skill 与当前目录里的 .verify-marker。按本 skill 的完整计划模板在 ./plan.md 写入可执行计划：首行放 `.verify-marker` 原文，包含 `# 目标`、`# 验收标准`（至少一条 `- [ ]` 复选框）、`# 方案与取舍`、`# 任务拆解`（至少两条 `- [ ] 单元 ... / 验证：`node --test``）、`# 风险与回滚`、`# 本期不做`。完成后只回复 DONE。",
       "assertions": [
         {
           "id": "skill-load",
@@ -40,16 +40,40 @@
           "value": "{{marker}}"
         },
         {
+          "id": "has-goal-section",
+          "type": "file_contains",
+          "path": "plan.md",
+          "value": "# 目标"
+        },
+        {
           "id": "has-acceptance-section",
           "type": "file_contains",
           "path": "plan.md",
-          "value": "## 验收标准"
+          "value": "# 验收标准"
         },
         {
-          "id": "has-verify-line",
+          "id": "has-tasks-section",
           "type": "file_contains",
           "path": "plan.md",
-          "value": "- verify:"
+          "value": "# 任务拆解"
+        },
+        {
+          "id": "has-non-goals",
+          "type": "file_contains",
+          "path": "plan.md",
+          "value": "# 本期不做"
+        },
+        {
+          "id": "has-task-checkbox",
+          "type": "file_contains",
+          "path": "plan.md",
+          "value": "- [ ]"
+        },
+        {
+          "id": "has-verify-cmd",
+          "type": "file_contains",
+          "path": "plan.md",
+          "value": "`"
         },
         {
           "id": "clean-exit",
@@ -62,7 +86,7 @@
   "zcode:skill-invocation:kelin-mode": [
     {
       "id": "behavioral-mode-route",
-      "prompt": "/skill {qualified} 读完这个 skill 与当前目录里的 .verify-marker。针对任务「修复登录页 500 报错」，给出 kelin-mode 应进入的模式名（feature/fix/ship/audit/grill/research 之一）与首阶段名，将 `.verify-marker` 原文和路由结论写进 ./route.txt（含模式名 `fix` 和阶段名 `intake`）。完成后只回复 DONE。",
+      "prompt": "/skill {qualified} 读完这个 skill 与当前目录里的 .verify-marker。请运行你所在插件的 `kelin-mode/scripts/mode.mjs route`（如果不可达则按路由规则推演），针对用户请求「用户提交报价单后页面白屏、接口返回 500 异常」，把结果写进 ./route.json，必须包含 `.verify-marker` 原文（字段 `marker`）、判定出的模式字段 `mode`、首阶段字段 `firstPhase` 以及 `companionSkills`。完成后只回复 DONE。",
       "assertions": [
         {
           "id": "skill-load",
@@ -72,25 +96,31 @@
         {
           "id": "route-exists",
           "type": "file_exists",
-          "path": "route.txt"
+          "path": "route.json"
         },
         {
           "id": "marker-bound",
           "type": "file_contains",
-          "path": "route.txt",
+          "path": "route.json",
           "value": "{{marker}}"
         },
         {
-          "id": "routed-fix",
+          "id": "routed-mode",
           "type": "file_contains",
-          "path": "route.txt",
-          "value": "fix"
+          "path": "route.json",
+          "value": "\"fix\""
         },
         {
-          "id": "routed-intake",
+          "id": "routed-phase",
           "type": "file_contains",
-          "path": "route.txt",
-          "value": "intake"
+          "path": "route.json",
+          "value": "\"intake\""
+        },
+        {
+          "id": "has-companions",
+          "type": "file_contains",
+          "path": "route.json",
+          "value": "kelin-"
         },
         {
           "id": "clean-exit",
@@ -369,7 +399,7 @@
   "zcode:skill-invocation:kelin-review": [
     {
       "id": "behavioral-review-finding",
-      "prompt": "/skill {qualified} 读完这个 skill 与 .verify-marker。按本 skill 的发现格式，针对空 catch 吞异常（位置 `src/auth.js:12`）写一条包含 `.verify-marker` 原文的审查意见到 ./review.md，必须写明 严重度、触发条件、后果 和 最小改法。完成后只回复 DONE。",
+      "prompt": "/skill {qualified} 读完这个 skill 与 .verify-marker。按本 skill 的发现格式，针对未记录日志且直接吞掉错误的空 catch（位置 `src/auth.js:12`）写一条包含 `.verify-marker` 原文的审查意见到 ./review.md，必须写明 严重度（按 P0-P3 分级）、位置、触发条件、后果 和 最小改法。完成后只回复 DONE。",
       "assertions": [
         {
           "id": "skill-load",
@@ -386,6 +416,24 @@
           "type": "file_contains",
           "path": "review.md",
           "value": "{{marker}}"
+        },
+        {
+          "id": "has-location",
+          "type": "file_contains",
+          "path": "review.md",
+          "value": "src/auth.js:12"
+        },
+        {
+          "id": "has-severity",
+          "type": "file_contains",
+          "path": "review.md",
+          "value": "P"
+        },
+        {
+          "id": "has-trigger",
+          "type": "file_contains",
+          "path": "review.md",
+          "value": "触发"
         },
         {
           "id": "has-consequence",

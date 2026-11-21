@@ -38,6 +38,14 @@ test('audit-check rejects a missing coverage table and not-assessed claims of no
   const missing = await write('audit.md', '# Audit\n\n## 必须修\n- none\n');
   assert.equal(run(auditCheck, missing).status, 1);
 
+  const spoofedNote = await write('audit.md', [
+    '## 覆盖声明',
+    '| 面 | 状态 | 范围 |',
+    '| --- | --- | --- |',
+    '| 安全 | 未审 | notes mention audited only |',
+  ].join('\n'));
+  assert.equal(run(auditCheck, spoofedNote).status, 1);
+
   const contradictory = await write('audit.md', [
     '## 覆盖声明',
     '| 面 | 状态 | 范围 |',
@@ -70,9 +78,18 @@ test('decision-check accepts pointer evidence and rejects prose or invalid field
   assert.equal(result.status, 1);
   assert.match(result.stdout, /invalid phase/);
 
-  const startRow = await write('decisions-start.tsv', [
+  const startOnly = await write('decisions-start.tsv', [
     'ts\tphase\tdecision\twhy\tevidence\tresult',
     '2026-11-11T00:00:00Z\tstart\t开启新会话\t接续上次断点\tagent-123\tstart',
   ].join('\n'));
-  assert.equal(run(decisionCheck, startRow).status, 0);
+  const startOnlyRes = run(decisionCheck, startOnly);
+  assert.equal(startOnlyRes.status, 1);
+  assert.match(startOnlyRes.stdout, /no substantive decision rows/);
+
+  const startWithDecision = await write('decisions-start-plus.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-11-11T00:00:00Z\tstart\t开启新会话\t接续上次断点\tagent-123\tstart',
+    '2026-11-11T00:05:00Z\t设计\t选 A\tB 更贵\tREADME.md:10\t待验证',
+  ].join('\n'));
+  assert.equal(run(decisionCheck, startWithDecision).status, 0);
 });

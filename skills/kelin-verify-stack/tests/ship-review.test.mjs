@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -71,4 +71,17 @@ test('preflight warns on staged gate findings and blocks with --strict-gates', a
   assert.equal(blocked.status, 1);
   const blockPayload = JSON.parse(blocked.stdout);
   assert.ok(blockPayload.findings.some((f) => f.code === 'gate-scan'));
+});
+
+test('install-ci vendors working run-acceptance + fingerprint check in fresh repo', async () => {
+  const dir = await repo();
+  const installCi = path.resolve(import.meta.dirname, '..', '..', 'kelin-ci', 'scripts', 'install-ci.mjs');
+  const installed = spawnSync(process.execPath, [installCi, dir, '--test', 'true'], { encoding: 'utf8' });
+  assert.equal(installed.status, 0, installed.stdout + installed.stderr);
+  await writeFile(path.join(dir, 'verify.json'), JSON.stringify({ checks: [{ id: 'c1', cmd: 'node -e "process.exit(0)"' }] }));
+  const vendoredAcc = spawnSync(process.execPath, [path.join(dir, '.kelin', 'ci', 'run-acceptance.mjs'), 'verify.json', '--json'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(vendoredAcc.status, 0, vendoredAcc.stdout + vendoredAcc.stderr);
+  const acc = JSON.parse(vendoredAcc.stdout);
+  assert.equal(acc.verdict, 'VERIFIED');
+  assert.match(acc.worktreeFingerprint, /^[a-f0-9]{64}$/);
 });

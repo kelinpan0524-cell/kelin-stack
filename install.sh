@@ -357,12 +357,34 @@ ALL_DIRS=()
 for d in "$SRC"/kelin-*/; do ALL_DIRS+=("$(basename "$d")"); done
 SELECTED=()
 if [[ -n "$SUBSET" ]]; then
-  IFS=',' read -ra WANTED <<< "$SUBSET"
-  for w in "${WANTED[@]}"; do
-    w="$(echo "$w" | xargs)"
-    [[ -d "$SRC/$w" ]] || { echo "subset 里没有这个 skill: ${w}"; exit 2; }
-    SELECTED+=("$w")
-  done
+  RESOLVED=$(python3 - "$SRC" "$SUBSET" <<'PY' || exit 2
+import pathlib, sys
+src = pathlib.Path(sys.argv[1])
+wanted = [item.strip() for item in sys.argv[2].split(",") if item.strip()]
+deps = {
+    "kelin-mode": ["kelin-agents", "kelin-audit", "kelin-ci", "kelin-plan", "kelin-review", "kelin-verify", "kelin-verify-app"],
+    "kelin-verify": ["kelin-review"],
+    "kelin-ship": ["kelin-review"],
+    "kelin-release": ["kelin-verify-stack"],
+    "kelin-ci": ["kelin-agents", "kelin-map", "kelin-verify", "kelin-review", "kelin-guard"],
+}
+seen = []
+queue = list(wanted)
+while queue:
+    name = queue.pop(0)
+    if name in seen:
+        continue
+    if not (src / name).is_dir():
+        sys.stderr.write(f"subset 里没有这个 skill: {name}\n")
+        sys.exit(2)
+    seen.append(name)
+    for dep in deps.get(name, []):
+        if dep not in seen and (src / dep).is_dir():
+            queue.append(dep)
+print(" ".join(seen))
+PY
+  ) || exit 2
+  read -ra SELECTED <<< "$RESOLVED"
 else
   SELECTED=("${ALL_DIRS[@]}")
 fi

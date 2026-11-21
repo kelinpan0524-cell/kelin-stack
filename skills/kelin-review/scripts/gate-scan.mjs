@@ -20,7 +20,7 @@ const explicitBase = option('--base', '');
 let base = explicitBase || 'HEAD';
 const staged = args.includes('--staged');
 const diffFile = option('--file', '');
-const git = (argv) => spawnSync('git', argv, { cwd: root, encoding: 'utf8' });
+const git = (argv) => spawnSync('git', argv, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 const resolveBase = () => {
   if (explicitBase) return explicitBase;
@@ -148,9 +148,45 @@ const deletedFiles = new Set();
 const hunks = [];
 let current = null;
 
+const fileSourceCache = new Map();
+const readRepoRevision = (revSpec) => {
+  if (diffFile) return null;
+  const res = git(['show', revSpec]);
+  return res.status === 0 ? res.stdout : null;
+};
+const getFileContext = (file) => {
+  if (fileSourceCache.has(file)) return fileSourceCache.get(file);
+  if (diffFile) {
+    fileSourceCache.set(file, null);
+    return null;
+  }
+  const afterRaw = staged ? readRepoRevision(`:${file}`) : (existsSync(path.join(root, file)) ? readFileSync(path.join(root, file), 'utf8') : null);
+  const beforeRaw = readRepoRevision(`${base}:${file}`);
+  const ctx = {
+    afterRaw,
+    beforeRaw,
+    afterCode: afterRaw !== null ? stripSource(afterRaw).split('\n') : null,
+    afterComments: afterRaw !== null ? extractComments(afterRaw).split('\n') : null,
+    beforeCode: beforeRaw !== null ? stripSource(beforeRaw).split('\n') : null,
+  };
+  fileSourceCache.set(file, ctx);
+  return ctx;
+};
+
 const annotateHunkLines = (hunk) => {
   if (!hunk) return;
   const codeFile = isCodeFile(hunk.file);
+  const fileCtx = codeFile && !hunk.deleted ? getFileContext(hunk.file) : null;
+  if (fileCtx?.afterCode) {
+    hunk.added.forEach((entry) => {
+      entry.code = fileCtx.afterCode[entry.line - 1] ?? '';
+      entry.comments = fileCtx.afterComments[entry.line - 1] ?? '';
+    });
+    hunk.removed.forEach((entry) => {
+      entry.code = fileCtx.beforeCode ? (fileCtx.beforeCode[entry.line - 1] ?? '') : '';
+    });
+    return;
+  }
   const joinAdded = hunk.added.map((e) => e.text).join('\n');
   const joinRemoved = hunk.removed.map((e) => e.text).join('\n');
   const addedCode = codeFile ? stripSource(joinAdded).split('\n') : hunk.added.map((e) => e.text);
@@ -165,26 +201,34 @@ const annotateHunkLines = (hunk) => {
   });
 };
 
+const thresholdRelaxed = (keyName, beforeVal, afterVal) => {
+  if (/^(min(?:imum|[a-z0-9_]*)|floor|quorum|required)$/i.test(keyName)) return afterVal < beforeVal;
+  if (/^threshold$/i.test(keyName)) return afterVal !== beforeVal;
+  return afterVal > beforeVal;
+};
+
 const flushHunk = () => {
   if (!current) return;
   annotateHunkLines(current);
   const relaxed = new Map();
+  const threshRe = /(timeout|timeoutMs|maxRetries|retries|max|min[A-Za-z0-9_]*|minimum|threshold|tolerance|sleep|waitFor|floor|quorum|required|limit|delay)["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i;
   for (const entry of current.removed) {
-    const match = /(timeout|timeoutMs|maxRetries|retries|max|threshold|tolerance|sleep|waitFor)["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i.exec(entry.code);
+    const match = threshRe.exec(entry.code);
     if (!match) continue;
     const keyName = match[1].toLowerCase();
     if (!relaxed.has(keyName)) relaxed.set(keyName, []);
     relaxed.get(keyName).push({ value: Number(match[2]), text: entry.text, line: entry.line });
   }
   for (const entry of current.added) {
-    const match = /(timeout|timeoutMs|maxRetries|retries|max|threshold|tolerance|sleep|waitFor)["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i.exec(entry.code);
+    const match = threshRe.exec(entry.code);
     if (!match) continue;
     const keyName = match[1].toLowerCase();
     const queue = relaxed.get(keyName);
     if (!queue?.length) continue;
     const before = queue.shift();
-    if (Number(match[2]) > before.value) {
-      add('RH-15', current.file, entry.line, 'changed', `${keyName}: ${before.value} -> ${match[2]}`);
+    const afterVal = Number(match[2]);
+    if (thresholdRelaxed(keyName, before.value, afterVal)) {
+      add('RH-15', current.file, entry.line, 'changed', `${keyName}: ${before.value} -> ${afterVal}`);
     }
   }
   current = null;
@@ -258,6 +302,9 @@ for (const deleted of deletedGateFiles) {
 
 const gateHunks = [];
 
+const emptyCatchRe = /catch\s*(?:\([^)]*\))?\s*\{\s*\}|except\s+[^:\n]+:\s*(?:\n\s*)?pass\b|\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/g;
+const reportedEmptyCatches = new Set();
+
 for (const hunk of hunks) {
   const changedFile = hunk.file;
   if (!changedFile) continue;
@@ -298,12 +345,41 @@ for (const hunk of hunks) {
         add('RH-13', changedFile, entry.line, 'added', entry.text);
       }
     }
-    const joinedAddedCode = hunk.added.map((e) => e.code).join('\n');
-    const emptyCatchRe = /catch\s*(?:\([^)]*\))?\s*\{\s*\}|except\s+[^:\n]+:\s*(?:\n\s*)?pass\b|\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/g;
-    for (const m of joinedAddedCode.matchAll(emptyCatchRe)) {
-      const idx = joinedAddedCode.slice(0, m.index).split('\n').length - 1;
-      const target = hunk.added[idx] || hunk.added[0];
-      add('RH-16', changedFile, target?.line ?? 1, 'added', m[0].replace(/\s+/g, ' '));
+    const fileCtx = getFileContext(changedFile);
+    if (fileCtx?.afterCode && isCodeFile(changedFile)) {
+      const fullAfterCode = fileCtx.afterCode.join('\n');
+      const fullBeforeCode = (fileCtx.beforeCode || []).join('\n');
+      const beforeCount = [...fullBeforeCode.matchAll(emptyCatchRe)].length;
+      const afterMatches = [...fullAfterCode.matchAll(emptyCatchRe)];
+      const touched = new Set([
+        ...hunk.added.map((e) => e.line),
+        ...hunk.removed.map((e) => Math.max(1, e.line)),
+      ]);
+      if (afterMatches.length > beforeCount) {
+        for (const m of afterMatches) {
+          const startLine = fullAfterCode.slice(0, m.index).split('\n').length;
+          const endLine = startLine + m[0].split('\n').length - 1;
+          let hitsHunk = false;
+          for (let ln = startLine - 1; ln <= endLine + 1; ln += 1) {
+            if (touched.has(ln)) {
+              hitsHunk = true;
+              break;
+            }
+          }
+          const key = `${changedFile}:${startLine}`;
+          if (hitsHunk && !reportedEmptyCatches.has(key)) {
+            reportedEmptyCatches.add(key);
+            add('RH-16', changedFile, startLine, 'added', m[0].replace(/\s+/g, ' '));
+          }
+        }
+      }
+    } else {
+      const joinedAddedCode = hunk.added.map((e) => e.code).join('\n');
+      for (const m of joinedAddedCode.matchAll(emptyCatchRe)) {
+        const idx = joinedAddedCode.slice(0, m.index).split('\n').length - 1;
+        const target = hunk.added[idx] || hunk.added[0];
+        add('RH-16', changedFile, target?.line ?? 1, 'added', m[0].replace(/\s+/g, ' '));
+      }
     }
   }
 }

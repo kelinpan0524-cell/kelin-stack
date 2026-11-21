@@ -2,6 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const args = process.argv.slice(2);
 const option = (name, fallback = '') => {
@@ -43,7 +44,9 @@ if (!withVersion.length) {
   process.exit(2);
 }
 
-const current = JSON.parse(readFileSync(withVersion[0], 'utf8')).version;
+const primaryMeta = JSON.parse(readFileSync(withVersion[0], 'utf8'));
+const current = primaryMeta.version;
+const targetName = primaryMeta.name || path.basename(root);
 const parts = current.split('.').map(Number);
 if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part))) {
   console.error(`Unsupported version: ${current}`);
@@ -65,7 +68,10 @@ const status = git(['status', '--porcelain'], true);
 const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], true);
 const head = git(['rev-parse', 'HEAD'], true) || null;
 
-const evaluateReceipt = () => {
+const ioPath = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify-stack', 'scripts', 'io.mjs');
+const { hashTree } = existsSync(ioPath) ? await import(pathToFileURL(ioPath).href) : { hashTree: null };
+
+const evaluateReceipt = async () => {
   if (skipReceipt) return { ok: true, skipped: true, reason: 'skipped by --skip-receipt' };
   if (!receiptPath) return { ok: false, provided: false, reason: 'no --receipt provided' };
   const resolved = path.resolve(root, receiptPath);
@@ -77,17 +83,30 @@ const evaluateReceipt = () => {
     return { ok: false, provided: true, reason: `unreadable receipt: ${error.message}` };
   }
   if (receipt.ok !== true) return { ok: false, provided: true, reason: 'receipt ok is not true' };
-  if (receipt.plugin?.treeHash && receipt.plugin.treeHash !== receipt.plugin.treeHashAfter) {
-    return { ok: false, provided: true, reason: 'receipt plugin treeHash mismatch' };
+  if (receipt.plugin?.dirty) return { ok: false, provided: true, reason: 'receipt was captured on a dirty checkout' };
+  if (!receipt.plugin?.treeHash || !receipt.plugin?.treeHashAfter || receipt.plugin.treeHash !== receipt.plugin.treeHashAfter) {
+    return { ok: false, provided: true, reason: 'receipt plugin treeHash is missing or inconsistent' };
   }
   const receiptHead = receipt.plugin?.gitHead || receipt.head || null;
-  if (receiptHead && head && receiptHead !== head) {
-    return { ok: false, provided: true, reason: `receipt verified at ${receiptHead}, current HEAD is ${head}` };
+  if (head && receiptHead !== head) {
+    return { ok: false, provided: true, reason: `receipt verified at ${receiptHead || 'missing gitHead'}, current HEAD is ${head}` };
+  }
+  if (receipt.plugin?.name && receipt.plugin.name !== targetName) {
+    return { ok: false, provided: true, reason: `receipt plugin ${receipt.plugin.name} does not match ${targetName}` };
+  }
+  if (receipt.plugin?.version && receipt.plugin.version !== current) {
+    return { ok: false, provided: true, reason: `receipt version ${receipt.plugin.version} does not match ${current}` };
+  }
+  if (hashTree && status === '') {
+    const actualTree = await hashTree(root);
+    if (actualTree.hash !== receipt.plugin.treeHash) {
+      return { ok: false, provided: true, reason: `receipt treeHash ${receipt.plugin.treeHash.slice(0, 12)} does not match ${actualTree.hash.slice(0, 12)}` };
+    }
   }
   return { ok: true, provided: true, head: receiptHead, level: receipt.verificationLevel || null };
 };
 
-const receiptCheck = evaluateReceipt();
+const receiptCheck = await evaluateReceipt();
 const branchAllowed = allowBranch || ['main', 'master'].includes(branch);
 
 const plan = {
@@ -127,7 +146,7 @@ if (!branchAllowed) {
   console.error(`Refusing release on branch ${branch}; switch to main/master or pass --allow-branch`);
   process.exit(1);
 }
-if (receiptPath && !receiptCheck.ok) {
+if (!skipReceipt && !receiptCheck.ok) {
   console.error(`Receipt check failed: ${receiptCheck.reason}`);
   process.exit(1);
 }

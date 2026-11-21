@@ -157,4 +157,11 @@ test('SessionStart recognizes audit phase, injects companion skills and onboardi
   const secondCtx = JSON.parse(second.stdout).hookSpecificOutput.additionalContext;
   assert.match(secondCtx, /AGENTS\.md 已就绪/);
   assert.doesNotMatch(secondCtx, /未检测到工作流规则块/);
+
+  const dirAgents = await mkdtemp(path.join(tmpdir(), 'kelin-session-dir-agents-'));
+  await mkdir(path.join(dirAgents, 'AGENTS.md'), { recursive: true });
+  const third = run({ hook_event_name: 'SessionStart' }, { ZCODE_PROJECT_DIR: dirAgents });
+  assert.equal(third.status, 0, third.stderr);
+  const thirdCtx = JSON.parse(third.stdout).hookSpecificOutput.additionalContext;
+  assert.match(thirdCtx, /未检测到工作流规则块/);
 });

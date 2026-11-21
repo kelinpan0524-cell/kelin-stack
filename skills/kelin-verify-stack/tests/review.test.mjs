@@ -206,3 +206,60 @@ test('gate-scan unquotes C-escaped non-ASCII git paths', async () => {
   assert.ok(payload.gateFiles.includes('tests/中文.test.mjs'), JSON.stringify(payload.gateFiles));
   assert.ok(payload.findings.some((f) => f.tag === 'RH-1' && f.path === 'tests/中文.test.mjs'));
 });
+
+test('gate-scan detects block-comment suppression edits, emptied catch, lower-bound thresholds, and NUL untracked fingerprints', async () => {
+  const dir = await repo();
+  await writeFile(
+    path.join(dir, 'src/app.mjs'),
+    [
+      '/*',
+      ' * multi-line header',
+      ' * note',
+      ' */',
+      'export function run() {',
+      '  try {',
+      '    return 1;',
+      '  } catch (err) {',
+      '    console.error(err);',
+      '  }',
+      '}',
+    ].join('\n') + '\n',
+  );
+  await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', minScore: 0.9, threshold: 0.8 }, null, 2));
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-qm', 'with block comment and catch']);
+
+  await writeFile(
+    path.join(dir, 'src/app.mjs'),
+    [
+      '/*',
+      ' * multi-line header',
+      ' * @ts-ignore',
+      ' */',
+      'export function run() {',
+      '  try {',
+      '    return 1;',
+      '  } catch (err) {',
+      '  }',
+      '}',
+    ].join('\n') + '\n',
+  );
+  await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', minScore: 0.4, threshold: 0.8 }, null, 2));
+  const scanRes = run(dir, gateScan);
+  assert.equal(scanRes.status, 1);
+  const scanJson = JSON.parse(scanRes.stdout);
+  assert.ok(scanJson.findings.some((f) => f.tag === 'RH-13' && f.path === 'src/app.mjs'));
+  assert.ok(scanJson.findings.some((f) => f.tag === 'RH-16' && f.path === 'src/app.mjs'));
+  assert.ok(scanJson.findings.some((f) => f.tag === 'RH-15' && f.evidence.includes('minscore')));
+
+  // Untracked subdirectory changes must invalidate review-check fingerprint
+  await writeFile(path.join(dir, 'src/app.mjs'), 'export const a = 1;\n');
+  await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', minScore: 0.9, threshold: 0.8 }, null, 2));
+  run(dir, reviewCheck, ['--write']);
+  await mkdir(path.join(dir, 'untracked-dir'), { recursive: true });
+  await writeFile(path.join(dir, 'untracked-dir/file.mjs'), 'v1\n');
+  assert.equal(JSON.parse(run(dir, reviewCheck).stdout).status, 'STALE');
+  run(dir, reviewCheck, ['--write']);
+  await writeFile(path.join(dir, 'untracked-dir/file.mjs'), 'v2\n');
+  assert.equal(JSON.parse(run(dir, reviewCheck).stdout).status, 'STALE');
+});

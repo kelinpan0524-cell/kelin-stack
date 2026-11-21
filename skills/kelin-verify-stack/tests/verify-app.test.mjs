@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -44,24 +44,24 @@ test('scan detects stack, harnesses, launch, port, methods, stable ids, and >8 r
   assert.ok(payload.features.length >= 12, `expected >= 12 features, got ${payload.features.length}`);
   const users = payload.features.find((entry) => entry.name.includes('/users'));
   assert.ok(users);
-  assert.equal(users.id, 'page-users');
+  assert.match(users.id, /^page-users-[a-f0-9]{6}$/);
   const post10 = payload.features.find((entry) => entry.entrypoint === 'POST /api/items/10');
   assert.ok(post10);
-  assert.equal(post10.id, 'api-post-api-items-10');
-  assert.ok(payload.features.some((entry) => entry.name.includes('demo-cli') && entry.id === 'cli-demo-cli'));
+  assert.match(post10.id, /^api-post-api-items-10-[a-f0-9]{6}$/);
+  assert.ok(payload.features.some((entry) => entry.name.includes('demo-cli') && /^cli-demo-cli-[a-f0-9]{6}$/.test(entry.id)));
 
   const capped = run(scan, ['--root', dir, '--limit', '3']);
   assert.equal(capped.status, 0, capped.stderr);
   assert.ok(JSON.parse(capped.stdout).features.length <= 3);
 });
 
-test('generate previews without writing, syncs incrementally without overwriting manual edits, and rejects --write conflict', async () => {
+test('generate previews without writing, syncs incrementally without overwriting manual edits, matches legacy numbered files, and refuses symlink escapes', async () => {
   const dir = await project();
   const preview = run(generate, ['--root', dir]);
   assert.equal(preview.status, 0, preview.stderr);
   const previewJson = JSON.parse(preview.stdout);
   assert.equal(previewJson.preview, true);
-  assert.ok(previewJson.diff.added.includes('page-users.md'));
+  assert.ok(previewJson.diff.added.some((name) => /^page-users-[a-f0-9]{6}\.md$/.test(name)));
   assert.equal(existsSync(path.join(dir, '.zcode')), false);
 
   const written = run(generate, ['--root', dir, '--write']);
@@ -69,7 +69,8 @@ test('generate previews without writing, syncs incrementally without overwriting
   const skillFile = path.join(dir, '.zcode', 'skills', 'verify-demo-app', 'SKILL.md');
   const body = await readFile(skillFile, 'utf8');
   for (const heading of ['## 启动', '## 体检', '## 驱动', '## 留证', '## 清理']) assert.ok(body.includes(heading), heading);
-  const usersFile = path.join(dir, '.zcode', 'skills', 'verify-demo-app', 'features', 'page-users.md');
+  const usersRel = previewJson.diff.added.find((name) => /^page-users-[a-f0-9]{6}\.md$/.test(name));
+  const usersFile = path.join(dir, '.zcode', 'skills', 'verify-demo-app', 'features', usersRel);
   assert.equal(existsSync(usersFile), true);
   const usersBody = await readFile(usersFile, 'utf8');
   assert.match(usersBody, /sync_commit:/);
@@ -89,8 +90,8 @@ test('generate previews without writing, syncs incrementally without overwriting
   assert.equal(synced.status, 0, synced.stderr);
   const syncJson = JSON.parse(synced.stdout);
   assert.equal(syncJson.sync, true);
-  assert.ok(syncJson.diff.added.includes('page-settings.md'));
-  assert.ok(syncJson.diff.preserved.includes('page-users.md'));
+  assert.ok(syncJson.diff.added.some((name) => /^page-settings-[a-f0-9]{6}\.md$/.test(name)));
+  assert.ok(syncJson.diff.preserved.includes(usersRel));
   assert.ok(syncJson.diff.orphaned.includes('legacy-orphan.md'));
   assert.match(await readFile(usersFile, 'utf8'), /MANUAL_NOTE_KEEP/);
   assert.equal(existsSync(orphanFile), true);
@@ -100,6 +101,34 @@ test('generate previews without writing, syncs incrementally without overwriting
 
   const forced = run(generate, ['--root', dir, '--write', '--force']);
   assert.equal(forced.status, 0, forced.stderr);
+
+  // Legacy 01-*.md file matching entrypoint is preserved on sync without duplication
+  const legacyDir = await project();
+  await mkdir(path.join(legacyDir, '.zcode', 'skills', 'verify-demo-app', 'features'), { recursive: true });
+  await writeFile(path.join(legacyDir, '.zcode', 'skills', 'verify-demo-app', 'features', '01-users.md'), '# 页面或接口 /users\nLEGACY_KEEP\n');
+  const legacySync = run(generate, ['--root', legacyDir, '--write', '--sync']);
+  assert.equal(legacySync.status, 0, legacySync.stderr);
+  const legacyDiff = JSON.parse(legacySync.stdout).diff;
+  assert.ok(legacyDiff.preserved.includes('01-users.md'));
+  assert.ok(!legacyDiff.added.some((name) => /^page-users-/.test(name)));
+
+  // Distinct routes sharing a slug (/foo/bar vs /foo-bar) never collide
+  const collideDir = await mkdtemp(path.join(tmpdir(), 'kelin-collide-'));
+  await writeFile(path.join(collideDir, 'package.json'), JSON.stringify({ name: 'c' }));
+  await mkdir(path.join(collideDir, 'src'), { recursive: true });
+  await writeFile(path.join(collideDir, 'src', 'r.ts'), "app.get('/foo/bar', () => {});\napp.get('/foo-bar', () => {});\n");
+  const collideScan = JSON.parse(run(scan, ['--root', collideDir]).stdout);
+  const ids = collideScan.features.map((f) => f.id);
+  assert.equal(ids.length, 2);
+  assert.equal(new Set(ids).size, 2);
+
+  // Symlink escape refused
+  const outside = await mkdtemp(path.join(tmpdir(), 'kelin-outside-'));
+  const symDir = await project();
+  await mkdir(path.join(symDir, '.zcode'), { recursive: true });
+  await symlink(outside, path.join(symDir, '.zcode', 'skills'));
+  const escaped = run(generate, ['--root', symDir, '--write']);
+  assert.equal(escaped.status, 2);
 });
 
 test('generate validates flags, rejects file --root, and --help creates no files in cwd', async () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { PHASE_TABLE, phaseMeta } from '../skills/kelin-mode/scripts/mode.mjs';
@@ -109,14 +109,23 @@ const findVerifySkills = () => {
   return [...new Set(found)].sort().slice(0, 10);
 };
 
+const isAgentsOnboarded = () => {
+  if (!projectDir) return false;
+  const agentsPath = path.join(projectDir, 'AGENTS.md');
+  try {
+    if (!existsSync(agentsPath) || !statSync(agentsPath).isFile()) return false;
+    return readFileSync(agentsPath, 'utf8').includes('<!-- kelin:workflow:start -->');
+  } catch {
+    return false;
+  }
+};
+
 const version = readVersion();
 const mode = readSafetyMode();
 const state = readState();
 const verifySkills = findVerifySkills();
 const frozen = Boolean(projectDir) && existsSync(path.join(projectDir, '.kelin', 'freeze.json'));
-const agentsOnboarded = Boolean(projectDir)
-  && existsSync(path.join(projectDir, 'AGENTS.md'))
-  && readFileSync(path.join(projectDir, 'AGENTS.md'), 'utf8').includes('<!-- kelin:workflow:start -->');
+const agentsOnboarded = isAgentsOnboarded();
 
 const stateLine = (() => {
   if (!state) {

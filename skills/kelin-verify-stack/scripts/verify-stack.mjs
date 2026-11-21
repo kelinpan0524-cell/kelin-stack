@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -268,6 +268,10 @@ async function runVerification(options) {
   const before = await hashTree(pluginRoot);
   const headProbe = await run('git', ['-C', pluginRoot, 'rev-parse', 'HEAD'], { timeoutMs: 20_000 });
   const gitHead = headProbe.code === 0 && /^[a-f0-9]{40}$/.test(headProbe.stdout.trim()) ? headProbe.stdout.trim() : null;
+  const statusProbe = gitHead ? await run('git', ['-C', pluginRoot, 'status', '--porcelain=v1'], { timeoutMs: 20_000 }) : { code: 0, stdout: '' };
+  const dirty = gitHead
+    ? statusProbe.code !== 0 || statusProbe.stdout.split('\n').some((line) => line && !/(^|\s)\.kelin\/(?!ci\/)/.test(line))
+    : false;
   let installedRoot = '';
   if (planned > 0) {
     installedRoot = (await installedPluginRoot(zcodeRef, pluginMeta.name)) || '';
@@ -289,7 +293,7 @@ async function runVerification(options) {
     zcodeVersion: version,
     verificationLevel: planned > 0 ? 'live' : 'static',
     skippedLive,
-    plugin: { root: pluginRoot, installedRoot: installedRoot || null, gitHead, name: pluginMeta.name, version: pluginMeta.version, treeHash: before.hash, treeHashAfter: before.hash, files: before.files },
+    plugin: { root: pluginRoot, installedRoot: installedRoot || null, gitHead, dirty, name: pluginMeta.name, version: pluginMeta.version, treeHash: before.hash, treeHashAfter: before.hash, files: before.files },
     selection: selection || null,
     features: [...new Set(cases.map((entry) => entry.feature))].sort(),
     expectedCases: cases.map((entry) => ({ feature: entry.feature, caseId: entry.id })),
@@ -345,7 +349,7 @@ async function runVerification(options) {
         marker,
       });
       const exitAssertion = { id: 'session-exit', type: 'process', ok: outcome.exitCode === 0, detail: `exit ${outcome.exitCode}${outcome.timedOut ? ' (timeout)' : ''}` };
-      const artifacts = await collectArtifacts(fixtureDir, sessionDir);
+      const artifacts = await collectArtifacts(fixtureDir, sessionDir, output);
       const transcriptRel = outcome.rolloutFile ? path.relative(output, outcome.rolloutFile) : '';
       const transcriptHash = transcriptRel ? sha256(await readFile(path.join(output, transcriptRel))) : '';
       const ok = exitAssertion.ok && evaluated.every((entry) => entry.ok) && artifacts.length > 0 && Boolean(transcriptRel);
@@ -399,13 +403,42 @@ export async function publish(options) {
   const runDir = path.resolve(options.run);
   const receipt = await readJson(path.join(runDir, 'receipt.json'));
   if (!receipt.ok) throw new Refused('Refusing to publish a failed run');
+  if (receipt.plugin?.dirty) {
+    throw new Refused('Refusing to publish a receipt verified on a dirty checkout; commit changes cleanly and rerun verify-stack');
+  }
   if (!receipt.plugin?.treeHash || receipt.plugin.treeHash !== receipt.plugin.treeHashAfter) {
     throw new Refused('Refusing to publish: plugin tree hash is missing or inconsistent inside receipt');
   }
-  if (options.requireLive && receipt.verificationLevel !== 'live') {
-    throw new Refused(`Refusing to publish static-only receipt (--require-live requires verificationLevel=live, got ${receipt.verificationLevel || 'unknown'})`);
+  try {
+    completeEvidence({
+      features: Array.isArray(receipt.features) ? receipt.features : [],
+      expectedCases: receipt.expectedCases,
+      observations: Array.isArray(receipt.observations) ? receipt.observations : [],
+      failure: receipt.failure || '',
+    });
+  } catch (error) {
+    throw new Refused(`Refusing to publish incomplete receipt: ${error.message}`);
+  }
+  if (options.requireLive) {
+    if (receipt.verificationLevel !== 'live' || !(Number(receipt.sessionsRun) >= 1)) {
+      throw new Refused(`Refusing to publish static-only receipt (--require-live requires verificationLevel=live, got ${receipt.verificationLevel || 'unknown'})`);
+    }
+    const liveOk = (receipt.observations || []).some(
+      (obs) => obs.kind === 'live'
+        && obs.ok === true
+        && Boolean(obs.transcript)
+        && Array.isArray(obs.assertions)
+        && obs.assertions.some((a) => a.type === 'skill_called' && a.ok === true),
+    );
+    if (!liveOk) {
+      throw new Refused('Refusing to publish under --require-live: no passing live observation with skill_called and transcript');
+    }
   }
   if (receipt.plugin.root && existsSync(receipt.plugin.root)) {
+    const dirtyCheck = await run('git', ['-C', receipt.plugin.root, 'status', '--porcelain=v1'], { timeoutMs: 20_000 });
+    if (dirtyCheck.code === 0 && dirtyCheck.stdout.split('\n').some((line) => line && !/(^|\s)\.kelin\/(?!ci\/)/.test(line))) {
+      throw new Refused('Refusing to publish: target checkout has uncommitted modifications');
+    }
     const currentTree = await hashTree(receipt.plugin.root);
     if (currentTree.hash !== receipt.plugin.treeHash) {
       throw new Refused(`Plugin tree changed after verification: ${receipt.plugin.treeHash} -> ${currentTree.hash}`);
@@ -667,7 +700,7 @@ async function main() {
   throw new Error(usage());
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   main().catch((error) => {
     const message = error instanceof Error ? error.message : String(error);
     console.error(message);

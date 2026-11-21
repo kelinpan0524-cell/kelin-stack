@@ -45,7 +45,7 @@ if (!verdicts.includes(spec.verdict)) problems.push(`verdict must be one of ${ve
 if (spec.workHappened === false && spec.verdict !== 'inconclusive') {
   problems.push('workHappened false requires verdict inconclusive');
 }
-if (Number.isInteger(spec.errors) && spec.errors > 0 && ['faster', 'slower'].includes(spec.verdict) && !spec.errorsExplained) {
+if (Number.isInteger(spec.errors) && spec.errors > 0 && ['faster', 'slower'].includes(spec.verdict) && (typeof spec.errorsExplained !== 'string' || !spec.errorsExplained.trim())) {
   problems.push('errors > 0 with directional verdict requires errorsExplained or verdict inconclusive');
 }
 

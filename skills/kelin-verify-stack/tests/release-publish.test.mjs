@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { hashTree, sha256 } from '../scripts/io.mjs';
+import { collectArtifacts } from '../scripts/harness.mjs';
 import { publish } from '../scripts/verify-stack.mjs';
 
 const releaseScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-release', 'scripts', 'release.mjs');
@@ -36,12 +37,16 @@ test('verify-stack publish binds gitHead, treeHash, and --require-live', async (
   const receipt = {
     ok: true,
     verificationLevel: 'static',
-    plugin: { root: dir, gitHead: head, treeHash: tree.hash, treeHashAfter: tree.hash },
+    plugin: { root: dir, gitHead: head, dirty: false, treeHash: tree.hash, treeHashAfter: tree.hash },
+    features: ['zcode:manifest'],
+    expectedCases: [{ feature: 'zcode:manifest', caseId: 'zcode-manifest' }],
     observations: [
       {
         feature: 'zcode:manifest',
+        case: 'zcode-manifest',
         kind: 'static',
         ok: true,
+        assertions: [{ id: 'manifest', ok: true }],
         artifacts: [{ path: 'static/zcode-manifest.json', sha256: sha256(body) }],
       },
     ],
@@ -53,6 +58,51 @@ test('verify-stack publish binds gitHead, treeHash, and --require-live', async (
     /static-only/,
   );
 
+  // Dirty receipt must be blocked
+  await writeFile(path.join(runDir, 'receipt.json'), JSON.stringify({ ...receipt, plugin: { ...receipt.plugin, dirty: true } }));
+  await assert.rejects(
+    () => publish({ confirm: true, repo: 'o/r', pr: 1, run: runDir }),
+    /dirty checkout/,
+  );
+
+  // Live receipt without passing skill_called under --require-live must be blocked; collectArtifacts writes runRoot-relative paths
+  const sessionDir = path.join(runDir, 'sessions', 's1');
+  const fixtureDir = path.join(sessionDir, 'fixture');
+  await mkdir(fixtureDir, { recursive: true });
+  await writeFile(path.join(fixtureDir, 'answer.md'), 'ok\n');
+  const liveArtifacts = await collectArtifacts(fixtureDir, sessionDir, runDir);
+  assert.match(liveArtifacts[0].path, /^sessions\/s1\/artifacts\//);
+  const txBody = '{"type":"done"}\n';
+  await writeFile(path.join(sessionDir, 'rollout.jsonl'), txBody);
+  await writeFile(
+    path.join(runDir, 'receipt.json'),
+    JSON.stringify({
+      ...receipt,
+      verificationLevel: 'live',
+      sessionsRun: 1,
+      features: ['zcode:skill-invocation:kelin-plan'],
+      expectedCases: [{ feature: 'zcode:skill-invocation:kelin-plan', caseId: 's1' }],
+      observations: [
+        {
+          feature: 'zcode:skill-invocation:kelin-plan',
+          case: 's1',
+          kind: 'live',
+          ok: true,
+          transcript: 'sessions/s1/rollout.jsonl',
+          transcriptHash: sha256(txBody),
+          assertions: [{ id: 'x', type: 'file_exists', ok: true }],
+          artifacts: liveArtifacts,
+        },
+      ],
+    }),
+  );
+  await assert.rejects(
+    () => publish({ confirm: true, repo: 'o/r', pr: 1, run: runDir, requireLive: true }),
+    /skill_called/,
+  );
+
+  await writeFile(path.join(runDir, 'receipt.json'), JSON.stringify(receipt, null, 2));
+
   await assert.rejects(
     () => publish({ confirm: true, repo: 'o/r', pr: 1, run: runDir, sha: '0'.repeat(40) }),
     /refusing to publish on/,
@@ -61,7 +111,7 @@ test('verify-stack publish binds gitHead, treeHash, and --require-live', async (
   await writeFile(path.join(dir, 'extra.txt'), 'mutated\n');
   await assert.rejects(
     () => publish({ confirm: true, repo: 'o/r', pr: 1, run: runDir }),
-    /Plugin tree changed/,
+    /uncommitted modifications|Plugin tree changed/,
   );
 
   git(['clean', '-fdq']);
@@ -75,7 +125,7 @@ test('verify-stack publish binds gitHead, treeHash, and --require-live', async (
   );
 });
 
-test('release.mjs blocks wrong branch and stale receipt before touching manifests', async () => {
+test('release.mjs blocks missing receipt on --publish --confirm, wrong branch and stale receipt', async () => {
   const { dir, head, git } = await initPluginGitRepo();
   git(['checkout', '-qb', 'feat/work']);
   const receiptFile = path.join(dir, 'receipt.json');
@@ -90,6 +140,14 @@ test('release.mjs blocks wrong branch and stale receipt before touching manifest
   );
   assert.equal(wrongBranch.status, 1);
   assert.match(wrongBranch.stderr, /Refusing release on branch feat\/work/);
+
+  const noReceipt = spawnSync(
+    process.execPath,
+    [releaseScript, '--root', dir, '--bump', 'patch', '--allow-branch', '--publish', '--confirm'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(noReceipt.status, 1);
+  assert.match(noReceipt.stderr, /no --receipt provided/);
 
   const staleReceipt = spawnSync(
     process.execPath,

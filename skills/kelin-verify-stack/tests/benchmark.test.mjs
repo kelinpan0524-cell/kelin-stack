@@ -76,6 +76,10 @@ test('rejects workHappened false or unexplained errors with directional verdict,
   assert.equal(withErrors.status, 1);
   assert.ok(withErrors.payload.problems.some((e) => e.includes('errors > 0')));
 
+  const blankExplanation = await check({ ...good, errors: 2, errorsExplained: '   ' });
+  assert.equal(blankExplanation.status, 1);
+  assert.ok(blankExplanation.payload.problems.some((e) => e.includes('errors > 0')));
+
   const badMedian = await check({
     ...good,
     samples: { before: [40, 40, 41, 42, 44], after: [32, 33, 33, 34, 35], alternating: true },
