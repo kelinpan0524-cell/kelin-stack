@@ -90,10 +90,10 @@ node "$SKILL_DIR"/scripts/mode.mjs advance --root .
 
 - **intake**：`ensure-workflow.mjs` 幂等检查 `AGENTS.md`，读 `kelin-policy.json` 与 `git status`，确定模式与风险；高风险先停。
 - **map**：`kelin-map` 建/更新地图或 `scope.md`，`kelin-blast-radius` 算影响面。
-- **design**：`kelin-goal` + `kelin-plan`（跨模块出设计草图；产品类先 `kelin-product`；跨模块跑计划评审门）。**停在这里等确认**，除非已明确授权。
+- **design**：`kelin-goal` + `kelin-plan`（先切最小闭环分批上线，外部底座先跑 10 行真探针；跨模块出设计草图）。**停在这里等确认**，除非已明确授权。
 - **build**：`kelin-tdd` 红-绿-重构，修 bug 加 `kelin-guard`；每单元提交加当前宿主前缀，写 `build.md`。
 - **verify**：写 `verify.json`，`run-acceptance.mjs` 产出绑定工作树指纹的 `acceptance.json`；有本地 `verify-*` 时优先执行。任何失败回 build。
-- **review**：`kelin-review` 自审 + `gate-scan.mjs`；最多 2 轮（二审只核对上次修复和回归，不重开全仓深挖），无真实 P0/P1 即前进，极端边界记 P2 交人拍板。
+- **review**：`kelin-review` 自审 + `gate-scan.mjs`；最多 2 轮（二审只核修过项和回归），无真实 P0/P1 放行，满 2 轮未过立刻停下大白话汇报由人拍板，禁悄悄死循环。
 - **refine**：`kelin-refine` 删多余代码与注释；改完必须重跑 verify。
 - **ship**：`kelin-neat` 对齐文档 → `kelin-brief` 摘要 → `kelin-ship` 跑 `preflight` → `kelin-watch` 盯 CI。**部署不在这一步**。
 - **done**：只做 `kelin-reflect`；下一需求直接 `init` 会自动归档本轮记录。
@@ -112,5 +112,5 @@ node "$SKILL_DIR"/scripts/budget.mjs
 - **正确性底线**：进入 build 先看 `kelin-correctness`（先见测试失败再变绿、断言行为、边界值矩阵）。
 - **Token 预算**：全链路同一会话内推进；静态默认 0 tokens，live 验证按需抽样，小改动用 `light`。
 - **自治边界**：只读/改码/跑测/本地提交/开 PR 可自动做；**部署、删数据/分支、force push、发版、发消息、花钱、改权限、动生产配置**必须先问。
-- **停止条件**：连续两轮未好转、触发“必须先问”项、需求有二义性、同一失败重试两次仍挂 -> 立即停并说明卡点。
+- **停止条件**：审查满 2 轮仍未过、单插件/脚本超 500-600 行未收住、连续两轮未好转、触发“必须先问”项、需求二义性 -> 立即停并用大白话说明卡点。
 - **反模式**：跳过 map 直接改、verify 未过进 review、手改 `state.json`、开 4 个子代理、把能编译当写对、ship 顺手部署。
