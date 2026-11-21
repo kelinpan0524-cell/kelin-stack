@@ -280,7 +280,7 @@ const expectedWorkflows = () => {
   for (const entry of readdirSync(wfDir).sort()) {
     if (!/\.ya?ml$/i.test(entry)) continue;
     const raw = readFileSync(path.join(wfDir, entry), 'utf8');
-    const onMatch = /^on:\s*(.*)$/m.exec(raw);
+    const onMatch = /^on:[ \t]*(.*)$/m.exec(raw);
     let triggersPush = !onMatch;
     if (onMatch) {
       const inline = onMatch[1].trim();

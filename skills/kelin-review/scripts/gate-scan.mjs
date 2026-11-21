@@ -394,7 +394,7 @@ const snapshotHasOwner = (snapFile) => {
 for (const deleted of deletedGateFiles) {
   if (isTest(deleted)) add('RH-1', deleted, 1, 'deleted', `deleted test file: ${deleted}`);
   else if (isSnapshot(deleted)) add('RH-3', deleted, 1, 'deleted', `deleted snapshot file: ${deleted}`);
-  else if (isCI(deleted) || isOwnGate(deleted)) add('RH-14', deleted, 1, 'deleted', `deleted gate file: ${deleted}`);
+  else if (isCI(deleted) || isOwnGate(deleted) || isConfig(deleted)) add('RH-14', deleted, 1, 'deleted', `deleted gate file: ${deleted}`);
 }
 
 const gateHunks = [];

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -409,15 +409,24 @@ async function main() {
   }
 
   const computeWorktreeFingerprint = await loadComputeFingerprint();
+  const uniqueRepoRoots = (() => {
+    if (!computeWorktreeFingerprint) return [];
+    const seen = new Map();
+    for (const dirPath of new Set([anchorReal, baseReal, ...checkCwds.map((c) => c.resolved)])) {
+      const topRes = spawnSync('git', ['-C', dirPath, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+      if (topRes.status === 0 && topRes.stdout.trim()) {
+        const repoKey = realpathSync(topRes.stdout.trim());
+        if (!seen.has(repoKey)) seen.set(repoKey, dirPath);
+      }
+    }
+    return [...seen.entries()];
+  })();
   const collectRepoFingerprints = () => {
     const map = new Map();
     if (!computeWorktreeFingerprint) return map;
-    for (const dirPath of [anchorReal, baseReal, ...checkCwds.map((c) => c.resolved)]) {
-      const fp = computeWorktreeFingerprint(dirPath);
-      if (fp?.isGit && fp.repo) {
-        const repoKey = realpathSync(fp.repo);
-        if (!map.has(repoKey)) map.set(repoKey, fp);
-      }
+    for (const [repoKey, probeDir] of uniqueRepoRoots) {
+      const fp = computeWorktreeFingerprint(probeDir);
+      if (fp?.isGit) map.set(repoKey, fp);
     }
     return map;
   };
