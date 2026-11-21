@@ -93,7 +93,7 @@ node "$SKILL_DIR"/scripts/mode.mjs advance --root .
 - **design**：`kelin-goal` + `kelin-plan`（跨模块出设计草图；产品类先 `kelin-product`；跨模块跑计划评审门）。**停在这里等确认**，除非已明确授权。
 - **build**：`kelin-tdd` 红-绿-重构，修 bug 加 `kelin-guard`；每单元提交加当前宿主前缀，写 `build.md`。
 - **verify**：写 `verify.json`，`run-acceptance.mjs` 产出绑定工作树指纹的 `acceptance.json`；有本地 `verify-*` 时优先执行。任何失败回 build。
-- **review**：`kelin-review` 自审 + `gate-scan.mjs`；P0/P1 清零才前进。
+- **review**：`kelin-review` 自审 + `gate-scan.mjs`；最多 2 轮（二审只核对上次修复和回归，不重开全仓深挖），无真实 P0/P1 即前进，极端边界记 P2 交人拍板。
 - **refine**：`kelin-refine` 删多余代码与注释；改完必须重跑 verify。
 - **ship**：`kelin-neat` 对齐文档 → `kelin-brief` 摘要 → `kelin-ship` 跑 `preflight` → `kelin-watch` 盯 CI。**部署不在这一步**。
 - **done**：只做 `kelin-reflect`；下一需求直接 `init` 会自动归档本轮记录。
