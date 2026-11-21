@@ -24,24 +24,44 @@ const project = async () => {
   return dir;
 };
 
-test('scan detects stack, launch, port and features', async () => {
+test('scan detects stack, harnesses, launch, port, methods, stable ids, and >8 routes', async () => {
   const dir = await project();
+  await mkdir(path.join(dir, 'src'), { recursive: true });
+  const lines = [];
+  for (let i = 1; i <= 10; i += 1) {
+    lines.push(`app.post('/api/items/${i}', () => {});`);
+  }
+  await writeFile(path.join(dir, 'src', 'routes.ts'), lines.join('\n'));
+
   const result = run(scan, ['--root', dir]);
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.name, 'demo-app');
   assert.ok(payload.stack.includes('next'));
+  assert.ok(payload.harnesses.includes('node-test'));
   assert.equal(payload.launch, 'npm run dev');
   assert.equal(payload.port, 3100);
-  assert.ok(payload.features.some((entry) => entry.name.includes('/users')));
-  assert.ok(payload.features.some((entry) => entry.name.includes('demo-cli')));
+  assert.ok(payload.features.length >= 12, `expected >= 12 features, got ${payload.features.length}`);
+  const users = payload.features.find((entry) => entry.name.includes('/users'));
+  assert.ok(users);
+  assert.equal(users.id, 'page-users');
+  const post10 = payload.features.find((entry) => entry.entrypoint === 'POST /api/items/10');
+  assert.ok(post10);
+  assert.equal(post10.id, 'api-post-api-items-10');
+  assert.ok(payload.features.some((entry) => entry.name.includes('demo-cli') && entry.id === 'cli-demo-cli'));
+
+  const capped = run(scan, ['--root', dir, '--limit', '3']);
+  assert.equal(capped.status, 0, capped.stderr);
+  assert.ok(JSON.parse(capped.stdout).features.length <= 3);
 });
 
-test('generate previews without writing, then writes the five sections and feature map', async () => {
+test('generate previews without writing, syncs incrementally without overwriting manual edits, and rejects --write conflict', async () => {
   const dir = await project();
   const preview = run(generate, ['--root', dir]);
   assert.equal(preview.status, 0, preview.stderr);
-  assert.equal(JSON.parse(preview.stdout).preview, true);
+  const previewJson = JSON.parse(preview.stdout);
+  assert.equal(previewJson.preview, true);
+  assert.ok(previewJson.diff.added.includes('page-users.md'));
   assert.equal(existsSync(path.join(dir, '.zcode')), false);
 
   const written = run(generate, ['--root', dir, '--write']);
@@ -49,12 +69,34 @@ test('generate previews without writing, then writes the five sections and featu
   const skillFile = path.join(dir, '.zcode', 'skills', 'verify-demo-app', 'SKILL.md');
   const body = await readFile(skillFile, 'utf8');
   for (const heading of ['## 启动', '## 体检', '## 驱动', '## 留证', '## 清理']) assert.ok(body.includes(heading), heading);
-  const map = await readFile(path.join(dir, '.zcode', 'skills', 'verify-demo-app', 'features', 'README.md'), 'utf8');
-  assert.ok(map.includes('/users'));
+  const usersFile = path.join(dir, '.zcode', 'skills', 'verify-demo-app', 'features', 'page-users.md');
+  assert.equal(existsSync(usersFile), true);
+  const usersBody = await readFile(usersFile, 'utf8');
+  assert.match(usersBody, /sync_commit:/);
+  assert.match(usersBody, /evidence_dir:/);
+  await writeFile(usersFile, `${usersBody}\nMANUAL_NOTE_KEEP\n`);
+
+  const orphanFile = path.join(dir, '.zcode', 'skills', 'verify-demo-app', 'features', 'legacy-orphan.md');
+  await writeFile(orphanFile, '# Legacy\n');
+  await mkdir(path.join(dir, 'app', 'settings'), { recursive: true });
+  await writeFile(path.join(dir, 'app', 'settings', 'page.tsx'), 'export default function Page() { return null; }\n');
 
   const again = run(generate, ['--root', dir, '--write']);
   assert.equal(again.status, 1);
   assert.equal(JSON.parse(again.stdout).ok, false);
+
+  const synced = run(generate, ['--root', dir, '--write', '--sync']);
+  assert.equal(synced.status, 0, synced.stderr);
+  const syncJson = JSON.parse(synced.stdout);
+  assert.equal(syncJson.sync, true);
+  assert.ok(syncJson.diff.added.includes('page-settings.md'));
+  assert.ok(syncJson.diff.preserved.includes('page-users.md'));
+  assert.ok(syncJson.diff.orphaned.includes('legacy-orphan.md'));
+  assert.match(await readFile(usersFile, 'utf8'), /MANUAL_NOTE_KEEP/);
+  assert.equal(existsSync(orphanFile), true);
+  const map = await readFile(path.join(dir, '.zcode', 'skills', 'verify-demo-app', 'features', 'README.md'), 'utf8');
+  assert.ok(map.includes('/users'));
+  assert.ok(map.includes('/settings'));
 
   const forced = run(generate, ['--root', dir, '--write', '--force']);
   assert.equal(forced.status, 0, forced.stderr);

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bodyNeedle, classify, completeEvidence, inventory, parseFrontmatter, readSkill, validateRegistry } from './core.mjs';
@@ -27,6 +29,7 @@ function usage() {
     '  verify.mjs features [--plugin DIR]',
     '  verify.mjs classify [--plugin DIR] (--changed a,b | --changed-file FILE | --all) [--output DIR]',
     '  verify.mjs run --output DIR [--plugin DIR] (--all | --feature F... | --changed a,b) [--wide REASON] [--auto] [--live] [--no-live] [--timeout MS]',
+    '  verify.mjs smoke --host antigravity|codex [--plugin DIR] [--output DIR]',
     '  verify.mjs self-test --output DIR [--plugin DIR] [--no-live]',
     USAGE_PUBLISH_LINE,
   ].join('\n');
@@ -34,7 +37,7 @@ function usage() {
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  const options = { command, features: [], changed: [], plugin: '', output: '', wide: '', timeout: 0, probe: false, auto: false, live: false, noLive: false, confirm: false, requireLive: false, repo: '', pr: 0, sha: '', run: '', changedFile: '', all: false };
+  const options = { command, features: [], changed: [], plugin: '', output: '', wide: '', timeout: 0, probe: false, auto: false, live: false, noLive: false, confirm: false, requireLive: false, repo: '', pr: 0, sha: '', run: '', changedFile: '', all: false, host: '' };
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     const value = () => {
@@ -46,6 +49,7 @@ function parseArgs(argv) {
     switch (arg) {
       case '--plugin': options.plugin = value(); break;
       case '--output': options.output = value(); break;
+      case '--host': options.host = value(); break;
       case '--changed': options.changed.push(...value().split(',').map((item) => item.trim()).filter(Boolean)); break;
       case '--changed-file': options.changedFile = value(); break;
       case '--feature': options.features.push(value()); break;
@@ -63,7 +67,7 @@ function parseArgs(argv) {
       case '--run': options.run = value(); break;
       case '--all': options.all = true; break;
       case '--help': case '-h': options.help = true; break;
-      default: if (arg !== 'doctor' && arg !== 'run' && arg !== 'features' && arg !== 'classify' && arg !== 'self-test' && arg !== 'publish') throw new Error(`Unknown option: ${arg}`);
+      default: if (arg !== 'doctor' && arg !== 'run' && arg !== 'features' && arg !== 'classify' && arg !== 'self-test' && arg !== 'publish' && arg !== 'smoke') throw new Error(`Unknown option: ${arg}`);
     }
   }
   return options;
@@ -288,6 +292,7 @@ async function runVerification(options) {
     plugin: { root: pluginRoot, installedRoot: installedRoot || null, gitHead, name: pluginMeta.name, version: pluginMeta.version, treeHash: before.hash, treeHashAfter: before.hash, files: before.files },
     selection: selection || null,
     features: [...new Set(cases.map((entry) => entry.feature))].sort(),
+    expectedCases: cases.map((entry) => ({ feature: entry.feature, caseId: entry.id })),
     sessionsPlanned: planned,
     sessionsRun: 0,
     wide: options.wide || '',
@@ -304,6 +309,7 @@ async function runVerification(options) {
         receipt.observations.push({
           feature: item.feature,
           kind: 'static',
+          case: item.id,
           staticOnly: Boolean(result.staticOnly),
           applicable: result.applicable !== false,
           ok: result.ok,
@@ -362,7 +368,7 @@ async function runVerification(options) {
     const after = await hashTree(pluginRoot);
     receipt.plugin.treeHashAfter = after.hash;
     if (after.hash !== before.hash) throw new Error(`Plugin tree changed during verification: ${before.hash} -> ${after.hash}`);
-    completeEvidence({ features: receipt.features, observations: receipt.observations, failure: '' });
+    completeEvidence({ features: receipt.features, expectedCases: receipt.expectedCases, observations: receipt.observations, failure: '' });
     receipt.ok = true;
   } catch (caught) {
     receipt.failure = caught.message;
@@ -452,6 +458,142 @@ async function selfTest(options) {
   return result;
 }
 
+export async function runSmoke(options) {
+  const host = options.host;
+  if (host !== 'antigravity' && host !== 'codex') {
+    throw new Error('smoke requires --host antigravity|codex');
+  }
+  const pluginRoot = path.resolve(options.plugin || path.resolve(import.meta.dirname, '..', '..', '..'));
+  const checks = [];
+  const record = (id, ok, detail, extra = {}) => checks.push({ id, ok: Boolean(ok), detail, ...extra });
+  const tmpRoot = await mkdtemp(path.join(tmpdir(), `kelin-smoke-${host}-`));
+  try {
+    const fakeHome = path.join(tmpRoot, 'home');
+    const wsDir = path.join(tmpRoot, 'ws');
+    await mkdir(fakeHome, { recursive: true });
+    await mkdir(wsDir, { recursive: true });
+    const baseEnv = { PATH: process.env.PATH || '', HOME: fakeHome };
+
+    const manifestPaths = ['.antigravity-plugin/plugin.json', '.zcode-plugin/plugin.json', '.claude-plugin/plugin.json'];
+    const manifests = {};
+    for (const rel of manifestPaths) {
+      const file = path.join(pluginRoot, rel);
+      manifests[rel] = existsSync(file) ? JSON.parse(await readFile(file, 'utf8')) : null;
+    }
+    const versions = new Set(Object.values(manifests).filter(Boolean).map((m) => `${m.name}@${m.version}`));
+    record('manifests-parity', Object.values(manifests).every(Boolean) && versions.size === 1, [...versions].join(', ') || 'missing manifests');
+
+    const offline = spawnSync(process.execPath, [path.join(pluginRoot, 'skills', 'kelin-verify-stack', 'scripts', 'offline-check.mjs')], { encoding: 'utf8', env: baseEnv });
+    record('offline-check', offline.status === 0, (offline.stdout || offline.stderr).trim().slice(0, 160));
+
+    const modeScript = path.join(pluginRoot, 'skills', 'kelin-mode', 'scripts', 'mode.mjs');
+    const modeInit = spawnSync(process.execPath, [modeScript, 'init', '--mode', 'light', '--root', wsDir], { encoding: 'utf8', env: baseEnv });
+    const modeStatus = spawnSync(process.execPath, [modeScript, 'status', '--root', wsDir], { encoding: 'utf8', env: baseEnv });
+    let modeOk = modeInit.status === 0 && modeStatus.status === 0;
+    try {
+      modeOk = modeOk && JSON.parse(modeStatus.stdout).phase === 'intake';
+    } catch {
+      modeOk = false;
+    }
+    record('mode-roundtrip', modeOk, modeOk ? 'init+status ok' : `${modeInit.stderr} ${modeStatus.stderr}`.trim().slice(0, 160));
+
+    if (host === 'antigravity') {
+      const agy = manifests['.antigravity-plugin/plugin.json'];
+      const logoOk = Boolean(agy?.logo) && existsSync(path.join(pluginRoot, agy.logo.replace(/^\.\//, '')));
+      const promptsOk = Array.isArray(agy?.suggestedPrompts) && agy.suggestedPrompts.length === 3;
+      record('agy-manifest', agy?.name === 'kelin-stack' && logoOk && promptsOk, `prompts=${agy?.suggestedPrompts?.length ?? 0}`);
+
+      const hooksJson = JSON.parse(await readFile(path.join(pluginRoot, 'hooks.json'), 'utf8'));
+      const hooksOk = Boolean(hooksJson['kelin-session-start']?.SessionStart?.[0]?.command) && Boolean(hooksJson['kelin-safety']?.PreToolUse?.[0]?.hooks?.[0]?.command);
+      const rulesBody = (await readFile(path.join(pluginRoot, 'rules', 'AGENTS.md'), 'utf8')).trim();
+      record('agy-hooks-rules', hooksOk && Boolean(rulesBody) && !rulesBody.startsWith('---'), hooksOk ? 'hooks+rules valid' : 'invalid hooks.json');
+
+      const ss = spawnSync(process.execPath, [path.join(pluginRoot, 'hooks', 'session-start.mjs'), '--host', 'antigravity'], {
+        encoding: 'utf8',
+        input: JSON.stringify({ hookEventName: 'SessionStart', cwd: wsDir, workspacePaths: [wsDir] }),
+        env: { ...baseEnv, PLUGIN_ROOT: pluginRoot },
+      });
+      let ssOk = ss.status === 0;
+      try {
+        const msg = JSON.parse(ss.stdout)?.injectSteps?.[0]?.systemMessage?.systemMessage || '';
+        ssOk = ssOk && msg.includes('mode=light phase=intake');
+      } catch {
+        ssOk = false;
+      }
+      record('agy-session-start', ssOk, ssOk ? 'injectSteps ok' : (ss.stderr || ss.stdout).trim().slice(0, 160));
+
+      const ptuEnv = { ...baseEnv, PLUGIN_ROOT: pluginRoot, KELIN_SAFETY: 'strict' };
+      const ptuDeny = spawnSync(process.execPath, [path.join(pluginRoot, 'hooks', 'pre-tool-use.mjs'), '--host', 'antigravity'], {
+        encoding: 'utf8',
+        input: JSON.stringify({ toolCall: { name: 'run_command', args: { CommandLine: 'rm -rf /' } }, workspacePaths: [wsDir], cwd: wsDir }),
+        env: ptuEnv,
+      });
+      const ptuAsk = spawnSync(process.execPath, [path.join(pluginRoot, 'hooks', 'pre-tool-use.mjs'), '--host', 'antigravity'], {
+        encoding: 'utf8',
+        input: JSON.stringify({ toolCall: { name: 'run_command', args: { CommandLine: 'ls' } }, workspacePaths: [wsDir], cwd: wsDir }),
+        env: ptuEnv,
+      });
+      let ptuOk = ptuDeny.status === 0 && ptuAsk.status === 0;
+      try {
+        ptuOk = ptuOk && JSON.parse(ptuDeny.stdout).decision === 'deny' && JSON.parse(ptuAsk.stdout).decision === 'ask';
+      } catch {
+        ptuOk = false;
+      }
+      record('agy-pre-tool-use', ptuOk, ptuOk ? 'deny+ask verified' : 'pre-tool-use mismatch');
+
+      const dry = spawnSync('bash', [path.join(pluginRoot, 'install.sh'), '--host', 'antigravity', '--scope', 'user', '--dry-run'], { encoding: 'utf8', env: baseEnv });
+      record('agy-installer-dry-run', dry.status === 0, dry.status === 0 ? 'dry-run ok' : (dry.stderr || dry.stdout).trim().slice(0, 160));
+
+      const hasAgy = spawnSync('which', ['agy'], { encoding: 'utf8' }).status === 0;
+      if (hasAgy) {
+        const stagedInstall = spawnSync('bash', [path.join(pluginRoot, 'install.sh'), '--host', 'antigravity', '--scope', 'user'], { encoding: 'utf8', env: baseEnv });
+        const installedAgyDir = path.join(fakeHome, '.gemini', 'config', 'plugins', agy?.name || 'kelin-stack');
+        const val = stagedInstall.status === 0
+          ? spawnSync('agy', ['plugin', 'validate', installedAgyDir, '--strict', '--json'], { encoding: 'utf8', env: baseEnv })
+          : stagedInstall;
+        let valOk = stagedInstall.status === 0 && val.status === 0;
+        try {
+          if (valOk) valOk = (JSON.parse(val.stdout).findings?.length ?? 0) === 0;
+        } catch {
+          valOk = false;
+        }
+        record('agy-cli-validate', valOk, valOk ? '0 findings' : (val.stderr || val.stdout).trim().slice(0, 160));
+      } else {
+        record('agy-cli-validate', true, 'skipped (agy not installed)', { skipped: true });
+      }
+    } else {
+      const registry = await loadRegistry();
+      const coreSkills = ['kelin-mode', 'kelin-plan', 'kelin-review', 'kelin-verify'];
+      let skillsOk = true;
+      for (const name of coreSkills) {
+        const parsed = parseFrontmatter(await readFile(path.join(pluginRoot, registry.skills, name, 'SKILL.md'), 'utf8'));
+        if (parsed.data.name !== name || !parsed.data.description) skillsOk = false;
+      }
+      record('codex-core-skills', skillsOk, coreSkills.join(','));
+
+      const ensureWf = spawnSync(process.execPath, [path.join(pluginRoot, 'skills', 'kelin-agents', 'scripts', 'ensure-workflow.mjs'), '--global', 'codex', '--dry-run'], { encoding: 'utf8', env: baseEnv });
+      record('codex-ensure-workflow', ensureWf.status === 0, ensureWf.status === 0 ? 'dry-run ok' : (ensureWf.stderr || ensureWf.stdout).trim().slice(0, 160));
+
+      const dry = spawnSync('bash', [path.join(pluginRoot, 'install.sh'), '--host', 'codex', '--scope', 'user', '--dry-run'], { encoding: 'utf8', env: baseEnv });
+      record('codex-installer-dry-run', dry.status === 0, dry.status === 0 ? 'dry-run ok' : (dry.stderr || dry.stdout).trim().slice(0, 160));
+
+      const matrixFile = path.join(pluginRoot, 'docs', 'support-matrix.md');
+      const matrixOk = existsSync(matrixFile) && (await readFile(matrixFile, 'utf8')).includes('Codex');
+      record('codex-support-matrix', matrixOk, matrixOk ? 'support-matrix present' : 'missing Codex matrix');
+    }
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true });
+  }
+
+  const report = { ok: checks.every((c) => c.ok), host, plugin: pluginRoot, checks, timestamp: nowIso() };
+  if (options.output) {
+    const outDir = path.resolve(options.output);
+    await mkdir(outDir, { recursive: true });
+    await writeJson(path.join(outDir, `smoke-${host}.json`), report);
+  }
+  return report;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help || !options.command) {
@@ -513,6 +655,13 @@ async function main() {
   if (options.command === 'publish') {
     const result = await publish(options);
     console.log(`Published ${result.comment} on ${result.sha}`);
+    return;
+  }
+  if (options.command === 'smoke') {
+    const report = await runSmoke(options);
+    console.log(`${report.ok ? 'PASS' : 'FAIL'} smoke:${report.host} (${report.checks.filter((c) => c.ok).length}/${report.checks.length})`);
+    for (const check of report.checks) console.log(`${check.ok ? 'OK  ' : 'FAIL'} ${check.id}: ${check.detail}`);
+    if (!report.ok) process.exitCode = 1;
     return;
   }
   throw new Error(usage());

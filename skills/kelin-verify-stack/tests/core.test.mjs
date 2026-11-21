@@ -91,6 +91,38 @@ test('completeEvidence requires one passing record with artifacts', () => {
   assert.throws(() => completeEvidence({ ...receipt, observations: [{ ...receipt.observations[0], artifacts: [] }] }), /No artifacts/);
 });
 
+test('completeEvidence enforces 1-to-1 per (feature, caseId) when expectedCases is set', () => {
+  const art = [{ path: 'sessions/s1/a.json', sha256: 'a'.repeat(64) }];
+  const tx = { transcript: 'sessions/s1/rollout.jsonl', transcriptHash: 'b'.repeat(64) };
+  const receipt = {
+    features: ['zcode:skill-invocation:kelin-plan'],
+    expectedCases: [
+      { feature: 'zcode:skill-invocation:kelin-plan', caseId: 'c1' },
+      { feature: 'zcode:skill-invocation:kelin-plan', caseId: 'c2' },
+    ],
+    observations: [
+      { feature: 'zcode:skill-invocation:kelin-plan', kind: 'live', case: 'c1', ok: true, assertions: [{ id: 'a1', ok: true }], artifacts: art, ...tx },
+      { feature: 'zcode:skill-invocation:kelin-plan', kind: 'live', case: 'c2', ok: true, assertions: [{ id: 'a2', ok: true }], artifacts: art, ...tx },
+    ],
+  };
+  assert.doesNotThrow(() => completeEvidence(receipt));
+  assert.throws(() => completeEvidence({ ...receipt, observations: [receipt.observations[0]] }), /Missing or duplicate/);
+  assert.throws(
+    () => completeEvidence({
+      ...receipt,
+      expectedCases: [...receipt.expectedCases, { feature: 'zcode:skill-invocation:kelin-plan', caseId: 'c1' }],
+    }),
+    /Duplicate expectedCase/,
+  );
+  assert.throws(
+    () => completeEvidence({
+      ...receipt,
+      observations: [...receipt.observations, { ...receipt.observations[0], case: 'extra' }],
+    }),
+    /Unexpected observation/,
+  );
+});
+
 test('sanitizeText drops unsafe publishing values', () => {
   assert.equal(sanitizeText('ok text'), 'ok text');
   assert.equal(sanitizeText('bad `tick`'), '');

@@ -35,7 +35,7 @@ verify-<app>/
 ├── SKILL.md
 └── features/
     ├── README.md
-    └── 01-....md
+    └── <feature-id>.md
 ```
 
 `SKILL.md` 固定五段：
@@ -46,14 +46,13 @@ verify-<app>/
 4. **留证**：截图、终端记录、响应体、退出码、副作用，放到 `.kelin/verify/<timestamp>/`；
 5. **清理**：只关自己启动的，证据不能删。
 
-## 功能地图与维护
+## 定期维护循环
 
-- 每个用户可见功能一个文件，四个 H2：子功能、用户怎么到达、怎么驱动、坑；
-- 代码变动后重跑 `scan-app.mjs` 对比现有 `features/README.md`，按稳定功能身份局部增改；**不要靠 `--force` 维护**（会覆盖手工旅程，编号变化还留旧文件）；
-- 失败分三类处理：**地图漂移**改地图；**驱动缺口**修驱动并重跑真机；**产品真坏**只报失败，不改弱旅程；
-- 旅程失败后先重跑体检或重置状态，记清尝试入口与缺失前置条件再决定是否继续（进程活着≠状态健康）；
-- 关键新断言先在已知坏结果上确认能失败；覆盖范围明确的高风险验证可记 `sync_commit` 追踪漂移；
-- CLI/TUI 驱动（`tmux`/PTY、确定性等待、dry-run 副作用核查）见 [references/cli-harness.md](references/cli-harness.md)。
+- 新增入口后跑 `generate.mjs --root . --write --sync` 增量补全并保留手改，不靠 `--force` 覆盖；
+- 按 `diff.added / orphaned` 人工复核孤儿功能与 `sync_commit` 漂移；
+- 失败分三类：**地图漂移**改地图；**驱动缺口**修驱动重跑；**产品真坏**只报失败，不改弱旅程；
+- 旅程失败后先重跑体检或重置状态，记清尝试入口与缺失前置条件再继续（进程活着≠状态健康）；
+- 关键新断言先在已知坏结果上确认能失败；CLI/TUI 驱动见 [references/cli-harness.md](references/cli-harness.md)。
 
 ## 生成后必须真跑一轮
 

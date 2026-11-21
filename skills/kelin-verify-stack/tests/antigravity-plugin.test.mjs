@@ -168,3 +168,14 @@ test('install.sh installs clean Antigravity plugin, guards unsafe targets, handl
     await rm(fakeHome, { recursive: true, force: true });
   }
 });
+
+test('verify-stack smoke passes for antigravity and codex and rejects invalid host', () => {
+  const verifyStack = path.join(repo, 'skills', 'kelin-verify-stack', 'scripts', 'verify-stack.mjs');
+  for (const host of ['antigravity', 'codex']) {
+    const res = spawnSync(process.execPath, [verifyStack, 'smoke', '--host', host], { encoding: 'utf8' });
+    assert.equal(res.status, 0, `${host} smoke failed:\n${res.stdout}\n${res.stderr}`);
+    assert.match(res.stdout, new RegExp(`PASS smoke:${host}`));
+  }
+  const bad = spawnSync(process.execPath, [verifyStack, 'smoke', '--host', 'foo'], { encoding: 'utf8' });
+  assert.notEqual(bad.status, 0);
+});
