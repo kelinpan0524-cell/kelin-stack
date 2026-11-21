@@ -158,3 +158,54 @@ test('generate validates flags, rejects file --root, and --help creates no files
   assert.equal(fileRoot.status, 2);
   assert.match(fileRoot.stderr, /existing directory/);
 });
+
+test('generate handles ambiguous legacy API headings, table-footer splicing, and >30 routes during --sync', async () => {
+  // Single GET /ping matches legacy # 页面或接口 /ping; dual GET+POST /ping surfaces ambiguousLegacy
+  const singleDir = await mkdtemp(path.join(tmpdir(), 'kelin-va-single-'));
+  await writeFile(path.join(singleDir, 'package.json'), JSON.stringify({ name: 'single-api' }));
+  await mkdir(path.join(singleDir, 'src'), { recursive: true });
+  await writeFile(path.join(singleDir, 'src', 'r.ts'), "app.get('/ping', () => {});\n");
+  await mkdir(path.join(singleDir, '.zcode', 'skills', 'verify-single-api', 'features'), { recursive: true });
+  await writeFile(path.join(singleDir, '.zcode', 'skills', 'verify-single-api', 'features', '01-ping.md'), '# 页面或接口 /ping\nKEEP\n');
+  const singleSync = JSON.parse(run(generate, ['--root', singleDir, '--write', '--sync'], singleDir).stdout);
+  assert.ok(singleSync.diff.preserved.includes('01-ping.md'));
+  assert.equal(singleSync.diff.ambiguousLegacy, undefined);
+
+  const dualDir = await mkdtemp(path.join(tmpdir(), 'kelin-va-dual-'));
+  await writeFile(path.join(dualDir, 'package.json'), JSON.stringify({ name: 'dual-api' }));
+  await mkdir(path.join(dualDir, 'src'), { recursive: true });
+  await writeFile(path.join(dualDir, 'src', 'r.ts'), "app.get('/ping', () => {});\napp.post('/ping', () => {});\n");
+  await mkdir(path.join(dualDir, '.zcode', 'skills', 'verify-dual-api', 'features'), { recursive: true });
+  await writeFile(path.join(dualDir, '.zcode', 'skills', 'verify-dual-api', 'features', '01-ping.md'), '# 页面或接口 /ping\nAMBIGUOUS\n');
+  const dualSync = JSON.parse(run(generate, ['--root', dualDir, '--write', '--sync'], dualDir).stdout);
+  assert.equal(dualSync.diff.ambiguousLegacy?.length, 1);
+  assert.equal(dualSync.diff.ambiguousLegacy[0].candidates.length, 2);
+
+  // Splicing missing rows into table leaves trailing sections intact & discovers beyond 30 routes on --sync
+  const bigDir = await project();
+  const routes = [];
+  for (let i = 1; i <= 30; i += 1) {
+    routes.push(`app.get('/api/r/${String(i).padStart(2, '0')}', () => {});`);
+  }
+  await mkdir(path.join(bigDir, 'src'), { recursive: true });
+  await writeFile(path.join(bigDir, 'src', 'routes.ts'), routes.join('\n') + '\n');
+  assert.equal(run(generate, ['--root', bigDir, '--write'], bigDir).status, 0);
+
+  const readmePath = path.join(bigDir, '.zcode', 'skills', 'verify-demo-app', 'features', 'README.md');
+  const initialReadme = await readFile(readmePath, 'utf8');
+  await writeFile(readmePath, `${initialReadme}\n## 手工说明\n不要破坏这段备注\n`);
+
+  routes.push("app.get('/api/z-extra-31', () => {});", "app.get('/api/z-extra-32', () => {});");
+  await writeFile(path.join(bigDir, 'src', 'routes.ts'), routes.join('\n') + '\n');
+  const bigSyncRes = run(generate, ['--root', bigDir, '--write', '--sync'], bigDir);
+  assert.equal(bigSyncRes.status, 0, bigSyncRes.stderr);
+  const bigSync = JSON.parse(bigSyncRes.stdout);
+  assert.ok(bigSync.diff.added.some((n) => n.includes('z-extra-31')), JSON.stringify(bigSync.diff));
+  assert.ok(bigSync.diff.added.some((n) => n.includes('z-extra-32')));
+
+  const updatedReadme = await readFile(readmePath, 'utf8');
+  const extraIdx = updatedReadme.indexOf('/api/z-extra-32');
+  const noteIdx = updatedReadme.indexOf('## 手工说明');
+  assert.ok(extraIdx > 0 && noteIdx > extraIdx, 'new table rows must be spliced above trailing notes');
+  assert.match(updatedReadme, /不要破坏这段备注/);
+});

@@ -50,10 +50,14 @@ if (diffFile) {
     console.error(`not a git repository: ${root}`);
     process.exit(2);
   }
-  base = staged ? base : resolveBase();
+  base = staged ? (explicitBase || 'HEAD') : resolveBase();
   const argv = ['diff', '--unified=0', '--no-color', '--no-ext-diff', '--binary'];
-  if (staged) argv.push('--cached');
-  else argv.push(base);
+  if (staged) {
+    argv.push('--cached');
+    if (explicitBase) argv.push(base);
+  } else {
+    argv.push(base);
+  }
   const result = git(argv);
   if (result.status !== 0) {
     console.error(`git diff failed: ${(result.stderr || '').trim()}`);
@@ -315,10 +319,13 @@ for (const hunk of hunks) {
   }
 
   if (gatePath && !hunk.deleted) {
-    const removedTests = hunk.removed.filter((entry) => /\b(it|test|describe)\s*\(|\bdef test_|\bfunc Test|\b@Test\b/.test(entry.code));
-    const addedTests = hunk.added.filter((entry) => /\b(it|test|describe)\s*\(|\bdef test_|\bfunc Test|\b@Test\b/.test(entry.code));
-    if (removedTests.length > addedTests.length) {
-      add('RH-1', changedFile, removedTests[0].line, 'removed', removedTests[0].text);
+    if (isTest(changedFile)) {
+      const testDeclRe = /(?:^|[^\w.$])(?:it|test|describe)\s*\(|\bdef test_|\bfunc Test|\b@Test\b/;
+      const removedTests = hunk.removed.filter((entry) => testDeclRe.test(entry.code));
+      const addedTests = hunk.added.filter((entry) => testDeclRe.test(entry.code));
+      if (removedTests.length > addedTests.length) {
+        add('RH-1', changedFile, removedTests[0].line, 'removed', removedTests[0].text);
+      }
     }
     if (isSnapshot(changedFile) && !snapshotHasOwner(changedFile)) {
       add('RH-3', changedFile, hunk.added[0]?.line ?? 1, 'changed', 'snapshot changed without an owning test file');
@@ -349,27 +356,26 @@ for (const hunk of hunks) {
     if (fileCtx?.afterCode && isCodeFile(changedFile)) {
       const fullAfterCode = fileCtx.afterCode.join('\n');
       const fullBeforeCode = (fileCtx.beforeCode || []).join('\n');
-      const beforeCount = [...fullBeforeCode.matchAll(emptyCatchRe)].length;
-      const afterMatches = [...fullAfterCode.matchAll(emptyCatchRe)];
-      const touched = new Set([
-        ...hunk.added.map((e) => e.line),
-        ...hunk.removed.map((e) => Math.max(1, e.line)),
-      ]);
-      if (afterMatches.length > beforeCount) {
-        for (const m of afterMatches) {
-          const startLine = fullAfterCode.slice(0, m.index).split('\n').length;
+      const spanMatches = (code, lines) => {
+        if (!code || !lines.length) return [];
+        const min = Math.max(1, Math.min(...lines) - 1);
+        const max = Math.max(...lines) + 1;
+        return [...code.matchAll(emptyCatchRe)].map((m) => {
+          const startLine = code.slice(0, m.index).split('\n').length;
           const endLine = startLine + m[0].split('\n').length - 1;
-          let hitsHunk = false;
-          for (let ln = startLine - 1; ln <= endLine + 1; ln += 1) {
-            if (touched.has(ln)) {
-              hitsHunk = true;
-              break;
-            }
-          }
-          const key = `${changedFile}:${startLine}`;
-          if (hitsHunk && !reportedEmptyCatches.has(key)) {
+          return { startLine, endLine, text: m[0] };
+        }).filter((item) => item.endLine >= min && item.startLine <= max);
+      };
+      const newLines = hunk.added.length ? hunk.added.map((e) => e.line) : hunk.removed.map((e) => e.line);
+      const oldLines = hunk.removed.length ? hunk.removed.map((e) => e.line) : hunk.added.map((e) => e.line);
+      const afterLocal = spanMatches(fullAfterCode, newLines);
+      const beforeLocal = spanMatches(fullBeforeCode, oldLines);
+      if (afterLocal.length > beforeLocal.length) {
+        for (const item of afterLocal) {
+          const key = `${changedFile}:${item.startLine}`;
+          if (!reportedEmptyCatches.has(key)) {
             reportedEmptyCatches.add(key);
-            add('RH-16', changedFile, startLine, 'added', m[0].replace(/\s+/g, ' '));
+            add('RH-16', changedFile, item.startLine, 'added', item.text.replace(/\s+/g, ' '));
           }
         }
       }

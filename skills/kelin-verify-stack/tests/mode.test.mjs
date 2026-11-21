@@ -119,11 +119,19 @@ test('mode walks every phase and enforces real artifact gates', async () => {
 
 test('legacy mode requires a feature map instead of scope', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-legacy-'));
+  await mkdir(path.join(root, 'src'), { recursive: true });
+  await writeFile(path.join(root, 'src', 'a.mjs'), 'export const a = 1;\n');
   assert.equal(run(['init', '--mode', 'legacy'], root).code, 0);
   assert.equal(run(['advance'], root).code, 0);
   await artifact(root, 'scope.md');
   assert.equal(run(['advance'], root).code, 1);
   await artifact(root, 'feature-map.json', '{"modules":[{"id":"core"}]}\n');
+  assert.equal(run(['advance'], root).code, 1);
+  await artifact(
+    root,
+    'feature-map.json',
+    JSON.stringify({ roots: ['src'], owners: [{ pattern: 'src/**', feature: 'core', verify: 'node --test' }], nonRuntime: [] }),
+  );
   assert.equal(run(['advance'], root).code, 0);
 });
 
@@ -170,10 +178,18 @@ test('rewind moves one phase back and records the reason', async () => {
 
 test('audit mode follows read-only track and enforces coverage declaration', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-audit-'));
+  await mkdir(path.join(root, 'src'), { recursive: true });
+  await writeFile(path.join(root, 'src', 'a.mjs'), 'export const a = 1;\n');
   assert.equal(run(['init', '--mode', 'audit'], root).code, 0);
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "map"/);
   await artifact(root, 'feature-map.json', '{}\n');
+  assert.equal(run(['advance'], root).code, 1);
+  await artifact(
+    root,
+    'feature-map.json',
+    JSON.stringify({ roots: ['src'], owners: [{ pattern: 'src/**', feature: 'core', verify: 'node --test' }], nonRuntime: [] }),
+  );
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "audit"/);
 
@@ -346,4 +362,101 @@ test('mode setup previews read-only, applies idempotently and supports --with-ve
   await symlink(targetGi, path.join(symRoot, '.gitignore'));
   assert.equal(run(['setup', '--host', 'antigravity', '--apply'], symRoot).code, 2);
   assert.equal(await readFile(targetGi, 'utf8'), 'keep\n');
+});
+
+test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P0/P1 review gate, --cross-module plan-gate, read-only status/route', async () => {
+  const reviewCheckScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-review', 'scripts', 'review-check.mjs');
+
+  // P1-9: POSIX single quoting with $ and spaces + applyArgs/nextArgs
+  const weirdParent = await mkdtemp(path.join(tmpdir(), 'kelin-quote-'));
+  const weirdRoot = path.join(weirdParent, 'proj $HOME name');
+  await mkdir(weirdRoot, { recursive: true });
+  const routed = JSON.parse(run(['route', '--task', '加个权限表单'], weirdRoot).stdout);
+  assert.ok(Array.isArray(routed.nextArgs));
+  assert.ok(routed.nextCommand.includes("'"), 'command with spaces/$ must use single quotes');
+  assert.equal(routed.nextCommand.includes('"$HOME"'), false);
+
+  const setupPrev = JSON.parse(run(['setup', '--host', 'antigravity'], weirdRoot).stdout);
+  assert.ok(Array.isArray(setupPrev.applyArgs));
+  assert.match(setupPrev.applyCommand, /'[^']*proj \$HOME name'/);
+
+  // P1-10: .kelin/history symlink outside root refused before archival mkdir/write/rename
+  const histSymRoot = await mkdtemp(path.join(tmpdir(), 'kelin-histsym-'));
+  const histOutside = await mkdtemp(path.join(tmpdir(), 'kelin-histout-'));
+  assert.equal(run(['init', '--mode', 'light'], histSymRoot).code, 0);
+  await artifact(histSymRoot, 'state.json', JSON.stringify({ runId: 'r1', mode: 'light', phase: 'done', history: [] }));
+  await symlink(histOutside, path.join(histSymRoot, '.kelin', 'history'));
+  const archRefused = run(['init', '--mode', 'light'], histSymRoot);
+  assert.equal(archRefused.code, 1);
+  assert.equal(readdirSync(histOutside).length, 0);
+
+  // P1-11: /.kelin/ migration + .git/info/exclude verification failure
+  const giRepo = await mkdtemp(path.join(tmpdir(), 'kelin-gi-'));
+  execFileSync('git', ['init', '-q'], { cwd: giRepo });
+  await writeFile(path.join(giRepo, '.gitignore'), '/.kelin/\n');
+  const giApplied = JSON.parse(run(['setup', '--host', 'codex', '--apply'], giRepo).stdout);
+  assert.equal(giApplied.ok, true);
+  assert.equal(execFileSync('git', ['check-ignore', '.kelin/state.json'], { cwd: giRepo, encoding: 'utf8' }).trim(), '.kelin/state.json');
+  assert.throws(() => execFileSync('git', ['check-ignore', '.kelin/ci/agents-check.mjs'], { cwd: giRepo }));
+
+  const blockedCiRepo = await mkdtemp(path.join(tmpdir(), 'kelin-gi-exclude-'));
+  execFileSync('git', ['init', '-q'], { cwd: blockedCiRepo });
+  await mkdir(path.join(blockedCiRepo, '.git', 'info'), { recursive: true });
+  await writeFile(path.join(blockedCiRepo, '.git', 'info', 'exclude'), '.kelin/\n');
+  const giErr = run(['setup', '--host', 'codex', '--apply'], blockedCiRepo);
+  assert.equal(giErr.code, 2);
+  assert.equal(JSON.parse(giErr.stdout).checks.find((c) => c.id === 'gitignore')?.status, 'error');
+
+  // P1-14: --cross-module and scope.md multi-module require plan-gate.json in design
+  const cmRoot = await mkdtemp(path.join(tmpdir(), 'kelin-cm-'));
+  assert.equal(run(['init', '--mode', 'feature', '--cross-module'], cmRoot).code, 0);
+  assert.equal(run(['advance'], cmRoot).code, 0);
+  await artifact(cmRoot, 'scope.md', '影响模块：auth, billing\n');
+  assert.equal(run(['advance'], cmRoot).code, 0);
+  await artifact(cmRoot, 'goal.md', '# 目标\n跨模块\n');
+  await artifact(cmRoot, 'plan.md', validStandardPlan);
+  const missingGate = run(['advance'], cmRoot);
+  assert.equal(missingGate.code, 1);
+  assert.match(missingGate.stdout, /plan-gate\.json/);
+
+  // P1-12: review blocks unresolved P1 and verifies review.json reportHash in Git repos
+  const revRepo = await mkdtemp(path.join(tmpdir(), 'kelin-revgate-'));
+  execFileSync('git', ['init', '-q'], { cwd: revRepo });
+  execFileSync('git', ['config', 'user.email', 'm@example.invalid'], { cwd: revRepo });
+  execFileSync('git', ['config', 'user.name', 'm'], { cwd: revRepo });
+  await writeFile(path.join(revRepo, '.gitignore'), '.kelin/*\n!.kelin/ci/\n');
+  await writeFile(path.join(revRepo, 'a.mjs'), 'export const a = 1;\n');
+  execFileSync('git', ['add', '-A'], { cwd: revRepo });
+  execFileSync('git', ['commit', '-qm', 'base'], { cwd: revRepo });
+
+  assert.equal(run(['init', '--mode', 'feature'], revRepo).code, 0);
+  assert.equal(run(['advance'], revRepo).code, 0);
+  await artifact(revRepo, 'scope.md', 'src/a.mjs\n');
+  assert.equal(run(['advance'], revRepo).code, 0);
+  await artifact(revRepo, 'goal.md', '# 目标\n完成\n');
+  await artifact(revRepo, 'plan.md', validStandardPlan);
+  assert.equal(run(['advance'], revRepo).code, 0);
+  await artifact(revRepo, 'build.md', '完成\n');
+  assert.equal(run(['advance'], revRepo).code, 0);
+  await writeValidAcceptance(revRepo);
+  assert.equal(run(['advance'], revRepo).code, 0);
+
+  await artifact(revRepo, 'review.md', '# 审查\n- P1: a.mjs:1 空指针风险\n');
+  const blockedReview = run(['advance'], revRepo);
+  assert.equal(blockedReview.code, 1);
+  assert.match(blockedReview.stdout, /unresolved P0\/P1/);
+
+  await artifact(revRepo, 'review.md', '# 审查\n- [x] P1: a.mjs:1 已修复\n结论：无 P0/P1\n');
+  execFileSync(process.execPath, [reviewCheckScript, '--write'], { cwd: revRepo });
+  assert.equal(run(['advance'], revRepo).code, 0);
+
+  // P2-4: status/route never mutate legacy audit state.json on disk; advance persists migration
+  const roDir = await mkdtemp(path.join(tmpdir(), 'kelin-ro-audit-'));
+  const rawLegacy = JSON.stringify({ mode: 'audit', phase: 'build', history: [] });
+  await artifact(roDir, 'state.json', rawLegacy);
+  const stRes = JSON.parse(run(['status'], roDir).stdout);
+  assert.equal(stRes.phase, 'audit');
+  const rtRes = JSON.parse(run(['route', '--task', '继续'], roDir).stdout);
+  assert.equal(rtRes.resume.phase, 'audit');
+  assert.equal(await readFile(path.join(roDir, '.kelin', 'state.json'), 'utf8'), rawLegacy);
 });

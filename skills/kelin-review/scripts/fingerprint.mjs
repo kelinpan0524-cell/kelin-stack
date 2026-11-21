@@ -54,12 +54,8 @@ export function computeWorktreeFingerprint(rootDir) {
   }
   const status = statusEntries.length ? `${statusEntries.join('\n')}\n` : '';
 
-  const stagedDiff = headResult.status === 0
-    ? gitStrict(['diff', '--cached', '--binary', '--no-color', '--no-ext-diff'], repo)
-    : '';
-  const worktreeDiff = headResult.status === 0
-    ? gitStrict(['diff', '--binary', '--no-color', '--no-ext-diff'], repo)
-    : '';
+  const stagedDiff = gitStrict(['diff', '--cached', '--binary', '--no-color', '--no-ext-diff'], repo);
+  const worktreeDiff = gitStrict(['diff', '--binary', '--no-color', '--no-ext-diff'], repo);
 
   const untrackedRaw = gitStrict(['ls-files', '-z', '--others', '--exclude-standard'], repo);
   const untracked = untrackedRaw

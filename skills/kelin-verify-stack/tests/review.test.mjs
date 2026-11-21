@@ -263,3 +263,98 @@ test('gate-scan detects block-comment suppression edits, emptied catch, lower-bo
   await writeFile(path.join(dir, 'untracked-dir/file.mjs'), 'v2\n');
   assert.equal(JSON.parse(run(dir, reviewCheck).stdout).status, 'STALE');
 });
+
+test('review & fingerprint hardening: unborn HEAD, JS regex literals, per-hunk empty catch, --staged --base, non-test .test(), review.md verdict/hash', async () => {
+  // Unborn HEAD repo: staged and unstaged edits both alter fingerprint
+  const unborn = await mkdtemp(path.join(tmpdir(), 'kelin-unborn-'));
+  git(unborn, ['init', '-q']);
+  await writeFile(path.join(unborn, 'app.mjs'), 'export const v = 1;\n');
+  git(unborn, ['add', 'app.mjs']);
+  const fp1 = JSON.parse(run(unborn, reviewCheck, ['--print']).stdout).fingerprint;
+  await writeFile(path.join(unborn, 'app.mjs'), 'export const v = 2;\n');
+  const fp2 = JSON.parse(run(unborn, reviewCheck, ['--print']).stdout).fingerprint;
+  assert.notEqual(fp1, fp2);
+
+  // Regex literal /\/\*/ does not swallow following // @ts-ignore as a block comment; regex /test\.skip\(/ does not trigger RH-1
+  const dir = await repo();
+  await writeFile(
+    path.join(dir, 'src/app.mjs'),
+    [
+      'export function fixMe() {',
+      '  try {',
+      '    return 1;',
+      '  } catch (e) {}',
+      '}',
+      'export const sep1 = 1;',
+      'export const sep2 = 2;',
+      'export const sep3 = 3;',
+      'export const sep4 = 4;',
+      'export function breakMe(x) {',
+      '  try {',
+      '    return /test\\.skip\\(/.test(x);',
+      '  } catch (err) {',
+      '    console.error(err);',
+      '  }',
+      '}',
+    ].join('\n') + '\n',
+  );
+  git(dir, ['add', 'src/app.mjs']);
+  git(dir, ['commit', '-qm', 'add baseline functions']);
+  git(dir, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+
+  const firstBase = git(dir, ['rev-parse', 'HEAD']).stdout.trim();
+  await writeFile(
+    path.join(dir, 'src/app.mjs'),
+    [
+      'export function fixMe() {',
+      '  const rx = /\\/\\*/;',
+      '  // @ts-ignore',
+      '  try {',
+      '    return 1;',
+      '  } catch (e) { console.error(e); }',
+      '}',
+      'export const sep1 = 1;',
+      'export const sep2 = 2;',
+      'export const sep3 = 3;',
+      'export const sep4 = 4;',
+      'export function breakMe(x) {',
+      '  try {',
+      '    return x;',
+      '  } catch (err) {}',
+      '}',
+    ].join('\n') + '\n',
+  );
+  await writeFile(path.join(dir, 'tests/app.test.mjs'), "const rx = /test\\.skip\\(/;\ntest('a', () => { assert.equal(1, 1); });\n");
+  const scanRegexCatch = run(dir, gateScan);
+  assert.equal(scanRegexCatch.status, 1, scanRegexCatch.stdout);
+  const findings = JSON.parse(scanRegexCatch.stdout).findings;
+  assert.ok(findings.some((f) => f.tag === 'RH-13' && f.path === 'src/app.mjs'), 'comment after /\\/\\*/ regex must still trigger RH-13');
+  assert.ok(findings.some((f) => f.tag === 'RH-16' && f.path === 'src/app.mjs'), 'new empty catch hunk must flag even when old empty catch elsewhere was fixed');
+  assert.equal(findings.some((f) => f.tag === 'RH-1'), false, 'regex /test\\.skip\\(/ and non-test .test() removal must not flag RH-1');
+
+  // --staged --base <firstBase> compares index against <firstBase>
+  await writeFile(path.join(dir, 'src/app.mjs'), '// @ts-ignore\nexport const clean = true;\n');
+  git(dir, ['add', 'src/app.mjs']);
+  git(dir, ['commit', '-qm', 'staged base check']);
+  const stagedBaseRes = run(dir, gateScan, ['--staged', '--base', firstBase]);
+  assert.equal(stagedBaseRes.status, 1);
+  assert.ok(JSON.parse(stagedBaseRes.stdout).findings.some((f) => f.tag === 'RH-13'));
+
+  // review-check rejects unresolved P0/P1 in .kelin/review.md and detects review.md edits
+  const cleanDir = await repo();
+  await mkdir(path.join(cleanDir, '.kelin'), { recursive: true });
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# 审查结论\n- P1: src/app.mjs:1 缺少校验\n');
+  const blockedWrite = run(cleanDir, reviewCheck, ['--write']);
+  assert.equal(blockedWrite.status, 1);
+  assert.equal(JSON.parse(blockedWrite.stdout).status, 'BLOCKED');
+
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# 审查结论\n无 P0/P1 问题（P0:0 / P1:0）\n');
+  const cleanWrite = run(cleanDir, reviewCheck, ['--write']);
+  assert.equal(cleanWrite.status, 0, cleanWrite.stdout + cleanWrite.stderr);
+  assert.equal(JSON.parse(cleanWrite.stdout).verdict, 'clean');
+
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# 审查结论\nP0:0 / P1:0 已补充注释\n');
+  const staleByMd = run(cleanDir, reviewCheck);
+  assert.equal(staleByMd.status, 1);
+  assert.equal(JSON.parse(staleByMd.stdout).status, 'STALE');
+});

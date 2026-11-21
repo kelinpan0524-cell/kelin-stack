@@ -176,3 +176,56 @@ test('mode.mjs design phase enforces check-plan and plan-gate when structured ar
   const goodAdv = run(modeScript, ['advance', '--root', dir], dir);
   assert.equal(goodAdv.status, 0, goodAdv.stdout + goodAdv.stderr);
 });
+
+test('check-plan ignores fenced code blocks, rejects empty checkboxes and bare backticks, and plan-gate rejects malformed schemas', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-plan-hardening-'));
+  const planFile = path.join(dir, 'plan.md');
+  const gateFile = path.join(dir, 'plan-gate.json');
+
+  const fencedSpoof = [
+    '# 目标',
+    '真实目标。',
+    '',
+    '# 验收标准',
+    '- [ ] `node -e "process.exit(0)"` 通过',
+    '',
+    '```markdown',
+    '# 方案与取舍',
+    '假方案',
+    '# 本期不做',
+    '- 假范围',
+    '# 任务拆解',
+    '- [ ] 单元 1 / 验证：`true`',
+    '# 风险与回滚',
+    '假风险',
+    '```',
+  ].join('\n');
+  await writeFile(planFile, fencedSpoof);
+  const fencedRes = run(checkPlan, [planFile], dir);
+  assert.equal(fencedRes.status, 1);
+  const fencedProblems = JSON.parse(fencedRes.stdout).problems;
+  assert.ok(fencedProblems.some((p) => p.includes('missing section: 任务拆解')));
+
+  const emptyBoxPlan = validPlan.replace('- [ ] `node test/export.test.mjs` 退出 0', '- [ ]   ');
+  await writeFile(planFile, emptyBoxPlan);
+  assert.equal(run(checkPlan, [planFile], dir).status, 1);
+
+  const bareTickPlan = validPlan.replace('/ 验证：`node test/export.test.mjs`', '触及 `src/export.mjs`');
+  await writeFile(planFile, bareTickPlan);
+  const tickRes = run(checkPlan, [planFile], dir);
+  assert.equal(tickRes.status, 1);
+  assert.ok(JSON.parse(tickRes.stdout).problems.some((p) => p.includes('task 2 has no verification method')));
+
+  await writeFile(planFile, validPlan);
+  await writeFile(gateFile, '[]');
+  const arrayGate = run(planGate, [gateFile], dir);
+  assert.equal(arrayGate.status, 1);
+  assert.ok(JSON.parse(arrayGate.stdout).problems.some((p) => p.code === 'invalid-schema'));
+
+  await writeFile(gateFile, JSON.stringify({ plan: 'plan.md', lenses: [null, null], decisions: 'bad' }));
+  const nullGate = run(planGate, [gateFile], dir);
+  assert.equal(nullGate.status, 1);
+  const nullCodes = JSON.parse(nullGate.stdout).problems.map((p) => p.code);
+  assert.ok(nullCodes.includes('invalid-lens'));
+  assert.ok(nullCodes.includes('invalid-decisions'));
+});

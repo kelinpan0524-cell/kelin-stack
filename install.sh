@@ -362,10 +362,11 @@ import pathlib, sys
 src = pathlib.Path(sys.argv[1])
 wanted = [item.strip() for item in sys.argv[2].split(",") if item.strip()]
 deps = {
-    "kelin-mode": ["kelin-agents", "kelin-audit", "kelin-ci", "kelin-plan", "kelin-review", "kelin-verify", "kelin-verify-app"],
-    "kelin-verify": ["kelin-review"],
-    "kelin-ship": ["kelin-review"],
-    "kelin-release": ["kelin-verify-stack"],
+    "kelin-mode": ["kelin-agents", "kelin-audit", "kelin-ci", "kelin-map", "kelin-plan", "kelin-review", "kelin-ship", "kelin-verify", "kelin-verify-app", "kelin-verify-stack"],
+    "kelin-verify": ["kelin-review", "kelin-verify-stack"],
+    "kelin-review": ["kelin-verify-stack"],
+    "kelin-ship": ["kelin-review", "kelin-verify-stack"],
+    "kelin-release": ["kelin-review", "kelin-verify-stack"],
     "kelin-ci": ["kelin-agents", "kelin-map", "kelin-verify", "kelin-review", "kelin-guard"],
 }
 seen = []

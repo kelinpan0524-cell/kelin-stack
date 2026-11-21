@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -14,6 +15,7 @@ const flag = (name) => args.includes(name);
 const root = path.resolve(option('--root', process.cwd()));
 const bump = option('--bump', 'patch');
 const receiptPath = option('--receipt', '');
+const verifyPathOpt = option('--verify', '');
 const allowBranch = flag('--allow-branch');
 const skipReceipt = flag('--skip-receipt');
 const publish = flag('--publish');
@@ -69,7 +71,28 @@ const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], true);
 const head = git(['rev-parse', 'HEAD'], true) || null;
 
 const ioPath = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify-stack', 'scripts', 'io.mjs');
+const corePath = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify-stack', 'scripts', 'core.mjs');
+const fpPath = path.resolve(import.meta.dirname, '..', '..', 'kelin-review', 'scripts', 'fingerprint.mjs');
 const { hashTree } = existsSync(ioPath) ? await import(pathToFileURL(ioPath).href) : { hashTree: null };
+const { completeEvidence } = existsSync(corePath) ? await import(pathToFileURL(corePath).href) : { completeEvidence: null };
+const { computeWorktreeFingerprint } = existsSync(fpPath) ? await import(pathToFileURL(fpPath).href) : { computeWorktreeFingerprint: null };
+
+const verifyEvidenceInline = (receipt) => {
+  if (!Array.isArray(receipt.features) || !receipt.features.length) throw new Error('No features verified');
+  if (!Array.isArray(receipt.observations) || !receipt.observations.length) throw new Error('No observations recorded');
+  for (const feature of receipt.features) {
+    const records = receipt.observations.filter((o) => o?.feature === feature);
+    if (records.length !== 1) throw new Error(`Missing or duplicate evidence: ${feature}`);
+    const rec = records[0];
+    if (rec.ok !== true) throw new Error(`Observation failed: ${feature}`);
+    if (!Array.isArray(rec.assertions) || !rec.assertions.length || rec.assertions.some((a) => !a?.ok)) {
+      throw new Error(`Invalid or failing assertions: ${feature}`);
+    }
+    if (!Array.isArray(rec.artifacts) || !rec.artifacts.length || rec.artifacts.some((a) => !a?.path || !/^[a-f0-9]{64}$/.test(a.sha256 || ''))) {
+      throw new Error(`Invalid artifacts: ${feature}`);
+    }
+  }
+};
 
 const evaluateReceipt = async () => {
   if (skipReceipt) return { ok: true, skipped: true, reason: 'skipped by --skip-receipt' };
@@ -82,28 +105,90 @@ const evaluateReceipt = async () => {
   } catch (error) {
     return { ok: false, provided: true, reason: `unreadable receipt: ${error.message}` };
   }
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    return { ok: false, provided: true, reason: 'receipt must be a JSON object' };
+  }
   if (receipt.ok !== true) return { ok: false, provided: true, reason: 'receipt ok is not true' };
-  if (receipt.plugin?.dirty) return { ok: false, provided: true, reason: 'receipt was captured on a dirty checkout' };
-  if (!receipt.plugin?.treeHash || !receipt.plugin?.treeHashAfter || receipt.plugin.treeHash !== receipt.plugin.treeHashAfter) {
-    return { ok: false, provided: true, reason: 'receipt plugin treeHash is missing or inconsistent' };
-  }
-  const receiptHead = receipt.plugin?.gitHead || receipt.head || null;
-  if (head && receiptHead !== head) {
-    return { ok: false, provided: true, reason: `receipt verified at ${receiptHead || 'missing gitHead'}, current HEAD is ${head}` };
-  }
-  if (receipt.plugin?.name && receipt.plugin.name !== targetName) {
-    return { ok: false, provided: true, reason: `receipt plugin ${receipt.plugin.name} does not match ${targetName}` };
-  }
-  if (receipt.plugin?.version && receipt.plugin.version !== current) {
-    return { ok: false, provided: true, reason: `receipt version ${receipt.plugin.version} does not match ${current}` };
-  }
-  if (hashTree && status === '') {
-    const actualTree = await hashTree(root);
-    if (actualTree.hash !== receipt.plugin.treeHash) {
-      return { ok: false, provided: true, reason: `receipt treeHash ${receipt.plugin.treeHash.slice(0, 12)} does not match ${actualTree.hash.slice(0, 12)}` };
+
+  if ('verdict' in receipt || 'specHash' in receipt) {
+    if (receipt.verdict !== 'VERIFIED') {
+      return { ok: false, provided: true, reason: `acceptance verdict is ${receipt.verdict || 'missing'}, expected VERIFIED` };
     }
+    const specFile = verifyPathOpt
+      ? path.resolve(root, verifyPathOpt)
+      : ['.kelin/verify.json', 'verify.json'].map((rel) => path.join(root, rel)).find((p) => existsSync(p));
+    if (!specFile || !existsSync(specFile)) {
+      return { ok: false, provided: true, reason: 'verify.json spec not found for acceptance receipt' };
+    }
+    const specBytes = readFileSync(specFile);
+    const actualSpecHash = createHash('sha256').update(specBytes).digest('hex');
+    if (receipt.specHash !== actualSpecHash) {
+      return { ok: false, provided: true, reason: 'acceptance receipt specHash does not match verify.json' };
+    }
+    let spec;
+    try {
+      spec = JSON.parse(specBytes.toString('utf8'));
+    } catch (error) {
+      return { ok: false, provided: true, reason: `unreadable verify.json: ${error.message}` };
+    }
+    const specIds = Array.isArray(spec?.checks) ? spec.checks.map((c) => c?.id).filter((id) => typeof id === 'string' && id.trim()) : [];
+    if (!specIds.length || !Array.isArray(receipt.requiredIds) || specIds.some((id) => !receipt.requiredIds.includes(id))) {
+      return { ok: false, provided: true, reason: 'acceptance receipt missing requiredIds' };
+    }
+    const rowMap = new Map(Array.isArray(receipt.rows) ? receipt.rows.map((r) => [r?.id, r]) : []);
+    const bad = specIds.find((id) => {
+      const row = rowMap.get(id);
+      return !row || row.skipped || row.timedOut || row.error || row.exit !== 0;
+    });
+    if (bad) return { ok: false, provided: true, reason: `acceptance check not passing: ${bad}` };
+    if (head || branch || existsSync(path.join(root, '.git'))) {
+      if (!computeWorktreeFingerprint) {
+        return { ok: false, provided: true, reason: 'fingerprint validator unavailable for acceptance receipt' };
+      }
+      const wt = computeWorktreeFingerprint(root);
+      if (wt.isGit && receipt.worktreeFingerprint !== wt.fingerprint) {
+        return { ok: false, provided: true, reason: 'acceptance receipt worktreeFingerprint mismatch' };
+      }
+    }
+    return { ok: true, provided: true, kind: 'acceptance', head: receipt.head || head || null };
   }
-  return { ok: true, provided: true, head: receiptHead, level: receipt.verificationLevel || null };
+
+  if (receipt.tool === 'kelin-verify-stack' || receipt.plugin) {
+    if (receipt.plugin?.dirty) return { ok: false, provided: true, reason: 'receipt was captured on a dirty checkout' };
+    if (!receipt.plugin?.treeHash || !receipt.plugin?.treeHashAfter || receipt.plugin.treeHash !== receipt.plugin.treeHashAfter) {
+      return { ok: false, provided: true, reason: 'receipt plugin treeHash is missing or inconsistent' };
+    }
+    const receiptHead = receipt.plugin?.gitHead || receipt.head || null;
+    if (head && receiptHead !== head) {
+      return { ok: false, provided: true, reason: `receipt verified at ${receiptHead || 'missing gitHead'}, current HEAD is ${head}` };
+    }
+    if (receipt.plugin?.name && receipt.plugin.name !== targetName) {
+      return { ok: false, provided: true, reason: `receipt plugin ${receipt.plugin.name} does not match ${targetName}` };
+    }
+    if (receipt.plugin?.version && receipt.plugin.version !== current) {
+      return { ok: false, provided: true, reason: `receipt version ${receipt.plugin.version} does not match ${current}` };
+    }
+    try {
+      const validator = completeEvidence || verifyEvidenceInline;
+      validator({
+        features: Array.isArray(receipt.features) ? receipt.features : [],
+        expectedCases: receipt.expectedCases,
+        observations: Array.isArray(receipt.observations) ? receipt.observations : [],
+        failure: receipt.failure || '',
+      });
+    } catch (error) {
+      return { ok: false, provided: true, reason: `incomplete receipt evidence: ${error.message}` };
+    }
+    if (hashTree && status === '') {
+      const actualTree = await hashTree(root);
+      if (actualTree.hash !== receipt.plugin.treeHash) {
+        return { ok: false, provided: true, reason: `receipt treeHash ${receipt.plugin.treeHash.slice(0, 12)} does not match ${actualTree.hash.slice(0, 12)}` };
+      }
+    }
+    return { ok: true, provided: true, kind: 'verify-stack', head: receiptHead, level: receipt.verificationLevel || null };
+  }
+
+  return { ok: false, provided: true, reason: 'unrecognized receipt schema' };
 };
 
 const receiptCheck = await evaluateReceipt();

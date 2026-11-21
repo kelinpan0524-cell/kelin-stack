@@ -1,15 +1,17 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const USAGE = `Usage: node ratchet-check.mjs [ratchet.json] [--root DIR] [--check] [--strict-shrink] [--update-baseline] [--today YYYY-MM-DD]
+const USAGE = `Usage: node ratchet-check.mjs [ratchet.json] [--root DIR] [--check] [--base-ref REF] [--strict-shrink] [--update-baseline] [--today YYYY-MM-DD]
 
 Enforce pattern lint rules with per-location baselines (blocks new violations, catches relocation, rejects expired exceptions).
 
 Options:
   --root DIR          Workspace root to scan (defaults to directory of ratchet.json)
   --check             Verify no new violations or expired exceptions (default)
+  --base-ref REF      Compare current baseline against REF to block unapproved baseline inflation
   --strict-shrink     Fail when baseline entries disappeared and can be tightened
   --update-baseline   Tighten resolved baseline debt in ratchet.json (refuses if violations or expired exceptions exist)
   --today DATE        Override YYYY-MM-DD date for exception expiry checks
@@ -39,10 +41,11 @@ const walk = (root, rel = '', acc = []) => {
 
 const normalizeLine = (line) => String(line).trim().replace(/\s+/g, ' ');
 
-export function evaluateRatchet(spec, { root, today = new Date().toISOString().slice(0, 10) } = {}) {
+export function evaluateRatchet(spec, { root, baseSpec = null, today = new Date().toISOString().slice(0, 10) } = {}) {
   const violations = [];
   const staleBaseline = [];
   const expiredExceptions = [];
+  const baselineRegressions = [];
   const badConfig = [];
   const updatedRules = [];
   if (!spec || typeof spec !== 'object' || Array.isArray(spec) || !Array.isArray(spec.rules) || !spec.rules.length) {
@@ -51,20 +54,31 @@ export function evaluateRatchet(spec, { root, today = new Date().toISOString().s
       violations,
       staleBaseline,
       expiredExceptions,
+      baselineRegressions,
       updatedSpec: spec,
     };
   }
   const rules = spec.rules;
   const allFiles = walk(root);
+  const baseRules = new Map(
+    (Array.isArray(baseSpec?.rules) ? baseSpec.rules : [])
+      .filter((r) => r && typeof r === 'object' && typeof r.id === 'string' && r.id)
+      .map((r) => [r.id, r]),
+  );
 
   for (const rule of rules) {
     if (!rule?.id || !rule?.pattern || !Array.isArray(rule.include) || !rule.include.length) {
       badConfig.push(`invalid rule schema: ${JSON.stringify(rule?.id || '(missing id)')}`);
       continue;
     }
+    const rawFlags = String(rule.flags || '');
+    if (rawFlags.includes('y')) {
+      badConfig.push(`${rule.id}: sticky flag "y" is not allowed`);
+      continue;
+    }
     const includes = rule.include.map(globToRegExp);
     const excludes = (Array.isArray(rule.exclude) ? rule.exclude : []).map(globToRegExp);
-    const flags = String(rule.flags || '').replace(/g/g, '');
+    const flags = rawFlags.replace(/[gy]/g, '');
     let re;
     try {
       re = new RegExp(rule.pattern, flags);
@@ -93,6 +107,29 @@ export function evaluateRatchet(spec, { root, today = new Date().toISOString().s
       baseCounts.set(key, (baseCounts.get(key) || 0) + (Number.isInteger(entry.count) && entry.count > 0 ? entry.count : 1));
     }
 
+    if (baseRules.has(rule.id)) {
+      const refRule = baseRules.get(rule.id);
+      const refCounts = new Map();
+      for (const entry of refRule.baseline || []) {
+        const key = `${entry.file}\0${normalizeLine(entry.match)}`;
+        refCounts.set(key, (refCounts.get(key) || 0) + (Number.isInteger(entry.count) && entry.count > 0 ? entry.count : 1));
+      }
+      for (const [key, currentCount] of baseCounts) {
+        const prevCount = refCounts.get(key) || 0;
+        if (currentCount > prevCount) {
+          const [file, match] = key.split('\0');
+          baselineRegressions.push({
+            rule: rule.id,
+            file,
+            match: match.slice(0, 120),
+            baseCount: prevCount,
+            currentCount,
+            kind: prevCount === 0 ? 'added-baseline-entry' : 'increased-baseline-count',
+          });
+        }
+      }
+    }
+
     const actualCounts = new Map();
     const matchLines = new Map();
     const targetFiles = allFiles.filter((rel) => includes.some((rx) => rx.test(rel)) && !excludes.some((rx) => rx.test(rel)));
@@ -100,6 +137,7 @@ export function evaluateRatchet(spec, { root, today = new Date().toISOString().s
     for (const rel of targetFiles) {
       const lines = readFileSync(path.join(root, rel), 'utf8').split(/\r?\n/);
       lines.forEach((line, idx) => {
+        re.lastIndex = 0;
         if (!re.test(line)) return;
         const norm = normalizeLine(line);
         const isExempt = activeExceptions.some((exc) => exc.file === rel && (!exc.match || exc.match === norm));
@@ -152,9 +190,40 @@ export function evaluateRatchet(spec, { root, today = new Date().toISOString().s
     violations,
     staleBaseline,
     expiredExceptions,
+    baselineRegressions,
     updatedSpec: { ...(spec || {}), version: spec?.version || 1, rules: updatedRules },
   };
 }
+
+const loadBaseSpec = (root, file, baseRef) => {
+  const topRes = spawnSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  if (topRes.status !== 0) {
+    return { ok: false, error: `--base-ref requires a Git repository: ${(topRes.stderr || '').trim()}` };
+  }
+  const verifyRes = spawnSync('git', ['-C', root, 'rev-parse', '--verify', `${baseRef}^{commit}`], { encoding: 'utf8' });
+  if (verifyRes.status !== 0) {
+    return { ok: false, error: `Unknown --base-ref "${baseRef}": ${(verifyRes.stderr || '').trim()}` };
+  }
+  const topDir = realpathSync(topRes.stdout.trim());
+  const absFile = realpathSync(file);
+  const relFile = path.relative(topDir, absFile).split(path.sep).join('/');
+  if (!relFile || relFile.startsWith('..')) {
+    return { ok: false, error: `${file} is outside git repository ${topDir}` };
+  }
+  const catRes = spawnSync('git', ['-C', topDir, 'cat-file', '-e', `${baseRef}:${relFile}`], { encoding: 'utf8' });
+  if (catRes.status !== 0) {
+    return { ok: true, spec: { rules: [] } };
+  }
+  const showRes = spawnSync('git', ['-C', topDir, 'show', `${baseRef}:${relFile}`], { encoding: 'utf8' });
+  if (showRes.status !== 0) {
+    return { ok: false, error: `Failed reading ${baseRef}:${relFile}: ${(showRes.stderr || '').trim()}` };
+  }
+  try {
+    return { ok: true, spec: JSON.parse(showRes.stdout) };
+  } catch (error) {
+    return { ok: false, error: `${baseRef}:${relFile}: ${error.message}` };
+  }
+};
 
 if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const args = process.argv.slice(2);
@@ -164,6 +233,7 @@ if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(
   }
   let file = '';
   let rootOpt = '';
+  let baseRef = '';
   let today = new Date().toISOString().slice(0, 10);
   const strictShrink = args.includes('--strict-shrink');
   const updateBaseline = args.includes('--update-baseline');
@@ -172,6 +242,9 @@ if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(
     const arg = args[i];
     if (arg === '--root') {
       rootOpt = args[i + 1] || '';
+      i += 1;
+    } else if (arg === '--base-ref') {
+      baseRef = args[i + 1] || '';
       i += 1;
     } else if (arg === '--today') {
       today = args[i + 1] || '';
@@ -200,13 +273,26 @@ if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(
   }
 
   const root = path.resolve(rootOpt || path.dirname(file));
-  const evalResult = evaluateRatchet(spec, { root, today });
+  let baseSpec = null;
+  if (baseRef) {
+    const loaded = loadBaseSpec(root, file, baseRef);
+    if (!loaded.ok) {
+      console.error(loaded.error);
+      process.exit(2);
+    }
+    baseSpec = loaded.spec;
+  }
+
+  const evalResult = evaluateRatchet(spec, { root, baseSpec, today });
   if (evalResult.badConfig.length) {
     console.log(JSON.stringify({ ok: false, file, ...evalResult, updatedSpec: undefined }, null, 2));
     process.exit(2);
   }
 
-  const canUpdate = updateBaseline && evalResult.violations.length === 0 && evalResult.expiredExceptions.length === 0;
+  const canUpdate = updateBaseline
+    && evalResult.violations.length === 0
+    && evalResult.expiredExceptions.length === 0
+    && evalResult.baselineRegressions.length === 0;
   if (canUpdate) {
     writeFileSync(file, `${JSON.stringify(evalResult.updatedSpec, null, 2)}\n`);
   }
@@ -214,6 +300,7 @@ if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(
   const ok =
     evalResult.violations.length === 0 &&
     evalResult.expiredExceptions.length === 0 &&
+    evalResult.baselineRegressions.length === 0 &&
     (!strictShrink || canUpdate || evalResult.staleBaseline.length === 0);
 
   console.log(
@@ -222,9 +309,11 @@ if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(path.resolve(
         ok,
         file,
         root,
+        ...(baseRef ? { baseRef } : {}),
         violations: evalResult.violations,
         staleBaseline: canUpdate ? [] : evalResult.staleBaseline,
         expiredExceptions: evalResult.expiredExceptions,
+        baselineRegressions: evalResult.baselineRegressions,
         updated: canUpdate,
       },
       null,

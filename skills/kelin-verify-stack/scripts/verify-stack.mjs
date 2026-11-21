@@ -423,15 +423,23 @@ export async function publish(options) {
     if (receipt.verificationLevel !== 'live' || !(Number(receipt.sessionsRun) >= 1)) {
       throw new Refused(`Refusing to publish static-only receipt (--require-live requires verificationLevel=live, got ${receipt.verificationLevel || 'unknown'})`);
     }
-    const liveOk = (receipt.observations || []).some(
-      (obs) => obs.kind === 'live'
-        && obs.ok === true
-        && Boolean(obs.transcript)
-        && Array.isArray(obs.assertions)
-        && obs.assertions.some((a) => a.type === 'skill_called' && a.ok === true),
-    );
-    if (!liveOk) {
-      throw new Refused('Refusing to publish under --require-live: no passing live observation with skill_called and transcript');
+    const liveObs = (receipt.observations || []).filter((obs) => obs.kind === 'live');
+    if (!liveObs.length) {
+      throw new Refused('Refusing to publish under --require-live: no live observations found');
+    }
+    for (const obs of liveObs) {
+      if (obs.ok !== true || !obs.transcript) {
+        throw new Refused(`Refusing to publish under --require-live: live case ${obs.feature || obs.case || 'unknown'} did not pass with a transcript`);
+      }
+      const skillName = obs.skill || (obs.feature?.startsWith('zcode:skill-invocation:') ? obs.feature.slice('zcode:skill-invocation:'.length) : '');
+      const expectedSkill = skillName && receipt.plugin?.name ? `${receipt.plugin.name}:${skillName}` : '';
+      const assertions = Array.isArray(obs.assertions) ? obs.assertions : [];
+      const hasSkillAssertion = assertions.some(
+        (a) => a.type === 'skill_called' && a.ok === true && (!expectedSkill || a.value === expectedSkill),
+      );
+      if (!hasSkillAssertion) {
+        throw new Refused(`Refusing to publish under --require-live: missing passing skill_called assertion for ${obs.feature || obs.case || 'live case'}`);
+      }
     }
   }
   if (receipt.plugin.root && existsSync(receipt.plugin.root)) {
@@ -450,17 +458,44 @@ export async function publish(options) {
       if (sha256(body) !== artifact.sha256) throw new Refused(`Artifact changed after acceptance: ${artifact.path}`);
     }
     if (observation.transcript) {
-      const body = await readFile(path.join(runDir, observation.transcript));
-      if (sha256(body) !== observation.transcriptHash) throw new Refused(`Transcript changed after acceptance: ${observation.transcript}`);
+      const txText = await readFile(path.join(runDir, observation.transcript), 'utf8');
+      if (sha256(Buffer.from(txText, 'utf8')) !== observation.transcriptHash) throw new Refused(`Transcript changed after acceptance: ${observation.transcript}`);
+      if (options.requireLive && observation.kind === 'live') {
+        const skillName = observation.skill || (observation.feature?.startsWith('zcode:skill-invocation:') ? observation.feature.slice('zcode:skill-invocation:'.length) : '');
+        const expectedSkill = skillName && receipt.plugin?.name ? `${receipt.plugin.name}:${skillName}` : '';
+        const calls = [];
+        for (const rawLine of txText.split('\n')) {
+          if (!rawLine.trim()) continue;
+          try {
+            const row = JSON.parse(rawLine);
+            for (const c of row?.response?.toolCalls || []) calls.push(c);
+          } catch {
+          }
+        }
+        const matchedCall = calls.some(
+          (call) => String(call?.name || '').toLowerCase() === 'skill'
+            && (!expectedSkill || call?.input?.skill === expectedSkill || call?.input?.name === expectedSkill),
+        );
+        if (!matchedCall) {
+          throw new Refused(`Refusing to publish under --require-live: transcript lacks Skill tool call for ${expectedSkill || observation.feature}`);
+        }
+      }
     }
   }
-  let sha = options.sha;
-  if (!sha) {
-    const head = await run('git', ['-C', receipt.plugin.root, 'rev-parse', 'HEAD'], { timeoutMs: 20_000 });
-    sha = head.code === 0 ? head.stdout.trim() : '';
+  if (!/^[a-f0-9]{40}$/.test(receipt.plugin.gitHead || '')) {
+    throw new Refused('Refusing to publish: receipt lacks a bound 40-character plugin.gitHead commit SHA');
   }
-  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('A 40-character --sha is required for a plugin that is not a git checkout');
-  if (receipt.plugin.gitHead && sha !== receipt.plugin.gitHead) {
+  let sha = options.sha;
+  if (receipt.plugin.root && existsSync(receipt.plugin.root)) {
+    const head = await run('git', ['-C', receipt.plugin.root, 'rev-parse', 'HEAD'], { timeoutMs: 20_000 });
+    const actualHead = head.code === 0 ? head.stdout.trim() : '';
+    if (actualHead && actualHead !== receipt.plugin.gitHead) {
+      throw new Refused(`Receipt was verified at ${receipt.plugin.gitHead}, current HEAD is ${actualHead}`);
+    }
+    if (!sha) sha = actualHead;
+  }
+  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('A 40-character --sha is required');
+  if (sha !== receipt.plugin.gitHead) {
     throw new Refused(`Receipt was verified at ${receipt.plugin.gitHead}, refusing to publish on ${sha}`);
   }
   const body = await readFile(path.join(runDir, 'gate.md'), 'utf8');

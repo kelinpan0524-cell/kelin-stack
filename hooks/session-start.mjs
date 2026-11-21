@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { PHASE_TABLE, phaseMeta } from '../skills/kelin-mode/scripts/mode.mjs';
+import { PHASE_TABLE, phaseMeta, resolvePhase } from '../skills/kelin-mode/scripts/mode.mjs';
 
 const hostIndex = process.argv.indexOf('--host');
 const hostArg = hostIndex >= 0 ? process.argv[hostIndex + 1] || '' : '';
@@ -83,7 +83,9 @@ const readState = () => {
     const data = JSON.parse(readFileSync(file, 'utf8'));
     if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
     if (typeof data.mode !== 'string' || typeof data.phase !== 'string') return null;
-    return VALID_MODES.has(data.mode) && VALID_PHASES.has(data.phase) ? { mode: data.mode, phase: data.phase } : null;
+    if (!VALID_MODES.has(data.mode)) return null;
+    const phase = resolvePhase(data.mode, data.phase);
+    return VALID_PHASES.has(phase) ? { mode: data.mode, phase } : null;
   } catch {
     return null;
   }

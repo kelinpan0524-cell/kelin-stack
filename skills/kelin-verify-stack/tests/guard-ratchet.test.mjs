@@ -133,3 +133,135 @@ test('ratchet-check catches relocated violations even at equal count, detects st
   assert.equal(JSON.parse(refusedUpdate.stdout).updated, false);
   assert.equal(run(ratchetCheck, [globCfg, '--check'], nestedDir).status, 1);
 });
+
+test('guard-check rejects disabled CI steps/echoes/basename collisions and ratchet-check blocks sticky flags and base-ref regressions', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-guard-hardening-'));
+  await mkdir(path.join(dir, '.github', 'workflows'), { recursive: true });
+  await mkdir(path.join(dir, 'src'), { recursive: true });
+  await mkdir(path.join(dir, 'tests'), { recursive: true });
+  await mkdir(path.join(dir, 'other'), { recursive: true });
+  await writeFile(path.join(dir, 'src', 'rule.mjs'), 'export const ok = true;\n');
+  await writeFile(path.join(dir, 'tests', 'target.test.mjs'), 'test("ok", () => {});\n');
+  await writeFile(path.join(dir, 'other', 'target.test.mjs'), 'test("other", () => {});\n');
+
+  const gFile = path.join(dir, 'guards.json');
+  await writeFile(gFile, JSON.stringify({
+    guards: [{
+      id: 'no-enforced-in',
+      bug: 'missing enforcedIn',
+      rootCause: 'forgot CI',
+      guard: { type: 'lint', location: 'src/rule.mjs', command: 'node src/rule.mjs' },
+      proof: { command: 'revert', expected: 'fail-on-old' },
+    }],
+  }));
+  assert.equal(run(guardCheck, [gFile], dir).status, 1);
+
+  await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), [
+    'jobs:',
+    '  disabled_job:',
+    '    if: false',
+    '    steps:',
+    '      - run: node src/rule.mjs',
+    '  active_job:',
+    '    steps:',
+    '      - name: node src/rule.mjs',
+    '        run: echo "node src/rule.mjs"',
+    '      - run: node --test other/target.test.mjs',
+  ].join('\n'));
+
+  await writeFile(gFile, JSON.stringify({
+    guards: [
+      {
+        id: 'spoofed-step',
+        bug: 'spoof',
+        rootCause: 'if false',
+        guard: { type: 'lint', location: 'src/rule.mjs', command: 'node src/rule.mjs' },
+        enforcedIn: ['.github/workflows/ci.yml'],
+        proof: { command: 'revert', expected: 'fail-on-old' },
+      },
+      {
+        id: 'basename-collision',
+        bug: 'wrong path',
+        rootCause: 'basename',
+        guard: { type: 'test', location: 'tests/target.test.mjs', command: 'node --test tests/target.test.mjs' },
+        enforcedIn: ['.github/workflows/ci.yml'],
+        proof: { command: 'revert', expected: 'fail-on-old' },
+      },
+    ],
+  }));
+  const spoofRes = run(guardCheck, [gFile], dir);
+  assert.equal(spoofRes.status, 1);
+  assert.equal(JSON.parse(spoofRes.stdout).problems.length, 2);
+
+  await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), [
+    'jobs:',
+    '  disabled_job:',
+    '    if: false',
+    '    steps:',
+    '      - run: true',
+    '  active_job:',
+    '    steps:',
+    '      - run: |',
+    '          echo "running"',
+    '          node src/rule.mjs',
+    '      - run: node --test tests/target.test.mjs',
+  ].join('\n'));
+  assert.equal(run(guardCheck, [gFile], dir).status, 0);
+
+  // Ratchet sticky flag and --base-ref baseline regression
+  const rDir = await mkdtemp(path.join(tmpdir(), 'kelin-ratchet-git-'));
+  const git = (args) => spawnSync('git', args, { cwd: rDir, encoding: 'utf8' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 'r@example.invalid']);
+  git(['config', 'user.name', 'r']);
+  await mkdir(path.join(rDir, 'src'), { recursive: true });
+  await writeFile(path.join(rDir, 'src', 'a.mjs'), 'console.log(1);\n');
+  const rCfg = path.join(rDir, 'ratchet.json');
+  await writeFile(rCfg, JSON.stringify({
+    version: 1,
+    rules: [{
+      id: 'no-log',
+      include: ['src/**/*.mjs'],
+      pattern: 'console\\.log',
+      flags: 'g',
+      baseline: [{ file: 'src/a.mjs', match: 'console.log(1);', count: 1 }],
+      exceptions: [],
+    }],
+  }, null, 2));
+  git(['add', '-A']);
+  git(['commit', '-qm', 'base']);
+
+  await writeFile(rCfg, JSON.stringify({
+    version: 1,
+    rules: [{
+      id: 'sticky-bad',
+      include: ['src/**/*.mjs'],
+      pattern: 'console\\.log',
+      flags: 'y',
+      baseline: [],
+    }],
+  }));
+  assert.equal(run(ratchetCheck, [rCfg, '--check'], rDir).status, 2);
+
+  await writeFile(path.join(rDir, 'src', 'a.mjs'), 'console.log(1);\nconsole.log(2);\n');
+  await writeFile(rCfg, JSON.stringify({
+    version: 1,
+    rules: [{
+      id: 'no-log',
+      include: ['src/**/*.mjs'],
+      pattern: 'console\\.log',
+      flags: 'g',
+      baseline: [
+        { file: 'src/a.mjs', match: 'console.log(1);', count: 1 },
+        { file: 'src/a.mjs', match: 'console.log(2);', count: 1 },
+      ],
+      exceptions: [],
+    }],
+  }, null, 2));
+  assert.equal(run(ratchetCheck, [rCfg, '--check'], rDir).status, 0);
+  const regRes = run(ratchetCheck, [rCfg, '--check', '--base-ref', 'HEAD'], rDir);
+  assert.equal(regRes.status, 1);
+  const regJson = JSON.parse(regRes.stdout);
+  assert.equal(regJson.baselineRegressions.length, 1);
+  assert.equal(regJson.baselineRegressions[0].kind, 'added-baseline-entry');
+});

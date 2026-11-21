@@ -5,6 +5,133 @@ import { fileURLToPath } from 'node:url';
 
 const TYPES = ['arch', 'test', 'type', 'lint', 'ci', 'agents'];
 
+const extractActiveLines = (rawText, filePath) => {
+  const isYaml = /\.(?:ya?ml)$/i.test(filePath);
+  const rawLines = String(rawText).split(/\r?\n/);
+  const cleaned = rawLines.map((line) => line.replace(/^\s*#.*$/, '').replace(/\s+#.*$/, ''));
+  const echoOnlyRe = /^(?:echo|printf|true|:)\b/;
+  if (!isYaml) {
+    return cleaned
+      .map((line) => line.trim())
+      .filter((line) => line && !echoOnlyRe.test(line));
+  }
+
+  const disabledFalseRe = /^if:\s*(?:\$\{\{\s*)?false(?:\s*\}\})?$/i;
+  const active = [];
+  let jobsIndent = -1;
+  let jobKeyIndent = -1;
+  let jobDisabled = false;
+  let stepsIndent = -1;
+  let stepItemIndent = -1;
+  let stepLines = [];
+
+  const flushStep = () => {
+    if (!stepLines.length) return;
+    const stepDisabled = jobDisabled || stepLines.some((l) => disabledFalseRe.test(l.replace(/^\s*-\s*/, '').trim()));
+    if (!stepDisabled) {
+      let inRunBlock = false;
+      let runKeyIndent = -1;
+      for (const rawLine of stepLines) {
+        const stripped = rawLine.replace(/^(\s*)-\s+/, '$1  ');
+        const indent = stripped.search(/\S/);
+        const trimmed = stripped.trim();
+        if (!trimmed) continue;
+        if (inRunBlock) {
+          if (indent > runKeyIndent) {
+            if (!echoOnlyRe.test(trimmed)) active.push(trimmed);
+            continue;
+          }
+          inRunBlock = false;
+          runKeyIndent = -1;
+        }
+        const runMatch = /^run:\s*(.*)$/.exec(trimmed);
+        if (runMatch) {
+          const rhs = runMatch[1].trim();
+          if (/^[|>][+-]?\s*$/.test(rhs)) {
+            inRunBlock = true;
+            runKeyIndent = indent;
+          } else if (rhs && !echoOnlyRe.test(rhs)) {
+            active.push(rhs);
+          }
+        }
+      }
+    }
+    stepLines = [];
+  };
+
+  for (const line of cleaned) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const indent = line.search(/\S/);
+    if (stepsIndent >= 0 && indent <= stepsIndent && !(indent === stepsIndent && /^\s*-\s+/.test(line))) {
+      flushStep();
+      stepsIndent = -1;
+      stepItemIndent = -1;
+    }
+    if (jobsIndent >= 0 && indent <= jobsIndent) {
+      flushStep();
+      jobsIndent = -1;
+      jobKeyIndent = -1;
+      jobDisabled = false;
+      stepsIndent = -1;
+      stepItemIndent = -1;
+    }
+    if (/^jobs:\s*$/.test(trimmed)) {
+      flushStep();
+      jobsIndent = indent;
+      jobKeyIndent = -1;
+      jobDisabled = false;
+      continue;
+    }
+    if (jobsIndent >= 0 && indent > jobsIndent && stepsIndent < 0 && !trimmed.startsWith('-')) {
+      if (jobKeyIndent < 0 && /^[A-Za-z0-9_.-]+:\s*$/.test(trimmed)) {
+        jobKeyIndent = indent;
+      } else if (indent === jobKeyIndent && /^[A-Za-z0-9_.-]+:\s*$/.test(trimmed)) {
+        flushStep();
+        jobDisabled = false;
+        stepsIndent = -1;
+        stepItemIndent = -1;
+      }
+    }
+    if (/^steps:\s*$/.test(trimmed)) {
+      flushStep();
+      stepsIndent = indent;
+      stepItemIndent = -1;
+      continue;
+    }
+    if (stepsIndent >= 0 && /^\s*-\s+/.test(line) && (stepItemIndent < 0 || indent <= stepItemIndent)) {
+      flushStep();
+      stepItemIndent = indent;
+      stepLines.push(line);
+      continue;
+    }
+    if (stepLines.length) {
+      stepLines.push(line);
+      continue;
+    }
+    if (jobsIndent >= 0 && disabledFalseRe.test(trimmed)) {
+      jobDisabled = true;
+    }
+  }
+  flushStep();
+  return active;
+};
+
+const coversSuite = (activeLines, normLoc, locDir) => {
+  for (const line of activeLines) {
+    if (!/\bnode\s+--test\b/.test(line)) continue;
+    const tokens = line.split(/[\s"'`()$;]+/).filter(Boolean);
+    if (tokens.includes(normLoc) || tokens.includes(`./${normLoc}`)) return true;
+    if (tokens.includes(`${locDir}/*.test.mjs`) || tokens.includes(`${locDir}/**/*.test.mjs`)) return true;
+    const findMatch = /find\s+([^\s;|&)]+)\s+.*-name\s+['"]?\*\.test\.mjs['"]?/.exec(line);
+    if (findMatch) {
+      const findDir = path.posix.normalize(findMatch[1]).replace(/\/+$/, '');
+      if (normLoc === findDir || normLoc.startsWith(`${findDir}/`)) return true;
+    }
+  }
+  return false;
+};
+
 export function validateGuards(spec, { base = process.cwd(), today = new Date().toISOString().slice(0, 10) } = {}) {
   const guards = Array.isArray(spec?.guards) ? spec.guards : [];
   const problems = [];
@@ -32,7 +159,11 @@ export function validateGuards(spec, { base = process.cwd(), today = new Date().
       problems.push(`${id}: location does not exist: ${location}`);
     }
 
-    if (guard.enforcedIn !== undefined) {
+    if (guard.enforcedIn === undefined) {
+      if (guard.guard?.type && guard.guard.type !== 'agents') {
+        problems.push(`${id}: executable guard requires enforcedIn`);
+      }
+    } else {
       const targets = Array.isArray(guard.enforcedIn) ? guard.enforcedIn : [guard.enforcedIn];
       if (!targets.length || targets.some((t) => typeof t !== 'string' || !t.trim())) {
         problems.push(`${id}: enforcedIn must name non-empty file path(s)`);
@@ -45,23 +176,18 @@ export function validateGuards(spec, { base = process.cwd(), today = new Date().
             problems.push(`${id}: enforcedIn does not exist: ${rel}`);
             continue;
           }
-          const activeLines = readFileSync(full, 'utf8')
-            .split(/\r?\n/)
-            .map((line) => line.replace(/(?:^|\s)#.*$/, '').trim())
-            .filter(Boolean);
+          const activeLines = extractActiveLines(readFileSync(full, 'utf8'), rel);
           const activeBody = activeLines.join('\n');
           const normLoc = path.posix.normalize(String(location));
           const locDir = path.posix.dirname(normLoc);
           const coversTestSuite =
             guard.guard?.type === 'test' &&
             normLoc.endsWith('.test.mjs') &&
-            activeLines.some((line) => {
-              if (!/\bnode\s+--test\b/.test(line)) return false;
-              if (line.includes(normLoc) || line.includes(path.posix.basename(normLoc))) return true;
-              if (normLoc.startsWith('skills/') && /find\s+skills\s+-name\s+['"]\*\.test\.mjs['"]/.test(line)) return true;
-              return line.includes(`${locDir}/*.test.mjs`);
-            });
-          const invokesCommand = Boolean(cmd) && (activeBody.includes(cmd) || (scriptToken && activeBody.includes(scriptToken)));
+            coversSuite(activeLines, normLoc, locDir);
+          const invokesCommand =
+            Boolean(cmd) &&
+            (activeBody.includes(cmd) ||
+              (!(guard.guard?.type === 'test' && normLoc.endsWith('.test.mjs')) && scriptToken && activeBody.includes(scriptToken)));
           if (!invokesCommand && !coversTestSuite) {
             problems.push(`${id}: enforcedIn ${rel} does not invoke "${cmd}"`);
           }

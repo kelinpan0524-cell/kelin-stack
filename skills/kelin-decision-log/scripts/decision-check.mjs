@@ -21,7 +21,8 @@ const warnings = [];
 const header = 'ts\tphase\tdecision\twhy\tevidence\tresult';
 const phases = /^(设计|实现|验证|发布|复盘|start|design|build|verify|release|retro)$/i;
 const results = /^(待验证|有效|有害|pending|valid|harmful|ok|start)$/i;
-const pointer = /(?:[0-9a-f]{7,40}|https?:\/\/|[\w./-]+:\d+|[\w./-]+\.(?:json|md|log|txt|tsv|xlsx|png|jpe?g|pdf)\b|PR\s*#?\d+|#\d+|agent-[\w-]+|session-[\w-]+)/i;
+const pointer = /(?:[0-9a-f]{7,40}|https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/\S*)?|[\w./-]+:\d+|[\w./-]+\.(?:json|md|log|txt|tsv|xlsx|png|jpe?g|pdf)\b|PR\s*#?\d+|#\d+|agent-[\w-]+|session-[\w-]+)/i;
+const isoTsRe = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
 
 let substantiveRows = 0;
 let startMarkers = 0;
@@ -36,7 +37,12 @@ else {
       problems.push(`row ${index + 1}: expected 6 columns, got ${cells.length}`);
       return;
     }
-    const [, phase, decision, why, evidence, result] = cells;
+    const rowProblemsBefore = problems.length;
+    const [tsCell, phase, decision, why, evidence, result] = cells;
+    const ts = tsCell.trim();
+    if (!ts || !isoTsRe.test(ts) || Number.isNaN(Date.parse(ts))) {
+      problems.push(`row ${index + 1}: invalid ISO ts ${ts || '(empty)'}`);
+    }
     const isStartPhase = /^start$/i.test(phase.trim());
     const isStartResult = /^start$/i.test(result.trim());
     if (!phases.test(phase)) problems.push(`row ${index + 1}: invalid phase ${phase}`);
@@ -48,7 +54,7 @@ else {
     if (isStartPhase || isStartResult) {
       if (!(isStartPhase && isStartResult)) problems.push(`row ${index + 1}: start marker must set both phase and result to start`);
       else startMarkers += 1;
-    } else {
+    } else if (problems.length === rowProblemsBefore) {
       substantiveRows += 1;
     }
     if (/[，。；]/.test(evidence) && evidence.length > 120) warnings.push(`row ${index + 1}: evidence looks like prose; use a pointer`);

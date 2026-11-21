@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { sha256 } from './io.mjs';
 
 const IGNORED = new Set(['.v2c', '.video_agent', '.DS_Store', 'node_modules']);
@@ -158,6 +159,41 @@ export async function evaluateAssertions(assertions, ctx) {
         case 'response_contains': {
           ok = ctx.response.includes(value);
           note = ctx.response.slice(0, 120);
+          break;
+        }
+        case 'file_regex': {
+          const target = safeJoin(ctx.fixtureDir, rule.path);
+          const body = existsSync(target) ? await readFile(target, 'utf8') : '';
+          const re = new RegExp(value, rule.flags || 'm');
+          ok = re.test(body);
+          note = ok ? `matched ${value}` : `missing /${value}/`;
+          break;
+        }
+        case 'json_field': {
+          const target = safeJoin(ctx.fixtureDir, rule.path);
+          const raw = existsSync(target) ? await readFile(target, 'utf8') : '';
+          const parsed = JSON.parse(raw);
+          const actual = parsed?.[rule.field];
+          if (Array.isArray(actual)) {
+            ok = rule.regex
+              ? actual.some((item) => new RegExp(rule.regex).test(String(item)))
+              : actual.includes(value);
+          } else if (rule.regex) {
+            ok = new RegExp(rule.regex).test(String(actual ?? ''));
+          } else {
+            ok = actual === value;
+          }
+          note = `${rule.field}=${JSON.stringify(actual)}`.slice(0, 160);
+          break;
+        }
+        case 'plan_valid': {
+          const target = safeJoin(ctx.fixtureDir, rule.path);
+          const body = existsSync(target) ? await readFile(target, 'utf8') : '';
+          const checker = path.resolve(import.meta.dirname, '..', '..', 'kelin-plan', 'scripts', 'check-plan.mjs');
+          const { validatePlanMarkdown } = await import(pathToFileURL(checker).href);
+          const res = validatePlanMarkdown(body, rule.level || 'standard');
+          ok = res.ok;
+          note = res.ok ? `planHash=${res.planHash.slice(0, 12)}` : res.problems.join('; ');
           break;
         }
         default:

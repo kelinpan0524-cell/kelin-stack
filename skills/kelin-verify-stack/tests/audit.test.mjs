@@ -93,3 +93,54 @@ test('decision-check accepts pointer evidence and rejects prose or invalid field
   ].join('\n'));
   assert.equal(run(decisionCheck, startWithDecision).status, 0);
 });
+
+test('audit-check handles fences, header schema and escaped pipes; decision-check validates ts and URL hosts', async () => {
+  const fenced = await write('audit-fenced.md', [
+    '```markdown',
+    '## 覆盖声明',
+    '| 面 | 状态 | 范围 |',
+    '| --- | --- | --- |',
+    '| 正确性 | 已审 | src/fake.ts |',
+    '```',
+  ].join('\n'));
+  assert.equal(run(auditCheck, fenced).status, 1);
+
+  const wrongHeader = await write('audit-header.md', [
+    '## 覆盖声明',
+    '| 模块 | 负责人 | 备注 |',
+    '| --- | --- | --- |',
+    '| core | 已审 | note |',
+  ].join('\n'));
+  const wrongRes = run(auditCheck, wrongHeader);
+  assert.equal(wrongRes.status, 1);
+  assert.match(wrongRes.stdout, /状态\/status/);
+
+  const noSep = await write('audit-nosep.md', [
+    '## 覆盖声明',
+    '| 面 | 状态 | 范围 |',
+    '| core | 已审 | note |',
+  ].join('\n'));
+  assert.equal(run(auditCheck, noSep).status, 1);
+
+  const escapedPipe = await write('audit-escaped.md', [
+    '## 覆盖声明',
+    '| 面 | 状态 | 范围',
+    '| --- | --- | ---',
+    '| 安全 | 已审 | a \\| b',
+  ].join('\n'));
+  assert.equal(run(auditCheck, escapedPipe).status, 0);
+
+  const badTs = await write('decisions-bad-ts.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    'not-a-timestamp\t设计\t选 A\t理由\tREADME.md:10\t待验证',
+  ].join('\n'));
+  const badTsRes = run(decisionCheck, badTs);
+  assert.equal(badTsRes.status, 1);
+  assert.equal(JSON.parse(badTsRes.stdout).substantiveRows, 0);
+
+  const bareUrl = await write('decisions-bare-url.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-11-11T00:05:00Z\t设计\t选 A\t理由\thttps://\t待验证',
+  ].join('\n'));
+  assert.equal(run(decisionCheck, bareUrl).status, 1);
+});

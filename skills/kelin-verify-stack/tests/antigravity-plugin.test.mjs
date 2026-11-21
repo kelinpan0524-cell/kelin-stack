@@ -170,6 +170,16 @@ test('install.sh installs clean Antigravity plugin, guards unsafe targets, handl
     assert.equal(subsetUninstall.status, 0, subsetUninstall.stdout + subsetUninstall.stderr);
     assert.equal(existsSync(linkPath), false);
     assert.equal(existsSync(path.join(repo, 'skills', 'kelin-mode', 'SKILL.md')), true);
+
+    // Copied --subset kelin-review and kelin-release/kelin-mode resolves transitive runtime deps cleanly
+    const copySub = spawnSync('bash', [installer, '--host', 'codex', '--scope', 'project', '--path', fakeHome, '--subset', 'kelin-review,kelin-mode'], { encoding: 'utf8', env });
+    assert.equal(copySub.status, 0, copySub.stdout + copySub.stderr);
+    const copiedSkillsDir = path.join(fakeHome, '.agents', 'skills');
+    assert.equal(spawnSync(process.execPath, [path.join(copiedSkillsDir, 'kelin-review', 'scripts', 'gate-scan.mjs'), '--help'], { encoding: 'utf8' }).status, 2);
+    assert.equal(spawnSync(process.execPath, [path.join(copiedSkillsDir, 'kelin-review', 'scripts', 'review-check.mjs'), '--help'], { encoding: 'utf8' }).status, 2);
+    const routedCopy = spawnSync(process.execPath, [path.join(copiedSkillsDir, 'kelin-mode', 'scripts', 'mode.mjs'), 'route', '--task', '修 bug', '--root', fakeHome], { encoding: 'utf8' });
+    assert.equal(routedCopy.status, 0, routedCopy.stderr);
+    assert.equal(JSON.parse(routedCopy.stdout).mode, 'fix');
   } finally {
     await rm(fakeHome, { recursive: true, force: true });
   }

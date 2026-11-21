@@ -4,9 +4,25 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const stripFenced = (raw) => {
+  const out = [];
+  let fence = '';
+  for (const line of String(raw).split(/\r?\n/)) {
+    const trimmed = line.trim();
+    const match = /^(`{3,}|~{3,})/.exec(trimmed);
+    if (match) {
+      if (!fence) fence = match[1][0];
+      else if (fence === match[1][0] && trimmed.length >= 3) fence = '';
+      continue;
+    }
+    if (!fence) out.push(line);
+  }
+  return out;
+};
+
 export function validatePlanMarkdown(raw, level = 'standard') {
   const text = String(raw);
-  const lines = text.split(/\r?\n/);
+  const lines = stripFenced(text);
   const problems = [];
   const heading = (name) => lines.findIndex((line) => /^#{1,3}\s+/.test(line) && line.includes(name));
   const sectionLines = (from) => {
@@ -15,15 +31,18 @@ export function validatePlanMarkdown(raw, level = 'standard') {
     return lines.slice(from + 1, next < 0 ? undefined : from + 1 + next);
   };
   const nonEmptyBody = (from) => sectionLines(from).filter((line) => line.trim() && !/^\s*<!--.*-->\s*$/.test(line));
-  const boxed = (from) => sectionLines(from).filter((line) => /^\s*- \[[ x]\] /.test(line));
+  const boxed = (from) => sectionLines(from).filter((line) => /^\s*- \[[ xX]\]/.test(line));
+  const boxText = (line) => line.replace(/^\s*- \[[ xX]\]\s*/, '').trim();
 
   const goalIdx = heading('目标');
   if (goalIdx < 0) problems.push('missing section: 目标');
   else if (!nonEmptyBody(goalIdx).length) problems.push('empty section: 目标');
 
   const accIdx = heading('验收标准');
-  const acceptance = accIdx >= 0 ? boxed(accIdx) : [];
-  if (!acceptance.length) problems.push('验收标准 has no checkbox');
+  const acceptanceRaw = accIdx >= 0 ? boxed(accIdx) : [];
+  const acceptance = acceptanceRaw.filter((line) => boxText(line).length > 0);
+  if (!acceptanceRaw.length) problems.push('验收标准 has no checkbox');
+  else if (acceptance.length < acceptanceRaw.length) problems.push('验收标准 has empty checkbox');
 
   let taskItems = 0;
   if (level === 'light') {
@@ -49,9 +68,12 @@ export function validatePlanMarkdown(raw, level = 'standard') {
       problems.push('任务拆解 has no checkbox');
     } else {
       tasks.forEach((line, index) => {
+        if (!boxText(line)) {
+          problems.push(`task ${index + 1} is empty`);
+          return;
+        }
         const hasNamedVerify = /(?:验证|验收|verify)\s*[:：]\s*\S+/i.test(line);
-        const hasCmdTick = /`\s*[^\s`][^`]*`/.test(line);
-        if (!hasNamedVerify && !hasCmdTick) {
+        if (!hasNamedVerify) {
           problems.push(`task ${index + 1} has no verification method`);
         }
       });

@@ -164,4 +164,16 @@ test('SessionStart recognizes audit phase, injects companion skills and onboardi
   assert.equal(third.status, 0, third.stderr);
   const thirdCtx = JSON.parse(third.stdout).hookSpecificOutput.additionalContext;
   assert.match(thirdCtx, /未检测到工作流规则块/);
+
+  // Legacy audit phase resolves read-only to audit without writing state.json on disk
+  const legacyDir = await mkdtemp(path.join(tmpdir(), 'kelin-session-legacy-audit-'));
+  const rawLegacyState = JSON.stringify({ mode: 'audit', phase: 'build', history: [] });
+  await mkdir(path.join(legacyDir, '.kelin'), { recursive: true });
+  await writeFile(path.join(legacyDir, '.kelin', 'state.json'), rawLegacyState);
+  const legacyRes = run({ hook_event_name: 'SessionStart' }, { ZCODE_PROJECT_DIR: legacyDir });
+  assert.equal(legacyRes.status, 0, legacyRes.stderr);
+  const legacyCtx = JSON.parse(legacyRes.stdout).hookSpecificOutput.additionalContext;
+  assert.match(legacyCtx, /mode=audit phase=audit/);
+  const { readFileSync } = await import('node:fs');
+  assert.equal(readFileSync(path.join(legacyDir, '.kelin', 'state.json'), 'utf8'), rawLegacyState);
 });

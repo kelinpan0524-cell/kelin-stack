@@ -7,24 +7,36 @@ import { fileURLToPath } from 'node:url';
 export function validatePlanGate(spec, { baseDir = process.cwd(), planFile = '', requireResolved = false } = {}) {
   const problems = [];
   const add = (code, detail) => problems.push({ code, detail });
-  const lenses = Array.isArray(spec?.lenses) ? spec.lenses : [];
-  const decisions = Array.isArray(spec?.decisions) ? spec.decisions : [];
+  if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
+    add('invalid-schema', 'plan-gate must be a JSON object');
+    return { ok: false, lenses: 0, decisions: 0, planHash: null, problems };
+  }
+  const lenses = Array.isArray(spec.lenses) ? spec.lenses : [];
+  const decisions = Array.isArray(spec.decisions) ? spec.decisions : [];
 
-  if (lenses.length < 2) add('missing-lenses', 'at least two review lenses are required');
+  if (!Array.isArray(spec.lenses)) add('missing-lenses', 'lenses must be an array');
+  else if (lenses.length < 2) add('missing-lenses', 'at least two review lenses are required');
+  if (!Array.isArray(spec.decisions)) add('invalid-decisions', 'decisions must be an array');
+
   const names = new Set();
-  for (const lens of lenses) {
-    if (!lens.name) add('lens-name', 'lens without name');
-    if (names.has(lens.name)) add('duplicate-lens', lens.name);
-    names.add(lens.name);
-    if (!['self', 'subagent'].includes(lens.reviewer)) add('lens-reviewer', `${lens.name}: reviewer must be self or subagent`);
-    if (!Array.isArray(lens.findings)) add('lens-findings', `${lens.name}: findings must be an array`);
+  for (const [idx, lens] of lenses.entries()) {
+    if (!lens || typeof lens !== 'object' || Array.isArray(lens)) {
+      add('invalid-lens', `lenses[${idx}]: must be an object`);
+      continue;
+    }
+    const name = typeof lens.name === 'string' ? lens.name.trim() : '';
+    if (!name) add('lens-name', `lenses[${idx}]: lens without name`);
+    else if (names.has(name)) add('duplicate-lens', name);
+    if (name) names.add(name);
+    if (!['self', 'subagent'].includes(lens.reviewer)) add('lens-reviewer', `${name || `lenses[${idx}]`}: reviewer must be self or subagent`);
+    if (!Array.isArray(lens.findings)) add('lens-findings', `${name || `lenses[${idx}]`}: findings must be an array`);
     if (requireResolved) {
       const hasSummary = typeof lens.summary === 'string' && lens.summary.trim().length > 0;
       if (!hasSummary) {
-        add('empty-lens-review', `${lens.name}: provide non-empty summary`);
+        add('empty-lens-review', `${name || `lenses[${idx}]`}: provide non-empty summary`);
       }
       if (lens.verdict !== 'approved') {
-        add('lens-not-approved', `${lens.name}: verdict must be approved (got ${lens.verdict || 'missing'})`);
+        add('lens-not-approved', `${name || `lenses[${idx}]`}: verdict must be approved (got ${lens.verdict || 'missing'})`);
       }
     }
   }
@@ -33,13 +45,18 @@ export function validatePlanGate(spec, { baseDir = process.cwd(), planFile = '',
   }
 
   const decisionIds = new Set();
-  for (const decision of decisions) {
-    const id = decision.id || '(missing id)';
-    if (!decision.id) add('decision-id', 'decision without id');
-    else if (decisionIds.has(decision.id)) add('duplicate-decision-id', id);
-    if (decision.id) decisionIds.add(decision.id);
-    if (!decision.question) add('decision-question', `${id}: missing question`);
-    if (!decision.recommendation) add('decision-recommendation', `${id}: missing recommendation`);
+  for (const [idx, decision] of decisions.entries()) {
+    if (!decision || typeof decision !== 'object' || Array.isArray(decision)) {
+      add('invalid-decision', `decisions[${idx}]: must be an object`);
+      continue;
+    }
+    const rawId = typeof decision.id === 'string' ? decision.id.trim() : '';
+    const id = rawId || '(missing id)';
+    if (!rawId) add('decision-id', `decisions[${idx}]: decision without id`);
+    else if (decisionIds.has(rawId)) add('duplicate-decision-id', rawId);
+    if (rawId) decisionIds.add(rawId);
+    if (typeof decision.question !== 'string' || !decision.question.trim()) add('decision-question', `${id}: missing question`);
+    if (typeof decision.recommendation !== 'string' || !decision.recommendation.trim()) add('decision-recommendation', `${id}: missing recommendation`);
     if (!['pending', 'approved', 'rejected'].includes(decision.status)) add('decision-status', `${id}: bad status`);
     if (decision.status === 'rejected' && (typeof decision.resolution !== 'string' || !decision.resolution.trim())) {
       add('missing-resolution', `${id}: rejected decision requires resolution`);

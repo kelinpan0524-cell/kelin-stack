@@ -30,6 +30,9 @@ const validateAuditReport = await loadOptional('kelin-audit/scripts/audit-check.
 const validatePlanMarkdown = await loadOptional('kelin-plan/scripts/check-plan.mjs', 'validatePlanMarkdown');
 const validatePlanGate = await loadOptional('kelin-plan/scripts/plan-gate.mjs', 'validatePlanGate');
 const computeWorktreeFingerprint = await loadOptional('kelin-review/scripts/fingerprint.mjs', 'computeWorktreeFingerprint');
+const hasUnresolvedHighSeverity = await loadOptional('kelin-review/scripts/review-check.mjs', 'hasUnresolvedHighSeverity');
+
+const isGitRepo = (projectRoot) => spawnSync('git', ['-C', projectRoot, 'rev-parse', '--git-dir'], { encoding: 'utf8' }).status === 0;
 
 export const PHASE_TABLE = {
   intake: {
@@ -124,6 +127,13 @@ export function phaseMeta(phase, currentMode = 'feature') {
   };
 }
 
+export function resolvePhase(currentMode, currentPhase) {
+  if (currentMode === 'audit' && !PHASES_BY_MODE.audit.includes(currentPhase)) {
+    return currentPhase === 'ship' ? 'reflect' : 'audit';
+  }
+  return currentPhase;
+}
+
 const parseJsonSafe = (raw) => {
   try {
     return { ok: true, value: JSON.parse(raw), error: '' };
@@ -132,7 +142,7 @@ const parseJsonSafe = (raw) => {
   }
 };
 
-const quoteArg = (val) => (/^[A-Za-z0-9_./:-]+$/.test(val) ? val : JSON.stringify(val));
+const quoteArg = (val) => (/^[A-Za-z0-9_./:-]+$/.test(String(val)) ? String(val) : `'${String(val).replace(/'/g, `'\\''`)}'`);
 
 const isWithinDir = (parentReal, childReal) => {
   const rel = path.relative(parentReal, childReal);
@@ -160,7 +170,39 @@ const assertSafeWriteTarget = (baseDir, targetPath) => {
   }
 };
 
-const modeCmd = (subArgs) => `node ${quoteArg(path.join(SKILLS_DIR, 'kelin-mode', 'scripts', 'mode.mjs'))} ${subArgs.join(' ')}`;
+const modeCmd = (subArgs) => `node ${quoteArg(path.join(SKILLS_DIR, 'kelin-mode', 'scripts', 'mode.mjs'))} ${subArgs.map(quoteArg).join(' ')}`;
+
+const detectCrossModule = (dir, currentMode) => {
+  if (currentMode === 'legacy') return true;
+  const mapFile = path.join(dir, 'feature-map.json');
+  if (existsSync(mapFile)) {
+    const parsed = parseJsonSafe(readFileSync(mapFile, 'utf8'));
+    if (parsed.ok && parsed.value && typeof parsed.value === 'object') {
+      const owners = Array.isArray(parsed.value.owners) ? parsed.value.owners : [];
+      const features = new Set(owners.map((o) => o?.feature).filter(Boolean));
+      const roots = Array.isArray(parsed.value.roots) ? parsed.value.roots.filter(Boolean) : [];
+      if (parsed.value.crossModule === true || features.size >= 2 || roots.length >= 2) return true;
+    }
+  }
+  const scopeFile = path.join(dir, 'scope.md');
+  if (existsSync(scopeFile)) {
+    const body = readFileSync(scopeFile, 'utf8');
+    const explicitCross = /(?:跨模块|cross[- ]?module)\s*[:：=]?\s*(?:是|yes|true|\brequired\b)/i.test(body)
+      && !/(?:跨模块|cross[- ]?module)\s*[:：=]?\s*(?:否|no|false|不需要|非)/i.test(body);
+    if (explicitCross) return true;
+    const modsMatch = /(?:涉及模块|影响模块|modules?)\s*[:：]\s*([^\n]+)/i.exec(body);
+    if (modsMatch) {
+      const items = modsMatch[1].split(/[,，、;；]+/).map((s) => s.trim()).filter(Boolean);
+      if (items.length >= 2) return true;
+    }
+    const dirHits = new Set();
+    for (const match of body.matchAll(/\b(?:src|skills|packages|apps|services|modules|lib)\/([A-Za-z0-9._-]+)\//g)) {
+      dirHits.add(match[1]);
+    }
+    if (dirHits.size >= 2) return true;
+  }
+  return false;
+};
 
 const findVerifySkillsInRoot = (projectRoot) => {
   const found = [];
@@ -193,9 +235,12 @@ export function routeTask(task, projectRoot = process.cwd()) {
   if (existsSync(statePath)) {
     const parsedState = parseJsonSafe(readFileSync(statePath, 'utf8'));
     const existing = parsedState.ok ? parsedState.value : null;
-    if (existing && typeof existing === 'object' && MODES.includes(existing.mode) && existing.phase && existing.phase !== 'done' && PHASE_TABLE[existing.phase]) {
-      const meta = phaseMeta(existing.phase, existing.mode);
-      resume = { mode: existing.mode, phase: existing.phase, activeSkills: meta.activeSkills, humanSummary: meta.humanSummary };
+    if (existing && typeof existing === 'object' && MODES.includes(existing.mode) && existing.phase) {
+      const resolvedPhase = resolvePhase(existing.mode, existing.phase);
+      if (resolvedPhase !== 'done' && PHASE_TABLE[resolvedPhase]) {
+        const meta = phaseMeta(resolvedPhase, existing.mode);
+        resume = { mode: existing.mode, phase: resolvedPhase, activeSkills: meta.activeSkills, humanSummary: meta.humanSummary };
+      }
     }
   }
 
@@ -227,7 +272,7 @@ export function routeTask(task, projectRoot = process.cwd()) {
   }
 
   if (mode === 'setup') {
-    const setupArgs = ['setup', '--root', quoteArg(root)];
+    const setupArgs = ['setup', '--root', root];
     return {
       ok: true,
       mode: 'setup',
@@ -240,6 +285,7 @@ export function routeTask(task, projectRoot = process.cwd()) {
       verifySkills,
       resume,
       reason,
+      nextArgs: setupArgs,
       nextCommand: modeCmd(setupArgs),
     };
   }
@@ -260,11 +306,9 @@ export function routeTask(task, projectRoot = process.cwd()) {
   );
   const companionSkills = needsGrill ? ['kelin-grill', ...[...companions].filter((s) => s !== 'kelin-grill')] : [...companions];
 
-  const nextCommand = resume
-    ? modeCmd(['status', '--root', quoteArg(root)])
-    : needsSetup
-      ? `${modeCmd(['setup', '--root', quoteArg(root)])} && ${modeCmd(['init', '--mode', mode, '--root', quoteArg(root)])}`
-      : modeCmd(['init', '--mode', mode, '--root', quoteArg(root)]);
+  const nextArgs = resume ? ['status', '--root', root] : ['init', '--mode', mode, '--root', root];
+  const setupArgs = needsSetup && !resume ? ['setup', '--root', root] : null;
+  const nextCommand = setupArgs ? `${modeCmd(setupArgs)} && ${modeCmd(nextArgs)}` : modeCmd(nextArgs);
 
   return {
     ok: true,
@@ -278,6 +322,8 @@ export function routeTask(task, projectRoot = process.cwd()) {
     verifySkills,
     resume,
     reason,
+    nextArgs,
+    ...(setupArgs ? { setupArgs } : {}),
     nextCommand,
   };
 }
@@ -319,7 +365,7 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
     actions.push({ step: 'ensure-workflow', file: 'AGENTS.md', action: agentsExists ? 'would-append' : 'would-create' });
   }
 
-  const isGit = spawnSync('git', ['-C', dirRoot, 'rev-parse', '--git-dir'], { encoding: 'utf8' }).status === 0;
+  const isGit = isGitRepo(dirRoot);
   const gitignoreFile = path.join(dirRoot, '.gitignore');
   try {
     assertSafeWriteTarget(dirRoot, gitignoreFile);
@@ -329,21 +375,27 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   const giText = existsSync(gitignoreFile) ? readFileSync(gitignoreFile, 'utf8') : '';
   const runtimeIgnored = isGit
     ? spawnSync('git', ['-C', dirRoot, 'check-ignore', '-q', '.kelin/state.json'], { encoding: 'utf8' }).status === 0
-    : /^\s*\.kelin\/(?:\*)?\s*$/m.test(giText);
+    : /^\s*\/?\.kelin(?:\/\*?)?\s*$/m.test(giText);
   const ciUnignored = isGit
     ? spawnSync('git', ['-C', dirRoot, 'check-ignore', '-q', '.kelin/ci/agents-check.mjs'], { encoding: 'utf8' }).status !== 0
-    : (!/^\s*\.kelin\/\s*$/m.test(giText) || /^\s*!\.kelin\/ci\/\s*$/m.test(giText));
+    : (!/^\s*\/?\.kelin\/?\s*$/m.test(giText) || /^\s*!\/?\.kelin\/ci\/\s*$/m.test(giText));
   const giReady = runtimeIgnored && ciUnignored;
   if (giReady) {
     pushCheck('gitignore', 'ready', '.gitignore 已忽略 .kelin/*（保留 !.kelin/ci/ 可追踪）');
   } else if (apply) {
-    let nextGi = giText.replace(/^\s*\.kelin\/\s*$/gm, '.kelin/*');
+    let nextGi = giText.replace(/^\s*\/?\.kelin\/?\s*$/gm, '.kelin/*');
     if (nextGi && !nextGi.endsWith('\n')) nextGi += '\n';
-    if (!/^\s*\.kelin\/\*\s*$/m.test(nextGi)) nextGi += '.kelin/*\n';
-    if (!/^\s*!\.kelin\/ci\/\s*$/m.test(nextGi)) nextGi += '!.kelin/ci/\n';
+    if (!/^\s*\/?\.kelin\/\*\s*$/m.test(nextGi)) nextGi += '.kelin/*\n';
+    if (!/^\s*!\/?\.kelin\/ci\/\s*$/m.test(nextGi)) nextGi += '!.kelin/ci/\n';
     writeFileSync(gitignoreFile, nextGi);
-    pushCheck('gitignore', 'applied', '已配置 .gitignore 规则（.kelin/* 且保留 !.kelin/ci/）');
-    actions.push({ step: 'gitignore', file: '.gitignore', action: 'added-kelin' });
+    const verifiedRuntime = !isGit || spawnSync('git', ['-C', dirRoot, 'check-ignore', '-q', '.kelin/state.json'], { encoding: 'utf8' }).status === 0;
+    const verifiedCi = !isGit || spawnSync('git', ['-C', dirRoot, 'check-ignore', '-q', '.kelin/ci/agents-check.mjs'], { encoding: 'utf8' }).status !== 0;
+    if (!verifiedRuntime || !verifiedCi) {
+      pushCheck('gitignore', 'error', '写入 .gitignore 后 git check-ignore 校验仍未放行 .kelin/ci/ 或未忽略 .kelin/state.json');
+    } else {
+      pushCheck('gitignore', 'applied', '已配置 .gitignore 规则（.kelin/* 且保留 !.kelin/ci/）');
+      actions.push({ step: 'gitignore', file: '.gitignore', action: 'added-kelin' });
+    }
   } else {
     pushCheck('gitignore', 'missing', runtimeIgnored ? '.gitignore 阻断了 .kelin/ci/ 追踪，建议改为 .kelin/* + !.kelin/ci/' : '.gitignore 尚未忽略 .kelin/*');
     actions.push({ step: 'gitignore', file: '.gitignore', action: 'would-add-kelin' });
@@ -428,13 +480,14 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   const delegateFile = path.join(homedir(), '.kelin', 'delegate.json');
   pushCheck('delegate', existsSync(delegateFile) ? 'ready' : 'optional', existsSync(delegateFile) ? '已配置 ~/.kelin/delegate.json 审查委托' : '未配置 ~/.kelin/delegate.json（可选）');
 
-  const applyFlags = ['setup', '--root', quoteArg(dirRoot), '--host', targetHost, '--apply'];
+  const applyFlags = ['setup', '--root', dirRoot, '--host', targetHost, '--apply'];
   if (withVerifyApp) applyFlags.push('--with-verify-app');
   if (withPrecommit) applyFlags.push('--with-precommit');
-  const applyCommand = !apply && actions.length ? modeCmd(applyFlags) : null;
+  const applyArgs = !apply && actions.length ? applyFlags : null;
+  const applyCommand = applyArgs ? modeCmd(applyArgs) : null;
   if (applyCommand) nextSteps.push(`确认无误后执行：${applyCommand}`);
   if (!existingVerify.length && !withVerifyApp) nextSteps.push('需要一键生成项目验收手册时可附带 --with-verify-app');
-  const routeSample = modeCmd(['route', '--task', '"你的需求"', '--root', quoteArg(dirRoot)]);
+  const routeSample = modeCmd(['route', '--task', '你的需求', '--root', dirRoot]);
   nextSteps.push(`开始做任务前，直接描述你的目标或运行：${routeSample}`);
 
   const readyCount = checks.filter((c) => c.status === 'ready' || c.status === 'applied').length;
@@ -446,29 +499,32 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
     checks,
     actions,
     applyCommand,
+    applyArgs,
     nextSteps,
     summary: apply ? `接入配置已执行（${readyCount}/${checks.length} 项就绪）` : `预览完成（未改动文件，${actions.length} 项待应用）`,
   };
 }
 
-const normalizeState = (state, stateFile) => {
-  if (state?.mode === 'audit' && !PHASES_BY_MODE.audit.includes(state.phase)) {
+const normalizeState = (state, stateFile, migrate = false) => {
+  const resolved = resolvePhase(state?.mode, state?.phase);
+  if (resolved !== state?.phase) {
     const from = state.phase;
-    const mapped = from === 'ship' ? 'reflect' : 'audit';
-    state.phase = mapped;
-    if (!Array.isArray(state.history)) state.history = [];
-    state.history.push({ phase: mapped, migratedFrom: from, at: new Date().toISOString() });
-    writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    state.phase = resolved;
+    if (migrate) {
+      if (!Array.isArray(state.history)) state.history = [];
+      state.history.push({ phase: resolved, migratedFrom: from, at: new Date().toISOString() });
+      writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    }
   }
   return state;
 };
 
-const loadState = (root, stateFile) => {
+const loadState = (root, stateFile, { migrate = false } = {}) => {
   if (!existsSync(stateFile)) {
     console.error(`No .kelin/state.json under ${root}; run init first`);
     process.exit(2);
   }
-  return normalizeState(JSON.parse(readFileSync(stateFile, 'utf8')), stateFile);
+  return normalizeState(JSON.parse(readFileSync(stateFile, 'utf8')), stateFile, migrate);
 };
 
 const checkAcceptance = (acceptanceFile, verifyFile, missing, root) => {
@@ -522,10 +578,14 @@ const checkAcceptance = (acceptanceFile, verifyFile, missing, root) => {
     missing.push(`acceptance.json (required check not passing: ${failedOrMissing})`);
     return;
   }
-  if (computeWorktreeFingerprint) {
-    const wt = computeWorktreeFingerprint(root);
-    if (wt.isGit && receipt.worktreeFingerprint !== wt.fingerprint) {
-      missing.push('acceptance.json (stale: worktree changed or fingerprint missing)');
+  if (isGitRepo(root)) {
+    if (!computeWorktreeFingerprint) {
+      missing.push('acceptance.json (fingerprint helper unavailable in Git repo)');
+    } else {
+      const wt = computeWorktreeFingerprint(root);
+      if (wt.isGit && receipt.worktreeFingerprint !== wt.fingerprint) {
+        missing.push('acceptance.json (stale: worktree changed or fingerprint missing)');
+      }
     }
   }
 };
@@ -538,9 +598,24 @@ const inspect = (root, dir, state) => {
 
   if (state.phase === 'map' && !missing.length) {
     if (state.mode === 'legacy' || state.mode === 'audit') {
-      const parsedMap = parseJsonSafe(readFileSync(path.join(dir, 'feature-map.json'), 'utf8'));
+      const mapPath = path.join(dir, 'feature-map.json');
+      const parsedMap = parseJsonSafe(readFileSync(mapPath, 'utf8'));
       if (!parsedMap.ok || !parsedMap.value || typeof parsedMap.value !== 'object' || Array.isArray(parsedMap.value)) {
         missing.push('feature-map.json (invalid JSON object)');
+      } else {
+        const mapCheckScript = path.join(SKILLS_DIR, 'kelin-map', 'scripts', 'map-check.mjs');
+        if (!existsSync(mapCheckScript)) {
+          missing.push('feature-map.json (kelin-map validator unavailable)');
+        } else {
+          const mapRes = spawnSync(process.execPath, [mapCheckScript, mapPath, '--root', root], { encoding: 'utf8' });
+          if (mapRes.status !== 0) {
+            const parsedRes = parseJsonSafe(mapRes.stdout);
+            const detail = parsedRes.ok && Array.isArray(parsedRes.value?.problems)
+              ? parsedRes.value.problems.slice(0, 3).join('; ')
+              : (mapRes.stderr || mapRes.stdout).trim().slice(0, 160);
+            missing.push(`feature-map.json (${detail || 'map-check failed'})`);
+          }
+        }
       }
     } else if (!readFileSync(path.join(dir, 'scope.md'), 'utf8').trim()) {
       missing.push('scope.md (empty)');
@@ -568,7 +643,10 @@ const inspect = (root, dir, state) => {
       if (!checkedPlan.ok) missing.push(`plan.md (${checkedPlan.problems.join('; ')})`);
     }
     const gateFile = path.join(dir, 'plan-gate.json');
-    if (existsSync(gateFile)) {
+    const needsPlanGate = Boolean(state.requiresPlanGate) || detectCrossModule(dir, state.mode);
+    if (needsPlanGate && !existsSync(gateFile)) {
+      missing.push('plan-gate.json (required for cross-module or legacy plan)');
+    } else if (existsSync(gateFile)) {
       if (!validatePlanGate) {
         missing.push('plan-gate.json (kelin-plan gate validator unavailable)');
       } else {
@@ -593,19 +671,34 @@ const inspect = (root, dir, state) => {
     checkAcceptance(acceptanceFile, verifyFile, missing, root);
   }
   if (state.phase === 'review' && !missing.length) {
-    const reviewBody = readFileSync(path.join(dir, 'review.md'), 'utf8').trim();
+    const reviewPath = path.join(dir, 'review.md');
+    const reviewRaw = readFileSync(reviewPath, 'utf8');
+    const reviewBody = reviewRaw.trim();
     if (!reviewBody || !/(P0|P1|P2|P3|结论|无问题|通过|none)/i.test(reviewBody)) {
       missing.push('review.md (must summarize findings or explicit clean verdict)');
-    } else if (computeWorktreeFingerprint) {
-      const wt = computeWorktreeFingerprint(root);
-      if (wt.isGit) {
-        const stampFile = path.join(dir, 'review.json');
-        if (!existsSync(stampFile)) {
-          missing.push('review.json (missing: run review-check.mjs --write)');
-        } else {
-          const parsedStamp = parseJsonSafe(readFileSync(stampFile, 'utf8'));
-          if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
-            missing.push('review.json (stale: rerun review-check.mjs --write)');
+    } else if (!hasUnresolvedHighSeverity) {
+      missing.push('review.md (kelin-review validator unavailable)');
+    } else if (hasUnresolvedHighSeverity(reviewRaw)) {
+      missing.push('review.md (unresolved P0/P1 findings must be resolved before leaving review)');
+    } else if (isGitRepo(root)) {
+      if (!computeWorktreeFingerprint) {
+        missing.push('review.json (fingerprint helper unavailable in Git repo)');
+      } else {
+        const wt = computeWorktreeFingerprint(root);
+        if (wt.isGit) {
+          const stampFile = path.join(dir, 'review.json');
+          if (!existsSync(stampFile)) {
+            missing.push('review.json (missing: run review-check.mjs --write)');
+          } else {
+            const parsedStamp = parseJsonSafe(readFileSync(stampFile, 'utf8'));
+            const expectedHash = createHash('sha256').update(reviewRaw).digest('hex');
+            if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
+              missing.push('review.json (stale: rerun review-check.mjs --write)');
+            } else if (parsedStamp.value?.verdict === 'blocked') {
+              missing.push('review.json (verdict is blocked: resolve P0/P1 and rerun review-check.mjs --write)');
+            } else if (parsedStamp.value?.reportHash !== expectedHash) {
+              missing.push('review.json (stale: review.md changed since review-check.mjs --write)');
+            }
           }
         }
       }
@@ -625,13 +718,23 @@ const inspect = (root, dir, state) => {
     const shipBody = readFileSync(path.join(dir, 'ship.md'), 'utf8').trim();
     if (!shipBody) {
       missing.push('ship.md (empty)');
-    } else if (computeWorktreeFingerprint && state.mode !== 'light') {
-      const wt = computeWorktreeFingerprint(root);
-      if (wt.isGit) {
-        const stampFile = path.join(dir, 'review.json');
-        const parsedStamp = existsSync(stampFile) ? parseJsonSafe(readFileSync(stampFile, 'utf8')) : { ok: false };
-        if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
-          missing.push('review.json (stale before ship)');
+    } else if (state.mode !== 'light' && isGitRepo(root)) {
+      if (!computeWorktreeFingerprint) {
+        missing.push('review.json (fingerprint helper unavailable in Git repo)');
+      } else {
+        const wt = computeWorktreeFingerprint(root);
+        if (wt.isGit) {
+          const stampFile = path.join(dir, 'review.json');
+          const parsedStamp = existsSync(stampFile) ? parseJsonSafe(readFileSync(stampFile, 'utf8')) : { ok: false };
+          const reviewPath = path.join(dir, 'review.md');
+          const expectedHash = existsSync(reviewPath) ? createHash('sha256').update(readFileSync(reviewPath, 'utf8')).digest('hex') : null;
+          if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
+            missing.push('review.json (stale before ship)');
+          } else if (parsedStamp.value?.verdict === 'blocked') {
+            missing.push('review.json (verdict is blocked before ship)');
+          } else if (expectedHash && parsedStamp.value?.reportHash !== expectedHash) {
+            missing.push('review.json (stale: review.md changed before ship)');
+          }
         }
       }
     }
@@ -688,29 +791,64 @@ function main(argv = process.argv.slice(2)) {
       console.error(`--mode must be one of ${MODES.join(', ')}`);
       process.exit(2);
     }
+    try {
+      assertSafeWriteTarget(root, dir);
+      assertSafeWriteTarget(root, stateFile);
+    } catch (error) {
+      console.error(error.message);
+      process.exit(1);
+    }
+
     let archived = '';
+    let archivePlan = null;
     if (existsSync(stateFile)) {
       const parsedExisting = parseJsonSafe(readFileSync(stateFile, 'utf8'));
       const existing = parsedExisting.ok ? parsedExisting.value : null;
       if (existing && existing.phase === 'done') {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const archiveDir = path.join(dir, 'history', `${stamp}-${existing.mode || 'run'}`);
-        mkdirSync(archiveDir, { recursive: true });
-        writeFileSync(path.join(archiveDir, 'state.json'), `${JSON.stringify(existing, null, 2)}\n`);
-        for (const name of RUN_ARTIFACTS) {
-          const src = path.join(dir, name);
-          if (existsSync(src)) renameSync(src, path.join(archiveDir, name));
+        const historyDir = path.join(dir, 'history');
+        const archiveDir = path.join(historyDir, `${stamp}-${existing.mode || 'run'}`);
+        const archiveState = path.join(archiveDir, 'state.json');
+        try {
+          assertSafeWriteTarget(root, historyDir);
+          assertSafeWriteTarget(root, archiveDir);
+          assertSafeWriteTarget(root, archiveState);
+          for (const name of RUN_ARTIFACTS) {
+            assertSafeWriteTarget(root, path.join(dir, name));
+            assertSafeWriteTarget(root, path.join(archiveDir, name));
+          }
+        } catch (error) {
+          console.error(error.message);
+          process.exit(1);
         }
-        archived = path.relative(root, archiveDir);
+        archivePlan = { existing, archiveDir, archiveState };
       } else {
         console.error(`Already initialized: ${stateFile}`);
         process.exit(1);
       }
     }
+    if (archivePlan) {
+      mkdirSync(archivePlan.archiveDir, { recursive: true });
+      writeFileSync(archivePlan.archiveState, `${JSON.stringify(archivePlan.existing, null, 2)}\n`);
+      for (const name of RUN_ARTIFACTS) {
+        const src = path.join(dir, name);
+        if (existsSync(src)) renameSync(src, path.join(archivePlan.archiveDir, name));
+      }
+      archived = path.relative(root, archivePlan.archiveDir);
+    }
     mkdirSync(dir, { recursive: true });
     assertSafeWriteTarget(root, stateFile);
+    const crossModule = argv.includes('--cross-module') || mode === 'legacy' || /(跨模块|多模块|cross[- ]?module|架构重构)/i.test(taskArg);
     const now = new Date().toISOString();
-    const state = { runId: randomUUID(), mode, ...(taskArg ? { task: taskArg } : {}), phase: 'intake', started: now, history: [{ phase: 'intake', at: now }] };
+    const state = {
+      runId: randomUUID(),
+      mode,
+      ...(crossModule ? { requiresPlanGate: true } : {}),
+      ...(taskArg ? { task: taskArg } : {}),
+      phase: 'intake',
+      started: now,
+      history: [{ phase: 'intake', at: now }],
+    };
     writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
     const phases = phasesFor(mode);
     const meta = phaseMeta('intake', mode);
@@ -731,7 +869,7 @@ function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'status') {
-    const state = loadState(root, stateFile);
+    const state = loadState(root, stateFile, { migrate: false });
     const result = inspect(root, dir, state);
     const phases = phasesFor(state.mode);
     const index = phases.indexOf(state.phase);
@@ -751,7 +889,7 @@ function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'advance') {
-    const state = loadState(root, stateFile);
+    const state = loadState(root, stateFile, { migrate: true });
     const phases = phasesFor(state.mode);
     const index = phases.indexOf(state.phase);
     if (index < 0) {
@@ -767,6 +905,9 @@ function main(argv = process.argv.slice(2)) {
       const curMeta = phaseMeta(state.phase, state.mode);
       console.log(JSON.stringify({ ok: false, phase: state.phase, missing: result.missing, activeSkills: curMeta.activeSkills, humanSummary: curMeta.humanSummary }, null, 2));
       process.exit(1);
+    }
+    if (state.phase === 'map' && detectCrossModule(dir, state.mode)) {
+      state.requiresPlanGate = true;
     }
     state.phase = phases[index + 1];
     state.history.push({ phase: state.phase, at: new Date().toISOString() });
@@ -784,7 +925,7 @@ function main(argv = process.argv.slice(2)) {
   }
 
   if (command === 'rewind') {
-    const state = loadState(root, stateFile);
+    const state = loadState(root, stateFile, { migrate: true });
     const phases = phasesFor(state.mode);
     const index = phases.indexOf(state.phase);
     const reason = option('--reason', '');
@@ -803,7 +944,7 @@ function main(argv = process.argv.slice(2)) {
     process.exit(0);
   }
 
-  console.error('Usage: node mode.mjs setup [--root DIR] [--host antigravity|codex|zcode] [--apply] [--with-verify-app] [--with-precommit] | route --task "<text>" [--root DIR] | init [--mode feature|fix|legacy|audit|light] [--task "<text>"] [--root DIR] | status [--root DIR] | advance [--root DIR] | rewind --reason "<why>" [--root DIR]');
+  console.error('Usage: node mode.mjs setup [--root DIR] [--host antigravity|codex|zcode] [--apply] [--with-verify-app] [--with-precommit] | route --task "<text>" [--root DIR] | init [--mode feature|fix|legacy|audit|light] [--task "<text>"] [--cross-module] [--root DIR] | status [--root DIR] | advance [--root DIR] | rewind --reason "<why>" [--root DIR]');
   process.exit(2);
 }
 

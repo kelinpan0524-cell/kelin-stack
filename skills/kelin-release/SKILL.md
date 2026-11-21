@@ -30,7 +30,7 @@ node "$SKILL_DIR"/scripts/release.mjs --bump patch
 确认后再执行：
 
 ```sh
-node "$SKILL_DIR"/scripts/release.mjs --bump patch --publish --confirm
+node "$SKILL_DIR"/scripts/release.mjs --bump patch --receipt .kelin/acceptance.json --publish --confirm
 ```
 
 `--publish` 会：升 manifest 版本 → 写 CHANGELOG → 提交 → 打 `vX.Y.Z` → `gh release create`。失败时停在原地并报告已完成的步骤。

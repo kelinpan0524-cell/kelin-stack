@@ -62,7 +62,8 @@ const gitHead = (() => {
   const res = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' });
   return res.status === 0 ? res.stdout.trim() : null;
 })();
-const scan = await scanApp(root);
+const scan = await scanApp(root, { limit: Infinity });
+const NEW_STUB_LIMIT = 30;
 const appName = option('--name', scan.name);
 const slug = appName.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'app';
 const outBase = path.resolve(option('--out', path.join(root, '.zcode', 'skills')));
@@ -141,17 +142,12 @@ description: 项目本地验证 skill：启动、体检、驱动、留证、清�
 
 const featureRow = (feature) => `| ${feature.id || featureSlug(feature)} | ${feature.name} | ${feature.howToReach} | ${feature.drive} | ${feature.endState} |`;
 
-const featureIndex = `# ${appName} 功能地图
-
-> 由 \`kelin-verify-app\` 生成。新增功能时跑 \`--write --sync\` 增量补全，已手改文件不会被覆盖。
-
-| ID | 功能 | 用户怎么到达 | 怎么驱动 | 成功的样子 |
-| --- | --- | --- | --- | --- |
-${scan.features.map((feature) => featureRow(feature)).join('\n')}
-`;
-
-const featureFiles = scan.features.map((feature) => {
+const allItems = scan.features.map((feature) => {
   const id = featureSlug(feature);
+  const ep = feature.entrypoint || '';
+  const routePath = feature.kind === 'api' && feature.method && ep.startsWith(`${feature.method} `)
+    ? ep.slice(feature.method.length + 1)
+    : ep;
   const body = `# ${feature.name}
 
 - feature_id: \`${id}\`
@@ -181,7 +177,7 @@ ${feature.endState}
 - 首次运行后把真实选择器、命令和前置数据补到这里。
 - 旅程失败就报失败，不要改弱它来通过。
 `;
-  return { id, name: `${id}.md`, feature, body };
+  return { id, name: `${id}.md`, feature, routePath, body };
 });
 
 const rootReal = realpathSync(root);
@@ -231,28 +227,78 @@ for (const file of existingFeatureFiles) {
   });
 }
 
-const matchedExistingFiles = new Set();
-const added = [];
-const preserved = [];
+const byRoutePath = new Map();
+for (const item of allItems) {
+  if (!item.routePath) continue;
+  if (!byRoutePath.has(item.routePath)) byRoutePath.set(item.routePath, []);
+  byRoutePath.get(item.routePath).push(item);
+}
+
+const claimedExisting = new Set();
 const matchedByPlannedName = new Map();
-for (const item of featureFiles) {
+const ambiguousMap = new Map();
+
+for (const item of allItems) {
   const ep = item.feature.entrypoint || '';
-  const match = existingMeta.find((meta) => ep && meta.entrypoint === ep)
-    || existingMeta.find((meta) => meta.heading === item.feature.name || (ep && meta.heading === `页面或接口 ${ep}`))
-    || existingMeta.find((meta) => meta.file === item.name && (!meta.entrypoint || meta.entrypoint === ep));
-  if (match) {
-    matchedExistingFiles.add(match.file);
-    matchedByPlannedName.set(item.name, match.file);
-    preserved.push(match.file);
-  } else {
-    added.push(item.name);
+  const exact = existingMeta.find((meta) => !claimedExisting.has(meta.file) && (
+    (ep && meta.entrypoint === ep)
+    || meta.heading === item.feature.name
+    || (ep && meta.heading === `页面或接口 ${ep}`)
+    || (meta.file === item.name && (!meta.entrypoint || meta.entrypoint === ep))
+  ));
+  if (exact) {
+    claimedExisting.add(exact.file);
+    matchedByPlannedName.set(item.name, exact.file);
   }
 }
 
+for (const item of allItems) {
+  if (matchedByPlannedName.has(item.name) || !item.routePath) continue;
+  const legacy = existingMeta.find((meta) => (
+    !claimedExisting.has(meta.file)
+    && !meta.entrypoint
+    && meta.heading === `页面或接口 ${item.routePath}`
+  ));
+  if (!legacy) continue;
+  const samePath = byRoutePath.get(item.routePath) || [];
+  if (samePath.length > 1) {
+    if (!ambiguousMap.has(legacy.file)) {
+      ambiguousMap.set(legacy.file, {
+        file: legacy.file,
+        heading: legacy.heading,
+        candidates: samePath.map((entry) => entry.feature.entrypoint || entry.name),
+      });
+    }
+    continue;
+  }
+  claimedExisting.add(legacy.file);
+  matchedByPlannedName.set(item.name, legacy.file);
+}
+
+const preservedItems = allItems.filter((item) => matchedByPlannedName.has(item.name));
+const unmatchedItems = allItems.filter((item) => !matchedByPlannedName.has(item.name));
+const cappedAddedItems = unmatchedItems.slice(0, NEW_STUB_LIMIT);
+const omittedNew = unmatchedItems.length - cappedAddedItems.length;
+const selectedNames = new Set([...preservedItems.map((i) => i.name), ...cappedAddedItems.map((i) => i.name)]);
+const featureFiles = allItems.filter((item) => selectedNames.has(item.name));
+const cappedScan = { ...scan, features: featureFiles.map((item) => item.feature) };
+
+const featureIndex = `# ${appName} 功能地图
+
+> 由 \`kelin-verify-app\` 生成。新增功能时跑 \`--write --sync\` 增量补全，已手改文件不会被覆盖。
+
+| ID | 功能 | 用户怎么到达 | 怎么驱动 | 成功的样子 |
+| --- | --- | --- | --- | --- |
+${featureFiles.map((item) => featureRow(item.feature)).join('\n')}
+`;
+
+const ambiguousLegacy = [...ambiguousMap.values()];
 const diff = {
-  added,
-  preserved,
-  orphaned: existingFeatureFiles.filter((name) => !matchedExistingFiles.has(name)),
+  added: cappedAddedItems.map((item) => item.name),
+  preserved: preservedItems.map((item) => matchedByPlannedName.get(item.name)),
+  orphaned: existingFeatureFiles.filter((name) => !claimedExisting.has(name) && !ambiguousMap.has(name)),
+  ...(ambiguousLegacy.length ? { ambiguousLegacy } : {}),
+  ...(omittedNew > 0 ? { omittedNew } : {}),
 };
 
 const files = [
@@ -267,7 +313,7 @@ if (!write) {
     preview: true,
     sync,
     skillDir,
-    scan,
+    scan: cappedScan,
     diff,
     files: files.map((entry) => ({ path: path.relative(root, entry.path), bytes: Buffer.byteLength(entry.body) })),
   }, null, 2));
@@ -289,6 +335,24 @@ if (conflicts.length && !force && !sync) {
   process.exit(1);
 }
 
+const spliceRowsIntoTable = (doc, missingRows) => {
+  const lines = doc.split(/\r?\n/);
+  let tableSepIdx = -1;
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    if (/^\s*\|\s*(?:ID|功能)\s*\|/.test(lines[i]) && /^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[i + 1])) {
+      tableSepIdx = i + 1;
+      break;
+    }
+  }
+  if (tableSepIdx < 0) return `${doc.trimEnd()}\n${missingRows.join('\n')}\n`;
+  let insertAt = tableSepIdx;
+  while (insertAt + 1 < lines.length && /^\s*\|/.test(lines[insertAt + 1])) {
+    insertAt += 1;
+  }
+  const updated = [...lines.slice(0, insertAt + 1), ...missingRows, ...lines.slice(insertAt + 1)];
+  return `${updated.join('\n').replace(/\n+$/, '')}\n`;
+};
+
 if (sync && !force) {
   const written = [];
   const preservedOut = [];
@@ -303,8 +367,7 @@ if (sync && !force) {
           ? featureRow(item.feature)
           : `| ${item.feature.name} | ${item.feature.howToReach} | ${item.feature.drive} | ${item.feature.endState} |`));
       if (missingRows.length) {
-        const next = `${current.trimEnd()}\n${missingRows.join('\n')}\n`;
-        await writeFile(file.path, next);
+        await writeFile(file.path, spliceRowsIntoTable(current, missingRows));
         written.push(path.relative(root, file.path));
       } else {
         preservedOut.push(path.relative(root, file.path));

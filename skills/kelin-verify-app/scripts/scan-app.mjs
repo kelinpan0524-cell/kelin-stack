@@ -116,7 +116,9 @@ const routesFromSource = async (root, files) => {
 
 export const scanApp = async (root, options = {}) => {
   const dir = path.resolve(root);
-  const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : 30;
+  const limit = options.limit === Infinity
+    ? Infinity
+    : (Number.isInteger(options.limit) && options.limit > 0 ? options.limit : 30);
   const files = await walk(dir);
   const pkg = await readJson(path.join(dir, 'package.json'));
   const scripts = pkg?.scripts || {};

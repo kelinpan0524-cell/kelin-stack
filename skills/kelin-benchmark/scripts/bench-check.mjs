@@ -76,7 +76,9 @@ if (spec.samples !== undefined) {
         problems.push(`range.${side} disagrees with samples [${min}, ${max}]`);
       }
     }
-    if (samples.alternating === false && spec.verdict !== 'inconclusive') {
+    if (typeof samples.alternating !== 'boolean') {
+      problems.push('samples.alternating must be a boolean');
+    } else if (samples.alternating === false && spec.verdict !== 'inconclusive') {
       problems.push('non-alternating samples require verdict inconclusive');
     }
   }

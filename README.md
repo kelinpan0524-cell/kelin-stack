@@ -138,7 +138,7 @@ zcode plugins install kelin-stack@kelin-stack-market
 
 ## 安装后怎么用（小白版）
 
-在 Antigravity 或 ZCode **原生插件**安装后，每个新会话会自动注入 kelin-stack 上下文并启用 `PreToolUse` 安全钩子（Antigravity 还自带常驻规则 `rules/AGENTS.md`）；若在 **Codex** 仅走 skills 安装，则无运行时钩子，需配合 `ensure-workflow.mjs` 写入的 `AGENTS.md` 路由块触发（能力边界详见 [docs/support-matrix.md](docs/support-matrix.md)）。不论哪种装法，**不懂流程也只需记住两句话**：
+在 Antigravity 或 ZCode **原生插件**安装后，每个新会话会自动注入 kelin-stack 上下文，并提供可按需开启的 `PreToolUse` 安全钩子（默认 `off` 不拦截，设 `KELIN_SAFETY=strict|relaxed` 或写入 `~/.kelin/safety.mode` 后生效；Antigravity 还自带常驻规则 `rules/AGENTS.md`）；若在 **Codex** 仅走 skills 安装，则无运行时钩子，需配合 `ensure-workflow.mjs` 写入的 `AGENTS.md` 路由块触发（能力边界详见 [docs/support-matrix.md](docs/support-matrix.md)）。不论哪种装法，**不懂流程也只需记住两句话**：
 
 1. **新仓库一键接入**：直接说 **`kelin mode setup`**（或运行 `node skills/kelin-mode/scripts/mode.mjs setup --root .`）。先只读预览缺什么（`AGENTS.md`、`.gitignore`、`kelin-policy.json`、本地验证手册、`pre-commit`、内存预算与安全钩子），确认后再加 `--apply` 自动配置。
 2. **直接交办任务**：直接说 **`用 kelin mode 帮我做 <需求>`**，agent 会先跑 `route` 判断模式（`light`/`feature`/`fix`/`legacy`/`audit`）、自动挂载当前阶段的配套 skill（如产品先走 `kelin-product`、前端加 `kelin-ui`、模糊需求先 `kelin-grill`），并按 `.kelin/state.json` 门禁推进，不再需要记住 40 个 skill 名字。

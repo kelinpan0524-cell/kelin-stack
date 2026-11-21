@@ -3,9 +3,21 @@ import { readFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const file = process.argv[2] || 'feature-map.json';
+const rawArgs = process.argv.slice(2);
+let file = 'feature-map.json';
+let explicitRoot = '';
+for (let i = 0; i < rawArgs.length; i += 1) {
+  if (rawArgs[i] === '--root' && rawArgs[i + 1]) {
+    explicitRoot = rawArgs[i + 1];
+    i += 1;
+  } else if (!rawArgs[i].startsWith('-')) {
+    file = rawArgs[i];
+  }
+}
 const configDir = path.dirname(path.resolve(file));
-let base = configDir;
+let base = explicitRoot
+  ? path.resolve(explicitRoot)
+  : (path.basename(configDir) === '.kelin' ? path.dirname(configDir) : configDir);
 
 const glob = (pattern) => {
   if (!pattern.includes('*')) return (target) => target === pattern;

@@ -409,9 +409,18 @@ async function checkTools(ctx) {
   if (existsSync(kelinGuard)) {
     const dir = path.join(ctx.tempDir, 'guard-repo');
     await mkdir(path.join(dir, 'test'), { recursive: true });
+    await mkdir(path.join(dir, '.github', 'workflows'), { recursive: true });
     await writeFile(path.join(dir, 'test/quote.test.js'), 'export {};\n');
+    await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), 'jobs:\n  test:\n    steps:\n      - run: node --test test/quote.test.js\n');
     const file = path.join(dir, 'guards.json');
-    const entry = { id: 'q0', bug: 'qty 0 divides by zero', rootCause: 'no qty>0 check', guard: { type: 'test', location: 'test/quote.test.js', command: 'node --test test/quote.test.js' }, proof: { command: 'revert then node --test test/quote.test.js', expected: 'fail-on-old' } };
+    const entry = {
+      id: 'q0',
+      bug: 'qty 0 divides by zero',
+      rootCause: 'no qty>0 check',
+      guard: { type: 'test', location: 'test/quote.test.js', command: 'node --test test/quote.test.js' },
+      enforcedIn: ['.github/workflows/ci.yml'],
+      proof: { command: 'revert then node --test test/quote.test.js', expected: 'fail-on-old' },
+    };
     await writeFile(file, JSON.stringify({ guards: [entry] }));
     const accepted = await run(process.execPath, [kelinGuard, file], { timeoutMs: 30_000 });
     await writeFile(file, JSON.stringify({ guards: [{ ...entry, proof: undefined }] }));

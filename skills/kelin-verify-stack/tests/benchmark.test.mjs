@@ -95,4 +95,23 @@ test('rejects workHappened false or unexplained errors with directional verdict,
     samples: { before: [39, 41, 44, 40, 42], after: [32, 35, 33, 33, 34], alternating: true },
   });
   assert.equal(goodSamples.status, 0, JSON.stringify(goodSamples.payload));
+
+  const stringAlternating = await check({
+    ...good,
+    runs: 5,
+    median: { before: 41, after: 33 },
+    range: { before: [39, 44], after: [32, 35] },
+    samples: { before: [39, 41, 44, 40, 42], after: [32, 35, 33, 33, 34], alternating: 'false' },
+  });
+  assert.equal(stringAlternating.status, 1);
+  assert.ok(stringAlternating.payload.problems.some((e) => e.includes('samples.alternating')));
+
+  const missingAlternating = await check({
+    ...good,
+    runs: 5,
+    median: { before: 41, after: 33 },
+    range: { before: [39, 44], after: [32, 35] },
+    samples: { before: [39, 41, 44, 40, 42], after: [32, 35, 33, 33, 34] },
+  });
+  assert.equal(missingAlternating.status, 1);
 });

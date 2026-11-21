@@ -168,3 +168,91 @@ test('release.mjs blocks missing receipt on --publish --confirm, wrong branch an
   assert.equal(plan.gates.receipt.ok, false);
   assert.notEqual(plan.head, head);
 });
+
+test('publish() rejects invalid gitHead & missing Skill transcript call; release.mjs validates acceptance receipts and blocks empty verify-stack receipts', async () => {
+  const { dir, head, git } = await initPluginGitRepo();
+  const runDir = await mkdtemp(path.join(tmpdir(), 'kelin-pub-hardening-'));
+  const tree = await hashTree(dir);
+  const sessionDir = path.join(runDir, 'sessions', 's1');
+  const fixtureDir = path.join(sessionDir, 'fixture');
+  await mkdir(fixtureDir, { recursive: true });
+  await writeFile(path.join(fixtureDir, 'out.md'), 'ok\n');
+  const artifacts = await collectArtifacts(fixtureDir, sessionDir, runDir);
+  await writeFile(path.join(runDir, 'gate.md'), '## gate\nPASS\n');
+  const noSkillTx = '{"response":{"toolCalls":[{"name":"Read","input":{"path":"a"}}]}}\n';
+  await writeFile(path.join(sessionDir, 'rollout.jsonl'), noSkillTx);
+
+  await writeFile(
+    path.join(runDir, 'receipt.json'),
+    JSON.stringify({
+      ok: true,
+      verificationLevel: 'live',
+      sessionsRun: 1,
+      plugin: { name: 'demo', root: dir, gitHead: 'not-a-sha', dirty: false, treeHash: tree.hash, treeHashAfter: tree.hash },
+      features: ['zcode:skill-invocation:kelin-plan'],
+      expectedCases: [{ feature: 'zcode:skill-invocation:kelin-plan', caseId: 's1' }],
+      observations: [{
+        feature: 'zcode:skill-invocation:kelin-plan',
+        case: 's1',
+        kind: 'live',
+        ok: true,
+        transcript: 'sessions/s1/rollout.jsonl',
+        transcriptHash: sha256(noSkillTx),
+        assertions: [{ id: 's', type: 'skill_called', value: 'demo:kelin-plan', ok: true }],
+        artifacts,
+      }],
+    }),
+  );
+
+  // Lacks Skill tool call inside transcript (even with obs.skill omitted!)
+  await assert.rejects(
+    () => publish({ confirm: true, repo: 'o/r', pr: 1, run: runDir, requireLive: true }),
+    /transcript lacks Skill tool call/,
+  );
+
+  // Matching Skill tool call in transcript unblocks live check, then invalid 40-char gitHead blocks publish
+  const withSkillTx = `${JSON.stringify({ response: { toolCalls: [{ name: 'Skill', input: { skill: 'demo:kelin-plan' } }] } })}\n`;
+  await writeFile(path.join(sessionDir, 'rollout.jsonl'), withSkillTx);
+  const rec = JSON.parse(await (await import('node:fs/promises')).readFile(path.join(runDir, 'receipt.json'), 'utf8'));
+  rec.observations[0].transcriptHash = sha256(withSkillTx);
+  await writeFile(path.join(runDir, 'receipt.json'), JSON.stringify(rec));
+  await assert.rejects(
+    () => publish({ confirm: true, repo: 'o/r', pr: 1, run: runDir, requireLive: true }),
+    /bound 40-character plugin\.gitHead/,
+  );
+
+  // release.mjs rejects empty verify-stack receipt (features: [])
+  const emptyVsReceipt = path.join(runDir, 'empty-vs.json');
+  await writeFile(emptyVsReceipt, JSON.stringify({
+    ok: true,
+    tool: 'kelin-verify-stack',
+    plugin: { name: 'demo', version: '0.1.0', gitHead: head, dirty: false, treeHash: tree.hash, treeHashAfter: tree.hash },
+    features: [],
+    observations: [],
+  }));
+  const emptyVsPlan = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', emptyVsReceipt], { encoding: 'utf8' }).stdout);
+  assert.equal(emptyVsPlan.gates.receipt.ok, false);
+  assert.match(emptyVsPlan.gates.receipt.reason, /incomplete receipt evidence/);
+
+  // release.mjs validates real run-acceptance.mjs receipt
+  const runAcc = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify', 'scripts', 'run-acceptance.mjs');
+  await mkdir(path.join(dir, '.kelin'), { recursive: true });
+  await writeFile(path.join(dir, '.gitignore'), '.kelin/\n');
+  git(['add', '.gitignore']);
+  git(['commit', '-qm', 'ignore .kelin']);
+  const specFile = path.join(dir, '.kelin', 'verify.json');
+  await writeFile(specFile, JSON.stringify({ checks: [{ id: 'c1', cmd: 'node -e "process.exit(0)"' }] }));
+  const accOut = execFileSync(process.execPath, [runAcc, specFile, '--json'], { cwd: dir, encoding: 'utf8' });
+  const accFile = path.join(dir, '.kelin', 'acceptance.json');
+  await writeFile(accFile, accOut);
+
+  const validPlan = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', accFile], { encoding: 'utf8' }).stdout);
+  assert.equal(validPlan.gates.receipt.ok, true);
+  assert.equal(validPlan.gates.receipt.kind, 'acceptance');
+
+  const tampered = JSON.parse(accOut);
+  tampered.rows[0].exit = 1;
+  await writeFile(accFile, JSON.stringify(tampered));
+  const badPlan = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', accFile], { encoding: 'utf8' }).stdout);
+  assert.equal(badPlan.gates.receipt.ok, false);
+});
