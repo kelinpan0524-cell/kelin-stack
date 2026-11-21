@@ -134,3 +134,75 @@ test('gate-scan recognizes more CI platforms', async () => {
     assert.ok((scanned.gateFiles ?? []).includes(rel), `should scan ${rel}`);
   }
 });
+
+test('gate-scan catches RH-13 in comments, ignores string literals, and scans prod code + multi-line catch', async () => {
+  const dir = await repo();
+  await writeFile(
+    path.join(dir, 'tests/app.test.mjs'),
+    [
+      'const literal = "// @ts-ignore eslint-disable-next-line";',
+      '// eslint-disable-next-line no-unused-vars',
+      "test('a', () => { assert.equal(1, 1); });",
+    ].join('\n') + '\n',
+  );
+  await writeFile(
+    path.join(dir, 'src/app.mjs'),
+    [
+      'export function run() {',
+      '  // @ts-ignore',
+      '  try {',
+      '    return 1;',
+      '  } catch (err) {',
+      '  }',
+      '}',
+    ].join('\n') + '\n',
+  );
+  const result = run(dir, gateScan);
+  assert.equal(result.status, 1);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.findings.filter((f) => f.tag === 'RH-13').length, 2, JSON.stringify(payload.findings));
+  assert.ok(payload.findings.some((f) => f.tag === 'RH-16' && f.path === 'src/app.mjs'), JSON.stringify(payload.findings));
+
+  await writeFile(path.join(dir, 'tests/app.test.mjs'), 'const literal = "// @ts-ignore";\ntest(\'a\', () => { assert.equal(1, 1); });\n');
+  await writeFile(path.join(dir, 'src/app.mjs'), 'export const a = 2;\n');
+  const clean = run(dir, gateScan);
+  assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+});
+
+test('gate-scan catches whole deleted test/snapshot files, unrelated snapshot changes, and allows tightening timeouts', async () => {
+  const dir = await repo();
+  await mkdir(path.join(dir, 'tests/__snapshots__'), { recursive: true });
+  await writeFile(path.join(dir, 'tests/other.test.mjs'), "test('o', () => { assert.equal(1, 1); });\n");
+  await writeFile(path.join(dir, 'tests/__snapshots__/other.test.mjs.snap'), 'exports[`o`] = `1`;\n');
+  await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', timeout: 30000 }, null, 2));
+  await writeFile(path.join(dir, 'guards.json'), '{"guards":[]}\n');
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-qm', 'add baseline files']);
+  git(dir, ['update-ref', 'refs/remotes/origin/main', 'HEAD']);
+
+  git(dir, ['rm', '-q', 'tests/other.test.mjs']);
+  await writeFile(path.join(dir, 'tests/app.test.mjs'), "test('a', () => { assert.equal(2, 2); });\n");
+  await writeFile(path.join(dir, 'tests/__snapshots__/other.test.mjs.snap'), 'exports[`o`] = `2`;\n');
+  await writeFile(path.join(dir, 'package.json'), JSON.stringify({ name: 'demo', timeout: 5000 }, null, 2));
+  await writeFile(path.join(dir, 'guards.json'), '{"guards":[1]}\n');
+
+  const result = run(dir, gateScan);
+  assert.equal(result.status, 1);
+  const payload = JSON.parse(result.stdout);
+  assert.ok(payload.deletedGateFiles.includes('tests/other.test.mjs'));
+  assert.ok(payload.findings.some((f) => f.tag === 'RH-1' && f.path === 'tests/other.test.mjs'));
+  assert.ok(payload.findings.some((f) => f.tag === 'RH-3' && f.path.includes('other.test.mjs.snap')));
+  assert.equal(payload.findings.some((f) => f.tag === 'RH-15'), false, 'tightening timeout must not trigger RH-15');
+  assert.ok(payload.gateFiles.includes('guards.json'));
+});
+
+test('gate-scan unquotes C-escaped non-ASCII git paths', async () => {
+  const dir = await repo();
+  await writeFile(path.join(dir, 'tests/中文.test.mjs'), "test.skip('zh', () => {});\n");
+  git(dir, ['add', '-A']);
+  const result = run(dir, gateScan, ['--staged']);
+  assert.equal(result.status, 1);
+  const payload = JSON.parse(result.stdout);
+  assert.ok(payload.gateFiles.includes('tests/中文.test.mjs'), JSON.stringify(payload.gateFiles));
+  assert.ok(payload.findings.some((f) => f.tag === 'RH-1' && f.path === 'tests/中文.test.mjs'));
+});

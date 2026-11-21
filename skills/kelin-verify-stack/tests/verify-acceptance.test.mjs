@@ -270,3 +270,42 @@ test('large piped --json output (>65536 bytes) flushes without truncation', asyn
   assert.equal(payload.total, 200);
   assert.equal(payload.rows.length, 200);
 });
+
+test('runs .kelin/verify.json from repo root, emits verdict/hashes, and marks skipped or non-comparable runs INCONCLUSIVE', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-kelindir-'));
+  await writeFile(path.join(dir, 'marker.txt'), 'hello\n');
+  const kelinDir = path.join(dir, '.kelin');
+  const specFile = path.join(kelinDir, 'verify.json');
+  const fs = await import('node:fs/promises');
+  await fs.mkdir(kelinDir, { recursive: true });
+  await writeFile(specFile, JSON.stringify({
+    checks: [{ id: 'read-root', cmd: 'node -e "process.exit(require(\'node:fs\').existsSync(\'marker.txt\') ? 0 : 1)"' }],
+  }));
+
+  const okRes = run([specFile, '--json'], kelinDir);
+  assert.equal(okRes.status, 0, okRes.stderr);
+  const okPayload = JSON.parse(okRes.stdout);
+  assert.equal(okPayload.verdict, 'VERIFIED');
+  assert.equal(okPayload.cwd, dir);
+  assert.match(okPayload.specHash, /^[a-f0-9]{64}$/);
+  assert.deepEqual(okPayload.requiredIds, ['read-root']);
+
+  const sentinel = path.join(dir, 'should-not-run');
+  await writeFile(specFile, JSON.stringify({
+    checks: [
+      { id: 'skip-me', cmd: `node -e 'require("node:fs").writeFileSync(${JSON.stringify(sentinel)}, "1")'`, skipped: true },
+    ],
+  }));
+  const skipRes = run([specFile, '--json'], dir);
+  assert.equal(skipRes.status, 1);
+  assert.equal(existsSync(sentinel), false, 'skipped check must not execute');
+  assert.equal(JSON.parse(skipRes.stdout).verdict, 'INCONCLUSIVE');
+
+  await writeFile(specFile, JSON.stringify({
+    baselineComparable: false,
+    checks: [{ id: 'ok', cmd: 'node -e "process.exit(0)"' }],
+  }));
+  const nonComp = run([specFile, '--json'], dir);
+  assert.equal(nonComp.status, 1);
+  assert.equal(JSON.parse(nonComp.stdout).verdict, 'INCONCLUSIVE');
+});

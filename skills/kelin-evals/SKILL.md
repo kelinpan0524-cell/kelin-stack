@@ -85,14 +85,7 @@ node "$SKILL_DIR"/scripts/drift-check.mjs --root .
 | 提醒性的偏好 | AGENTS.md | 先规划再写、收尾对齐文档 |
 | 只在特定任务用 | skill | 权限设计、批量修改 |
 
-**本插件不加 SessionStart hook**，原因：
-
-- AGENTS.md 已经能在每个仓库里自动带出“跨文件任务先 `/kelin-mode`”，不需要额外注入；
-- hook 每次会话都跑，增加上下文和故障面，失败还可能挡住正常会话；
-- 你的机器内存紧张，少一层进程更稳；
-- 真要强制，用 CI 或 pre-commit，比 hook 更可验证。
-
-**本插件加两个 hook**：
+**本插件的 hooks 分工**（仅 2 个，最小侵入）：
 
 - `SessionStart`：每个会话注入一次激活上下文（版本、当前 mode/phase、本地 verify skill、冻结状态），让用户不需要每次点名 skill；只注入，不改文件，失败不阻塞会话。
 - `PreToolUse`：在执行前拦 `rm -rf /`、强推默认分支这类灾难命令；只匹配明确模式，JSON 解析失败放行。

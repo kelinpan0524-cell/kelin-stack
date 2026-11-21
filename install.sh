@@ -371,6 +371,9 @@ echo "宿主: ${HOST}  范围: ${SCOPE}"
 echo "目标目录: ${DEST}"
 echo "将安装 ${#SELECTED[@]}/${#ALL_DIRS[@]} 个 skill: ${SELECTED[*]}"
 echo "方式: $([[ $LINK -eq 1 ]] && echo symlink || echo copy)"
+if [[ "$HOST" == "codex" ]]; then
+  echo "排除项: hooks/hooks.json（ZCode 专用钩子不写入 Codex 目录）"
+fi
 [[ $DRY -eq 1 ]] && { echo "(dry-run，未写入)"; exit 0; }
 
 mkdir -p "$DEST"

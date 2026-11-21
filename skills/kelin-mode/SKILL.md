@@ -137,7 +137,7 @@ node "$SKILL_DIR"/scripts/policy-check.mjs kelin-policy.json
 
 **design**：`kelin-goal` 写目标契约，`kelin-plan` 拆任务（跨模块先出设计草图：类型签名、模块边界、失败模式、双候选），`kelin-blast-radius` 算影响面。产品类任务（有用户、权限、上传导出、数据量）先跑 `kelin-product`，把用户环境、权限矩阵、上传预览确认、分页和性能预算定下来。feature/legacy 跨模块的计划，写完跑 `kelin-plan` 的计划评审门（产品 + 工程两个镜头，最多 2 个子代理），有 `pending` 决策就停。**停在这里等确认**，除非用户已明确授权连续执行。
 
-**build**：`kelin-tdd` 红-绿-重构。修 bug 时用 `kelin-guard` 选最强且最便宜的防再犯手段，并证明它在旧代码上会失败。每完成一个可验证单元就提交一次，提交信息带 `[ZCode]`。写 `build.md`：改了哪些文件、加了哪些测试和 guard、还剩什么。
+**build**：`kelin-tdd` 红-绿-重构。修 bug 时用 `kelin-guard` 选最强且最便宜的防再犯手段，并证明它在旧代码上会失败。每完成一个可验证单元就提交一次，提交信息带当前宿主前缀（如 `[Antigravity]` / `[Codex]` / `[ZCode]`）。写 `build.md`：改了哪些文件、加了哪些测试和 guard、还剩什么。
 
 **verify**：把验收写成 `verify.json`，用 `run-acceptance.mjs` 跑出 `acceptance.json`。任何一条失败就回 build，不要进 review。
 

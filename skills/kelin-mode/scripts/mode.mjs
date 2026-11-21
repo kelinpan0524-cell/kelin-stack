@@ -1,11 +1,36 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { validateAuditReport } from '../../kelin-audit/scripts/audit-check.mjs';
+import { computeWorktreeFingerprint } from '../../kelin-review/scripts/fingerprint.mjs';
 
-const PHASES = ['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done'];
-const PHASES_BY_MODE = { light: ['intake', 'design', 'build', 'verify', 'ship', 'reflect', 'done'] };
-const MODES = ['feature', 'fix', 'legacy', 'audit', 'light'];
-const phasesFor = (currentMode) => PHASES_BY_MODE[currentMode] || PHASES;
+export const PHASE_TABLE = {
+  intake: { required: () => [] },
+  map: { required: (mode) => (mode === 'legacy' || mode === 'audit' ? ['feature-map.json'] : ['scope.md']) },
+  audit: { required: () => ['audit.md'] },
+  design: { required: () => ['goal.md', 'plan.md'] },
+  build: { required: () => ['build.md'] },
+  verify: { required: () => ['verify.json', 'acceptance.json'] },
+  review: { required: () => ['review.md'] },
+  refine: { required: () => ['refine.md'] },
+  ship: { required: () => ['ship.md'] },
+  reflect: { required: () => ['reflect.md'] },
+  done: { required: () => [] },
+};
+
+const PHASES_BY_MODE = {
+  feature: ['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done'],
+  fix: ['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done'],
+  legacy: ['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done'],
+  audit: ['intake', 'map', 'audit', 'reflect', 'done'],
+  light: ['intake', 'design', 'build', 'verify', 'ship', 'reflect', 'done'],
+};
+
+const MODES = Object.keys(PHASES_BY_MODE);
+const phasesFor = (currentMode) => PHASES_BY_MODE[currentMode] || PHASES_BY_MODE.feature;
+const required = (phase, currentMode) => (PHASE_TABLE[phase] ? PHASE_TABLE[phase].required(currentMode) : []);
+
 const args = process.argv.slice(2);
 const command = args[0];
 const option = (name, fallback = '') => {
@@ -18,22 +43,6 @@ const dir = path.join(root, '.kelin');
 const stateFile = path.join(dir, 'state.json');
 const mode = option('--mode', 'feature');
 
-const required = (phase, currentMode) => {
-  switch (phase) {
-    case 'intake': return [];
-    case 'map': return currentMode === 'legacy' || currentMode === 'audit' ? ['feature-map.json'] : ['scope.md'];
-    case 'design': return ['goal.md', 'plan.md'];
-    case 'build': return ['build.md'];
-    case 'verify': return ['verify.json', 'acceptance.json'];
-    case 'review': return ['review.md'];
-    case 'refine': return ['refine.md'];
-    case 'ship': return ['ship.md'];
-    case 'reflect': return ['reflect.md'];
-    case 'done': return [];
-    default: return [];
-  }
-};
-
 const load = () => {
   if (!existsSync(stateFile)) {
     console.error(`No .kelin/state.json under ${root}; run init first`);
@@ -42,26 +51,84 @@ const load = () => {
   return JSON.parse(readFileSync(stateFile, 'utf8'));
 };
 
-const checkAcceptance = (acceptanceFile, missing) => {
+const checkAcceptance = (acceptanceFile, verifyFile, missing) => {
+  let receipt;
   try {
-    if (JSON.parse(readFileSync(acceptanceFile, 'utf8')).ok !== true) missing.push('acceptance.json (ok must be true)');
+    receipt = JSON.parse(readFileSync(acceptanceFile, 'utf8'));
   } catch {
     missing.push('acceptance.json (unreadable)');
+    return;
+  }
+  if (!receipt || typeof receipt !== 'object' || receipt.ok !== true) {
+    missing.push('acceptance.json (ok must be true)');
+    return;
+  }
+  if ('verdict' in receipt && receipt.verdict !== 'VERIFIED') {
+    missing.push(`acceptance.json (verdict is ${receipt.verdict}, expected VERIFIED)`);
+    return;
+  }
+  if (typeof receipt.specHash === 'string' && existsSync(verifyFile)) {
+    const currentSpecHash = createHash('sha256').update(readFileSync(verifyFile)).digest('hex');
+    if (currentSpecHash !== receipt.specHash) {
+      missing.push('acceptance.json (stale: verify.json changed)');
+      return;
+    }
+  }
+  if (Array.isArray(receipt.requiredIds) && existsSync(verifyFile)) {
+    try {
+      const spec = JSON.parse(readFileSync(verifyFile, 'utf8'));
+      const specIds = Array.isArray(spec.checks) ? spec.checks.map((c) => c?.id).filter(Boolean) : [];
+      const rowMap = new Map(Array.isArray(receipt.rows) ? receipt.rows.map((r) => [r.id, r]) : []);
+      const missingId = specIds.find((id) => !receipt.requiredIds.includes(id));
+      if (missingId) {
+        missing.push(`acceptance.json (missing required check: ${missingId})`);
+        return;
+      }
+      if (rowMap.size > 0) {
+        const failedOrSkipped = specIds.find((id) => {
+          const row = rowMap.get(id);
+          return !row || row.skipped || row.timedOut || row.error || row.exit !== 0;
+        });
+        if (failedOrSkipped) {
+          missing.push(`acceptance.json (required check not passing: ${failedOrSkipped})`);
+          return;
+        }
+      }
+    } catch {
+      missing.push('verify.json (unreadable)');
+      return;
+    }
+  }
+  if (typeof receipt.worktreeFingerprint === 'string') {
+    const wt = computeWorktreeFingerprint(root);
+    if (wt.isGit && wt.fingerprint !== receipt.worktreeFingerprint) {
+      missing.push('acceptance.json (stale: worktree changed)');
+    }
   }
 };
 
 const inspect = (state) => {
   const files = required(state.phase, state.mode).map((file) => ({ file, exists: existsSync(path.join(dir, file)) }));
   const missing = files.filter((entry) => !entry.exists).map((entry) => entry.file);
+  const verifyFile = path.join(dir, 'verify.json');
   const acceptanceFile = path.join(dir, 'acceptance.json');
+
+  if (state.phase === 'audit' && !missing.length) {
+    const auditFile = path.join(dir, 'audit.md');
+    const result = validateAuditReport(readFileSync(auditFile, 'utf8'));
+    if (!result.ok) missing.push(`audit.md (${result.problems.join('; ')})`);
+  }
   if (state.phase === 'verify' && !missing.length) {
-    checkAcceptance(acceptanceFile, missing);
+    checkAcceptance(acceptanceFile, verifyFile, missing);
   }
   if (state.phase === 'refine') {
     const refineFile = path.join(dir, 'refine.md');
     if (!existsSync(acceptanceFile)) missing.push('acceptance.json (missing)');
-    else if (existsSync(refineFile) && statSync(acceptanceFile).mtimeMs < statSync(refineFile).mtimeMs) missing.push('acceptance.json (rerun after refine)');
-    else checkAcceptance(acceptanceFile, missing);
+    else if (existsSync(refineFile) && statSync(acceptanceFile).mtimeMs < statSync(refineFile).mtimeMs) {
+      missing.push('acceptance.json (rerun after refine)');
+    } else {
+      checkAcceptance(acceptanceFile, verifyFile, missing);
+    }
   }
   return { files, missing, ready: missing.length === 0 };
 };

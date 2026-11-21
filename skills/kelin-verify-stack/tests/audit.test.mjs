@@ -69,4 +69,10 @@ test('decision-check accepts pointer evidence and rejects prose or invalid field
   const result = run(decisionCheck, badPhase);
   assert.equal(result.status, 1);
   assert.match(result.stdout, /invalid phase/);
+
+  const startRow = await write('decisions-start.tsv', [
+    'ts\tphase\tdecision\twhy\tevidence\tresult',
+    '2026-11-11T00:00:00Z\tstart\t开启新会话\t接续上次断点\tagent-123\tstart',
+  ].join('\n'));
+  assert.equal(run(decisionCheck, startRow).status, 0);
 });

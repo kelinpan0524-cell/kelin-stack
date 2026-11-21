@@ -66,3 +66,29 @@ test('warns when ranges overlap', async () => {
   assert.equal(result.status, 0, JSON.stringify(result.payload));
   assert.ok(result.payload.warnings.some((entry) => entry.includes('overlap')));
 });
+
+test('rejects workHappened false or unexplained errors with directional verdict, and verifies raw samples', async () => {
+  const noWork = await check({ ...good, workHappened: false });
+  assert.equal(noWork.status, 1);
+  assert.ok(noWork.payload.problems.some((e) => e.includes('workHappened false')));
+
+  const withErrors = await check({ ...good, errors: 2 });
+  assert.equal(withErrors.status, 1);
+  assert.ok(withErrors.payload.problems.some((e) => e.includes('errors > 0')));
+
+  const badMedian = await check({
+    ...good,
+    samples: { before: [40, 40, 41, 42, 44], after: [32, 33, 33, 34, 35], alternating: true },
+  });
+  assert.equal(badMedian.status, 1);
+  assert.ok(badMedian.payload.problems.some((e) => e.includes('disagrees with samples')));
+
+  const goodSamples = await check({
+    ...good,
+    runs: 5,
+    median: { before: 41, after: 33 },
+    range: { before: [39, 44], after: [32, 35] },
+    samples: { before: [39, 41, 44, 40, 42], after: [32, 35, 33, 33, 34], alternating: true },
+  });
+  assert.equal(goodSamples.status, 0, JSON.stringify(goodSamples.payload));
+});

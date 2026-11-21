@@ -6,11 +6,13 @@ import path from 'node:path';
 const args = process.argv.slice(2);
 const noReview = args.includes('--no-review');
 const requireReview = args.includes('--require-review');
-const git = (args) => spawnSync('git', args, { encoding: 'utf8' });
-const must = (args) => {
-  const result = git(args);
+const strictGates = args.includes('--strict-gates');
+const runGateScan = strictGates || args.includes('--gate-scan');
+const git = (argv) => spawnSync('git', argv, { encoding: 'utf8' });
+const must = (argv) => {
+  const result = git(argv);
   if (result.status !== 0) {
-    console.error(`git ${args.join(' ')}: ${(result.stderr || '').trim() || 'failed'}`);
+    console.error(`git ${argv.join(' ')}: ${(result.stderr || '').trim() || 'failed'}`);
     process.exit(2);
   }
   return result.stdout.trim();
@@ -21,6 +23,7 @@ const staged = must(['diff', '--cached', '--name-only']).split('\n').filter(Bool
 const diff = git(['diff', '--cached', '--unified=0']).stdout || '';
 
 const findings = [];
+const warnings = [];
 const add = (code, severity, detail) => findings.push({ code, severity, detail });
 
 if (['main', 'master'].includes(branch)) {
@@ -75,11 +78,32 @@ for (const line of diff.split('\n')) {
   }
 }
 
+if (staged.length > 0 && (runGateScan || true)) {
+  const gateScript = path.resolve(import.meta.dirname, '..', '..', '..', 'skills', 'kelin-review', 'scripts', 'gate-scan.mjs');
+  if (existsSync(gateScript)) {
+    const scan = spawnSync(process.execPath, [gateScript, '--staged'], { cwd: process.cwd(), encoding: 'utf8' });
+    let scanPayload = null;
+    try {
+      scanPayload = JSON.parse(scan.stdout);
+    } catch {
+      scanPayload = null;
+    }
+    if (scanPayload?.findings?.length) {
+      for (const item of scanPayload.findings) {
+        const msg = `${item.tag} ${item.path}:${item.line} ${item.question}`;
+        if (strictGates) add('gate-scan', 'P1', msg);
+        else warnings.push(msg);
+      }
+    }
+  }
+}
+
 const result = {
   ok: findings.length === 0,
   branch,
   staged: staged.length,
   review,
+  gateWarnings: warnings,
   findings,
 };
 

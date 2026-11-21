@@ -19,9 +19,9 @@ const lines = body.split(/\r?\n/).filter((line) => line.trim());
 const problems = [];
 const warnings = [];
 const header = 'ts\tphase\tdecision\twhy\tevidence\tresult';
-const phases = /^(设计|实现|验证|发布|复盘|design|build|verify|release|retro)$/i;
-const results = /^(待验证|有效|有害|pending|valid|harmful)$/i;
-const pointer = /(?:[0-9a-f]{7,40}|https?:\/\/|[\w./-]+:\d+|[\w./-]+\.(?:json|md|log|txt|tsv|xlsx|png|jpe?g|pdf)\b|PR\s*#?\d+|#\d+)/i;
+const phases = /^(设计|实现|验证|发布|复盘|start|design|build|verify|release|retro)$/i;
+const results = /^(待验证|有效|有害|pending|valid|harmful|ok|start)$/i;
+const pointer = /(?:[0-9a-f]{7,40}|https?:\/\/|[\w./-]+:\d+|[\w./-]+\.(?:json|md|log|txt|tsv|xlsx|png|jpe?g|pdf)\b|PR\s*#?\d+|#\d+|agent-[\w-]+|session-[\w-]+)/i;
 
 if (!lines.length) problems.push('file is empty');
 else {

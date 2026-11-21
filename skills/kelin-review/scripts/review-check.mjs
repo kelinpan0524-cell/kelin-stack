@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { computeWorktreeFingerprint } from './fingerprint.mjs';
 
 const args = process.argv.slice(2);
 const option = (name, fallback = '') => {
@@ -17,61 +16,22 @@ if (args.includes('--help') || args.includes('-h')) {
 
 const root = path.resolve(option('--root', process.cwd()));
 const reviewFile = option('--review', '');
-const git = (argv) => spawnSync('git', argv, { cwd: root, encoding: 'utf8' });
-
-const probe = git(['rev-parse', '--show-toplevel']);
-if (probe.status !== 0) {
+const wt = computeWorktreeFingerprint(root);
+if (!wt.isGit) {
   console.error(`not a git repository: ${root}`);
   process.exit(2);
 }
-const repo = probe.stdout.trim();
-const headResult = git(['rev-parse', 'HEAD']);
-const head = headResult.status === 0 ? headResult.stdout.trim() : 'NO_HEAD';
-const branchResult = git(['rev-parse', '--abbrev-ref', 'HEAD']);
-const branch = branchResult.status === 0 ? branchResult.stdout.trim() : 'unknown';
-const statusResult = git(['status', '--porcelain=v1']);
-const statusLines = (statusResult.status === 0 ? statusResult.stdout : '')
-  .split('\n')
-  .filter((line) => line && !/(^|\s)\.kelin\//.test(line));
-const status = statusLines.length ? `${statusLines.join('\n')}\n` : '';
-const diffResult = headResult.status === 0 ? git(['diff', 'HEAD', '--binary', '--no-color', '--no-ext-diff']) : { status: 0, stdout: '' };
-const diff = diffResult.status === 0 ? diffResult.stdout : '';
-const untracked = status
-  .split('\n')
-  .filter((line) => line.startsWith('?? '))
-  .map((line) => line.slice(3).trim())
-  .filter(Boolean)
-  .sort();
-
-const hashes = [];
-for (const file of untracked) {
-  const full = path.join(repo, file);
-  if (!existsSync(full)) continue;
-  const hashed = git(['hash-object', '--no-filters', '--', file]);
-  hashes.push(`${file}:${hashed.status === 0 ? hashed.stdout.trim() : 'unreadable'}`);
-}
-
-const fingerprint = createHash('sha256')
-  .update(`head:${head}\nbranch:${branch}\n`)
-  .update(`status:\n${status}`)
-  .update(`diff:\n${diff}`)
-  .update(`untracked:\n${hashes.join('\n')}\n`)
-  .digest('hex');
 
 const record = {
-  fingerprint,
-  head,
-  branch,
-  statusLines: status.trim() ? status.trim().split('\n').length : 0,
-  files: status
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => line.slice(3).trim())
-    .filter(Boolean),
+  fingerprint: wt.fingerprint,
+  head: wt.head,
+  branch: wt.branch,
+  statusLines: wt.statusLines,
+  files: wt.files,
   createdAt: new Date().toISOString(),
 };
 
-const stampFile = path.join(repo, '.kelin', 'review.json');
+const stampFile = path.join(wt.repo, '.kelin', 'review.json');
 
 if (args.includes('--print')) {
   console.log(JSON.stringify(record, null, 2));
@@ -101,20 +61,20 @@ if (reviewFile) {
   } catch {
     expected = '';
   }
-  source = path.relative(repo, stampFile);
+  source = path.relative(wt.repo, stampFile);
 }
 
 let verdict = 'MISSING';
-if (expected) verdict = expected === fingerprint ? 'CURRENT' : 'STALE';
+if (expected) verdict = expected === wt.fingerprint ? 'CURRENT' : 'STALE';
 else if (source) verdict = 'UNVERIFIED';
 
 const result = {
   ok: verdict === 'CURRENT',
   status: verdict,
   source: source || null,
-  fingerprint,
-  head,
-  branch,
+  fingerprint: wt.fingerprint,
+  head: wt.head,
+  branch: wt.branch,
   changedFiles: record.files.length,
 };
 console.log(JSON.stringify(result, null, 2));

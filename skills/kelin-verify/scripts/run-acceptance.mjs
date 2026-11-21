@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { computeWorktreeFingerprint } from '../../kelin-review/scripts/fingerprint.mjs';
 
 const DEFAULT_TIMEOUT_MS = 300_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -9,26 +11,29 @@ const KILL_GRACE_MS = 150;
 const POLL_INTERVAL_MS = 20;
 const MAX_CAPTURE_BYTES = 32_768;
 
-const USAGE = `Usage: node run-acceptance.mjs [verify.json] [--json]
+const USAGE = `Usage: node run-acceptance.mjs [verify.json] [--root DIR] [--json]
 
 Run acceptance checks declared in a verify.json spec.
 
 Options:
+  --root DIR   Override base working directory (defaults to repo root when spec is inside .kelin/)
   --json       Emit only the JSON summary on stdout (for acceptance.json)
   -h, --help   Show this help message and exit
 
 Examples:
   node run-acceptance.mjs verify.json
-  node run-acceptance.mjs verify.json --json > acceptance.json`;
+  node run-acceptance.mjs .kelin/verify.json --json > .kelin/acceptance.json`;
 
 function parseArgs(argv) {
   let file = null;
+  let root = null;
   let jsonOnly = false;
   let positionalOnly = false;
 
-  for (const arg of argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
     if (!positionalOnly && (arg === '-h' || arg === '--help')) {
-      return { help: true, file: null, jsonOnly: false };
+      return { help: true, file: null, root: null, jsonOnly: false };
     }
     if (!positionalOnly && arg === '--') {
       positionalOnly = true;
@@ -36,6 +41,18 @@ function parseArgs(argv) {
     }
     if (!positionalOnly && arg === '--json') {
       jsonOnly = true;
+      continue;
+    }
+    if (!positionalOnly && arg === '--root') {
+      const value = argv[i + 1];
+      if (!value || value.startsWith('-')) {
+        throw new Error('--root requires a directory path');
+      }
+      if (root !== null) {
+        throw new Error('Duplicate option: --root');
+      }
+      root = value;
+      i += 1;
       continue;
     }
     if (!positionalOnly && arg.startsWith('-')) {
@@ -47,7 +64,7 @@ function parseArgs(argv) {
     file = arg;
   }
 
-  return { help: false, file: file || 'verify.json', jsonOnly };
+  return { help: false, file: file || 'verify.json', root, jsonOnly };
 }
 
 function parseTimeoutMs(raw, id) {
@@ -69,12 +86,18 @@ function validateSpec(spec) {
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
     throw new Error('verify.json must be a JSON object');
   }
+  if (spec.cwd !== undefined && (typeof spec.cwd !== 'string' || !spec.cwd.trim() || spec.cwd.includes('\0'))) {
+    throw new Error('verify.json cwd must be a non-empty string without NUL bytes');
+  }
+  if (spec.baselineComparable !== undefined && typeof spec.baselineComparable !== 'boolean') {
+    throw new Error('verify.json baselineComparable must be a boolean');
+  }
   if (!Array.isArray(spec.checks) || spec.checks.length === 0) {
     throw new Error('verify.json needs a non-empty checks array');
   }
 
   const seenIds = new Set();
-  return spec.checks.map((check, index) => {
+  const checks = spec.checks.map((check, index) => {
     if (!check || typeof check !== 'object' || Array.isArray(check)) {
       throw new Error(`checks[${index}] must be an object`);
     }
@@ -95,9 +118,18 @@ function validateSpec(spec) {
     if (check.cwd !== undefined && (typeof check.cwd !== 'string' || !check.cwd.trim() || check.cwd.includes('\0'))) {
       throw new Error(`check "${check.id}" cwd must be a non-empty string without NUL bytes`);
     }
+    if (check.skipped !== undefined && typeof check.skipped !== 'boolean') {
+      throw new Error(`check "${check.id}" skipped must be a boolean`);
+    }
 
-    return { id: check.id, cmd: check.cmd, cwd: check.cwd, timeoutMs };
+    return { id: check.id, cmd: check.cmd, cwd: check.cwd, timeoutMs, skipped: check.skipped === true };
   });
+
+  return {
+    cwd: spec.cwd,
+    baselineComparable: spec.baselineComparable !== false,
+    checks,
+  };
 }
 
 function appendTail(current, chunk) {
@@ -200,6 +232,19 @@ function installSignalCleanup(state) {
 }
 
 function runCheck(check, base, state) {
+  if (check.skipped) {
+    return Promise.resolve({
+      id: check.id,
+      cmd: check.cmd,
+      exit: null,
+      timedOut: false,
+      skipped: true,
+      signal: null,
+      error: 'check marked skipped',
+      durationMs: 0,
+      output: '',
+    });
+  }
   return new Promise((resolve) => {
     const started = Date.now();
     const cwd = check.cwd ? path.resolve(base, check.cwd) : base;
@@ -227,6 +272,7 @@ function runCheck(check, base, state) {
         cmd: check.cmd,
         exit: -1,
         timedOut: false,
+        skipped: false,
         signal: null,
         error: error.message,
         durationMs: Date.now() - started,
@@ -249,6 +295,7 @@ function runCheck(check, base, state) {
         cmd: check.cmd,
         exit: exitCode ?? -1,
         timedOut,
+        skipped: false,
         signal: signal ?? null,
         error: errorMessage,
         durationMs: Date.now() - started,
@@ -303,16 +350,27 @@ async function main() {
     return;
   }
 
-  const base = path.dirname(path.resolve(parsed.file));
-  let checks;
+  const specPath = path.resolve(parsed.file);
+  const specDir = path.dirname(specPath);
+  let specHash;
+  let validated;
   try {
-    const raw = JSON.parse(readFileSync(parsed.file, 'utf8'));
-    checks = validateSpec(raw);
+    const rawBytes = readFileSync(specPath);
+    specHash = createHash('sha256').update(rawBytes).digest('hex');
+    const raw = JSON.parse(rawBytes.toString('utf8'));
+    validated = validateSpec(raw);
   } catch (error) {
     console.error(`${parsed.file}: ${error.message}`);
     process.exitCode = 2;
     return;
   }
+
+  // Specs inside .kelin/ describe checks at the repository root unless overridden.
+  const defaultBase = path.basename(specDir) === '.kelin' ? path.dirname(specDir) : specDir;
+  const anchor = parsed.root ? path.resolve(parsed.root) : defaultBase;
+  const base = validated.cwd ? path.resolve(anchor, validated.cwd) : anchor;
+  const worktree = computeWorktreeFingerprint(base);
+  const checks = validated.checks;
 
   const state = { activeChild: null, interrupted: false };
   const removeSignalCleanup = installSignalCleanup(state);
@@ -327,15 +385,33 @@ async function main() {
   }
   if (state.interrupted) return;
 
-  const isPassed = (row) => row.exit === 0 && !row.timedOut && !row.error;
+  const isPassed = (row) => !row.skipped && row.exit === 0 && !row.timedOut && !row.error;
   const failed = rows.filter((row) => !isPassed(row));
-  const summary = { ok: failed.length === 0, total: rows.length, failed: failed.length, rows };
+  const hasSkipped = rows.some((row) => row.skipped);
+  let verdict = 'VERIFIED';
+  if (!validated.baselineComparable || hasSkipped) verdict = 'INCONCLUSIVE';
+  else if (failed.length > 0) verdict = 'NOT VERIFIED';
+  const ok = verdict === 'VERIFIED';
+
+  const summary = {
+    ok,
+    verdict,
+    specHash,
+    worktreeFingerprint: worktree.fingerprint,
+    head: worktree.head,
+    cwd: base,
+    requiredIds: checks.map((c) => c.id),
+    total: rows.length,
+    failed: failed.length,
+    rows,
+  };
 
   if (!parsed.jsonOnly) {
     for (const row of rows) {
       const passed = isPassed(row);
-      const suffix = row.timedOut ? ' [TIMEOUT]' : '';
-      console.log(`${passed ? 'PASS' : 'FAIL'} ${row.id} (${row.durationMs}ms)${suffix} ${row.cmd}`);
+      const suffix = row.skipped ? ' [SKIPPED]' : row.timedOut ? ' [TIMEOUT]' : '';
+      const label = row.skipped ? 'SKIP' : passed ? 'PASS' : 'FAIL';
+      console.log(`${label} ${row.id} (${row.durationMs}ms)${suffix} ${row.cmd}`);
       const detail = row.output || row.error;
       if (!passed && detail) {
         console.log(detail.split('\n').map((line) => `  ${line}`).join('\n'));
@@ -344,7 +420,7 @@ async function main() {
   }
 
   console.log(JSON.stringify(summary, null, 2));
-  process.exitCode = failed.length ? 1 : 0;
+  process.exitCode = ok ? 0 : 1;
 }
 
 await main();

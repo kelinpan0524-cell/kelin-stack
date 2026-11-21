@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | 插件 / skill 发现 | marketplace 插件安装（`.zcode-plugin/`） | 项目 `.agents/skills/` ✓ 实测 | 原生插件（`.antigravity-plugin/plugin.json` + `skills/` + `agents/` + `rules/` + `hooks.json` + `assets/logo.svg`）+ 项目 `.agents/skills/` ✓ 实测（2026-11-20） |
 | 用户级安装目录 | —（走插件市场） | `~/.agents/skills/` ✓ 实测（2026-11-17 codex 会话确认发现 kelin skills） | `~/.gemini/config/plugins/kelin-stack/`（完整原生插件）或 `~/.gemini/config/skills/`（`--subset` 子集）✓ 实测（2026-11-20） |
-| 钩子（SessionStart / PreToolUse） | `hooks/hooks.json` ✓ 实测 | 不支持 | 根目录 `hooks.json` ✓ 实测（2026-11-20；`PreToolUse` 用 `ask` 交回默认权限、`force_ask` 强询问、`deny` 硬拦截） |
+| 钩子（SessionStart / PreToolUse） | `hooks/hooks.json` ✓ 实测 | 不支持（同步为 Codex 插件包时必须排除 ZCode `hooks/hooks.json`） | 根目录 `hooks.json` ✓ 实测（2026-11-20；`PreToolUse` 用 `ask` 交回默认权限、`force_ask` 强询问、`deny` 硬拦截） |
 | 规则 / 激活注入 | SessionStart hook 自动注入 | `~/.codex/AGENTS.md`（本机存在） | 插件内置 `rules/AGENTS.md` 常驻生效 + `SessionStart` 动态注入工作区状态 ✓ 实测（2026-11-20） |
 | SKILL_DIR 占位符解析 | 插件环境按 skill 目录执行 | ✓ 实测（模型正确替换为绝对路径） | ✓ 实测（模型正确替换为绝对路径） |
 | 项目外 cwd 调脚本 | — | ✓ 实测（脚本内 `import.meta.url` 自定位成立） | ✓ 实测（同左） |

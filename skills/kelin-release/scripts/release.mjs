@@ -12,6 +12,9 @@ const flag = (name) => args.includes(name);
 
 const root = path.resolve(option('--root', process.cwd()));
 const bump = option('--bump', 'patch');
+const receiptPath = option('--receipt', '');
+const allowBranch = flag('--allow-branch');
+const skipReceipt = flag('--skip-receipt');
 const publish = flag('--publish');
 const confirm = flag('--confirm');
 
@@ -60,10 +63,37 @@ const range = lastTag ? `${lastTag}..HEAD` : 'HEAD';
 const commits = git(['log', '--oneline', '--no-decorate', range], true).split('\n').filter(Boolean);
 const status = git(['status', '--porcelain'], true);
 const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], true);
+const head = git(['rev-parse', 'HEAD'], true) || null;
+
+const evaluateReceipt = () => {
+  if (skipReceipt) return { ok: true, skipped: true, reason: 'skipped by --skip-receipt' };
+  if (!receiptPath) return { ok: false, provided: false, reason: 'no --receipt provided' };
+  const resolved = path.resolve(root, receiptPath);
+  if (!existsSync(resolved)) return { ok: false, provided: true, reason: `receipt not found: ${resolved}` };
+  let receipt;
+  try {
+    receipt = JSON.parse(readFileSync(resolved, 'utf8'));
+  } catch (error) {
+    return { ok: false, provided: true, reason: `unreadable receipt: ${error.message}` };
+  }
+  if (receipt.ok !== true) return { ok: false, provided: true, reason: 'receipt ok is not true' };
+  if (receipt.plugin?.treeHash && receipt.plugin.treeHash !== receipt.plugin.treeHashAfter) {
+    return { ok: false, provided: true, reason: 'receipt plugin treeHash mismatch' };
+  }
+  const receiptHead = receipt.plugin?.gitHead || receipt.head || null;
+  if (receiptHead && head && receiptHead !== head) {
+    return { ok: false, provided: true, reason: `receipt verified at ${receiptHead}, current HEAD is ${head}` };
+  }
+  return { ok: true, provided: true, head: receiptHead, level: receipt.verificationLevel || null };
+};
+
+const receiptCheck = evaluateReceipt();
+const branchAllowed = allowBranch || ['main', 'master'].includes(branch);
 
 const plan = {
   root,
   branch,
+  head,
   current,
   next,
   bump,
@@ -73,6 +103,11 @@ const plan = {
   manifests: withVersion.map((file) => path.relative(root, file)),
   changelog: existsSync(path.join(root, 'CHANGELOG.md')) ? 'update' : 'create',
   clean: status === '',
+  gates: {
+    clean: status === '',
+    branchAllowed,
+    receipt: receiptCheck,
+  },
   mode: publish ? 'publish' : 'dry-run',
 };
 
@@ -86,6 +121,14 @@ if (!confirm) {
 }
 if (!plan.clean) {
   console.error('Working tree is not clean; commit or stash first');
+  process.exit(1);
+}
+if (!branchAllowed) {
+  console.error(`Refusing release on branch ${branch}; switch to main/master or pass --allow-branch`);
+  process.exit(1);
+}
+if (receiptPath && !receiptCheck.ok) {
+  console.error(`Receipt check failed: ${receiptCheck.reason}`);
   process.exit(1);
 }
 

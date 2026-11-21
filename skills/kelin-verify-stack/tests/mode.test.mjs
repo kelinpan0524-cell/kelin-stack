@@ -123,3 +123,64 @@ test('rewind moves one phase back and records the reason', async () => {
   const state = JSON.parse(await readFile(path.join(root, '.kelin', 'state.json'), 'utf8'));
   assert.equal(state.history.at(-1).rewind, 'recheck scope');
 });
+
+test('audit mode follows read-only track and enforces coverage declaration', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-audit-'));
+  assert.equal(run(['init', '--mode', 'audit'], root).code, 0);
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "map"/);
+  await artifact(root, 'feature-map.json', '{}\n');
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "audit"/);
+
+  await artifact(root, 'audit.md', '# Bad audit\n');
+  assert.equal(run(['advance'], root).code, 1, 'audit without coverage declaration must be blocked');
+
+  await artifact(
+    root,
+    'audit.md',
+    '# Audit\n\n## 覆盖声明\n| 面 | 状态 | 范围 |\n| --- | --- | --- |\n| 正确性 | 已审 | src/a.mjs |\n',
+  );
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "reflect"/);
+  await artifact(root, 'reflect.md');
+  assert.equal(run(['advance'], root).code, 0);
+  assert.match(run(['status'], root).stdout, /"phase": "done"/);
+});
+
+test('mode verify rejects stale acceptance receipts when verify.json or worktree changes', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-stale-'));
+  const git = (args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 'm@example.invalid']);
+  git(['config', 'user.name', 'm']);
+  await writeFile(path.join(root, '.gitignore'), '.kelin/\n');
+  await writeFile(path.join(root, 'app.mjs'), 'export const x = 1;\n');
+  git(['add', '-A']);
+  git(['commit', '-qm', 'base']);
+
+  assert.equal(run(['init', '--mode', 'light'], root).code, 0);
+  assert.equal(run(['advance'], root).code, 0);
+  await artifact(root, 'goal.md');
+  await artifact(root, 'plan.md');
+  assert.equal(run(['advance'], root).code, 0);
+  await artifact(root, 'build.md');
+  assert.equal(run(['advance'], root).code, 0);
+
+  const runAcc = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify', 'scripts', 'run-acceptance.mjs');
+  const specFile = path.join(root, '.kelin', 'verify.json');
+  await writeFile(specFile, JSON.stringify({ checks: [{ id: 'c1', cmd: 'node -e "process.exit(0)"' }] }));
+  const accOut = execFileSync(process.execPath, [runAcc, specFile, '--json'], { cwd: root, encoding: 'utf8' });
+  await writeFile(path.join(root, '.kelin', 'acceptance.json'), accOut);
+
+  await writeFile(path.join(root, 'app.mjs'), 'export const x = 2;\n');
+  const staleTree = run(['advance'], root);
+  assert.equal(staleTree.code, 1);
+  assert.match(staleTree.stdout, /worktree changed/);
+
+  await writeFile(path.join(root, 'app.mjs'), 'export const x = 1;\n');
+  await writeFile(specFile, JSON.stringify({ checks: [{ id: 'c1', cmd: 'node -e "process.exit(0)"' }, { id: 'c2', cmd: 'true' }] }));
+  const staleSpec = run(['advance'], root);
+  assert.equal(staleSpec.code, 1);
+  assert.match(staleSpec.stdout, /verify\.json changed/);
+});

@@ -56,3 +56,19 @@ test('--no-review explicitly bypasses the review gate', async () => {
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(JSON.parse(result.stdout).review, null);
 });
+
+test('preflight warns on staged gate findings and blocks with --strict-gates', async () => {
+  const dir = await repo();
+  await writeFile(path.join(dir, 'src.mjs'), '// @ts-ignore\nexport const x = 1;\n');
+  git(dir, ['add', 'src.mjs']);
+
+  const warnOnly = run(dir, preflight);
+  assert.equal(warnOnly.status, 0, warnOnly.stdout + warnOnly.stderr);
+  const warnPayload = JSON.parse(warnOnly.stdout);
+  assert.ok(warnPayload.gateWarnings.some((w) => w.includes('RH-13')));
+
+  const blocked = run(dir, preflight, ['--strict-gates']);
+  assert.equal(blocked.status, 1);
+  const blockPayload = JSON.parse(blocked.stdout);
+  assert.ok(blockPayload.findings.some((f) => f.code === 'gate-scan'));
+});

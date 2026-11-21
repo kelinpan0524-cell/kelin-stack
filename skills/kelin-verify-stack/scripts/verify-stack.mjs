@@ -2,6 +2,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { bodyNeedle, classify, completeEvidence, inventory, parseFrontmatter, readSkill, validateRegistry } from './core.mjs';
 import { staticCheck } from './catalog.mjs';
 import { runDoctor } from './doctor.mjs';
@@ -17,6 +18,8 @@ const SESSION_LIMIT = 12;
 
 class Refused extends Error {}
 
+const USAGE_PUBLISH_LINE = '  verify.mjs publish --run DIR --repo OWNER/REPO --pr N --confirm [--sha SHA] [--require-live]';
+
 function usage() {
   return [
     'Usage:',
@@ -25,13 +28,13 @@ function usage() {
     '  verify.mjs classify [--plugin DIR] (--changed a,b | --changed-file FILE | --all) [--output DIR]',
     '  verify.mjs run --output DIR [--plugin DIR] (--all | --feature F... | --changed a,b) [--wide REASON] [--auto] [--live] [--no-live] [--timeout MS]',
     '  verify.mjs self-test --output DIR [--plugin DIR] [--no-live]',
-    '  verify.mjs publish --run DIR --repo OWNER/REPO --pr N --confirm [--sha SHA]',
+    USAGE_PUBLISH_LINE,
   ].join('\n');
 }
 
 function parseArgs(argv) {
   const [command, ...rest] = argv;
-  const options = { command, features: [], changed: [], plugin: '', output: '', wide: '', timeout: 0, probe: false, auto: false, live: false, noLive: false, confirm: false, repo: '', pr: 0, sha: '', run: '', changedFile: '', all: false };
+  const options = { command, features: [], changed: [], plugin: '', output: '', wide: '', timeout: 0, probe: false, auto: false, live: false, noLive: false, confirm: false, requireLive: false, repo: '', pr: 0, sha: '', run: '', changedFile: '', all: false };
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     const value = () => {
@@ -53,6 +56,7 @@ function parseArgs(argv) {
       case '--no-live': options.noLive = true; break;
       case '--live': options.live = true; break;
       case '--confirm': options.confirm = true; break;
+      case '--require-live': options.requireLive = true; break;
       case '--repo': options.repo = value(); break;
       case '--pr': options.pr = Number(value()); break;
       case '--sha': options.sha = value(); break;
@@ -258,6 +262,8 @@ async function runVerification(options) {
   }
 
   const before = await hashTree(pluginRoot);
+  const headProbe = await run('git', ['-C', pluginRoot, 'rev-parse', 'HEAD'], { timeoutMs: 20_000 });
+  const gitHead = headProbe.code === 0 && /^[a-f0-9]{40}$/.test(headProbe.stdout.trim()) ? headProbe.stdout.trim() : null;
   let installedRoot = '';
   if (planned > 0) {
     installedRoot = (await installedPluginRoot(zcodeRef, pluginMeta.name)) || '';
@@ -277,7 +283,9 @@ async function runVerification(options) {
     ok: false,
     started,
     zcodeVersion: version,
-    plugin: { root: pluginRoot, installedRoot, name: pluginMeta.name, version: pluginMeta.version, treeHash: before.hash, treeHashAfter: before.hash, files: before.files },
+    verificationLevel: planned > 0 ? 'live' : 'static',
+    skippedLive,
+    plugin: { root: pluginRoot, installedRoot: installedRoot || null, gitHead, name: pluginMeta.name, version: pluginMeta.version, treeHash: before.hash, treeHashAfter: before.hash, files: before.files },
     selection: selection || null,
     features: [...new Set(cases.map((entry) => entry.feature))].sort(),
     sessionsPlanned: planned,
@@ -378,11 +386,25 @@ async function runVerification(options) {
   return { receipt, output };
 }
 
-async function publish(options) {
+export async function publish(options) {
   if (!options.confirm) throw new Refused('publish requires --confirm (it writes a public PR comment and commit status)');
+  if (!/^[^/]+\/[^/]+$/.test(options.repo)) throw new Error('--repo must be OWNER/REPO');
+  if (!Number.isInteger(options.pr) || options.pr < 1) throw new Error('--pr must be a positive integer');
   const runDir = path.resolve(options.run);
   const receipt = await readJson(path.join(runDir, 'receipt.json'));
   if (!receipt.ok) throw new Refused('Refusing to publish a failed run');
+  if (!receipt.plugin?.treeHash || receipt.plugin.treeHash !== receipt.plugin.treeHashAfter) {
+    throw new Refused('Refusing to publish: plugin tree hash is missing or inconsistent inside receipt');
+  }
+  if (options.requireLive && receipt.verificationLevel !== 'live') {
+    throw new Refused(`Refusing to publish static-only receipt (--require-live requires verificationLevel=live, got ${receipt.verificationLevel || 'unknown'})`);
+  }
+  if (receipt.plugin.root && existsSync(receipt.plugin.root)) {
+    const currentTree = await hashTree(receipt.plugin.root);
+    if (currentTree.hash !== receipt.plugin.treeHash) {
+      throw new Refused(`Plugin tree changed after verification: ${receipt.plugin.treeHash} -> ${currentTree.hash}`);
+    }
+  }
   for (const observation of receipt.observations) {
     for (const artifact of observation.artifacts || []) {
       const body = await readFile(path.join(runDir, artifact.path));
@@ -393,13 +415,15 @@ async function publish(options) {
       if (sha256(body) !== observation.transcriptHash) throw new Refused(`Transcript changed after acceptance: ${observation.transcript}`);
     }
   }
-  if (!/^[^/]+\/[^/]+$/.test(options.repo)) throw new Error('--repo must be OWNER/REPO');
   let sha = options.sha;
   if (!sha) {
     const head = await run('git', ['-C', receipt.plugin.root, 'rev-parse', 'HEAD'], { timeoutMs: 20_000 });
     sha = head.code === 0 ? head.stdout.trim() : '';
   }
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('A 40-character --sha is required for a plugin that is not a git checkout');
+  if (receipt.plugin.gitHead && sha !== receipt.plugin.gitHead) {
+    throw new Refused(`Receipt was verified at ${receipt.plugin.gitHead}, refusing to publish on ${sha}`);
+  }
   const body = await readFile(path.join(runDir, 'gate.md'), 'utf8');
   const comment = await run('gh', ['api', '-X', 'POST', `repos/${options.repo}/issues/${options.pr}/comments`, '-f', `body=${body}`], { timeoutMs: 60_000 });
   if (comment.code !== 0) throw new Error(`gh api comment failed: ${comment.stderr.trim()}`);
@@ -494,8 +518,10 @@ async function main() {
   throw new Error(usage());
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
-  process.exitCode = error instanceof Refused ? 3 : 1;
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    process.exitCode = error instanceof Refused ? 3 : 1;
+  });
+}

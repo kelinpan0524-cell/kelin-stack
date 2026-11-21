@@ -12,7 +12,7 @@ description: 按纪律交付：一任务一分支、带前缀的提交、PR 说�
 ## 硬规则
 
 1. **一任务一分支。** 分支名说清做什么：`feat/quote-export`、`fix/empty-qty`。
-2. **提交信息带 `[ZCode]` 前缀**，第一行说结果，正文说为什么。
+2. **提交信息带当前宿主前缀**（如 `[Antigravity]` / `[Codex]` / `[ZCode]`），第一行说结果，正文说为什么。
 3. **进度以远端 main 为准。** 合并前先 rebase/merge 最新 main，别在本地猜。
 4. **部署要人点头。** 没听到明确的“部署/上线”，只做到 push + PR。CI 绿不等于可以部署。
 5. **真实数据、密钥不进仓库。** 提交前扫一眼暂存区。
@@ -39,7 +39,7 @@ node "$SKILL_DIR"/../kelin-review/scripts/review-check.mjs --write
 git status --short          # 确认只改了该改的
 git diff --stat             # 确认没有意外的文件
 git add <明确路径>           # 不用 git add -A
-git commit -m "[ZCode] 一句话说结果" -m "为什么这么改，风险是什么"
+git commit -m "[Antigravity] 一句话说结果" -m "为什么这么改，风险是什么"
 ```
 
 ### 4. PR
