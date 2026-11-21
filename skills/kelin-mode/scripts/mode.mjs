@@ -172,6 +172,23 @@ const assertSafeWriteTarget = (baseDir, targetPath) => {
 
 const modeCmd = (subArgs) => `node ${quoteArg(path.join(SKILLS_DIR, 'kelin-mode', 'scripts', 'mode.mjs'))} ${subArgs.map(quoteArg).join(' ')}`;
 
+const writeStateSafe = (root, stateFile, state) => {
+  try {
+    const dir = path.dirname(stateFile);
+    assertSafeWriteTarget(root, dir);
+    assertSafeWriteTarget(root, stateFile);
+    const tmpFile = `${stateFile}.tmp-${process.pid}-${randomUUID()}`;
+    assertSafeWriteTarget(root, tmpFile);
+    writeFileSync(tmpFile, `${JSON.stringify(state, null, 2)}\n`);
+    renameSync(tmpFile, stateFile);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+};
+
+const hasCrossModuleHint = (text) => /(跨模块|多模块|cross[- ]?module|架构重构)/i.test(String(text || ''));
+
 const detectCrossModule = (dir, currentMode) => {
   if (currentMode === 'legacy') return true;
   const mapFile = path.join(dir, 'feature-map.json');
@@ -306,7 +323,17 @@ export function routeTask(task, projectRoot = process.cwd()) {
   );
   const companionSkills = needsGrill ? ['kelin-grill', ...[...companions].filter((s) => s !== 'kelin-grill')] : [...companions];
 
-  const nextArgs = resume ? ['status', '--root', root] : ['init', '--mode', mode, '--root', root];
+  const nextArgs = resume
+    ? ['status', '--root', root]
+    : [
+        'init',
+        '--mode',
+        mode,
+        ...(text ? ['--task', text] : []),
+        ...(hasCrossModuleHint(text) ? ['--cross-module'] : []),
+        '--root',
+        root,
+      ];
   const setupArgs = needsSetup && !resume ? ['setup', '--root', root] : null;
   const nextCommand = setupArgs ? `${modeCmd(setupArgs)} && ${modeCmd(nextArgs)}` : modeCmd(nextArgs);
 
@@ -505,7 +532,7 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   };
 }
 
-const normalizeState = (state, stateFile, migrate = false) => {
+const normalizeState = (root, state, stateFile, migrate = false) => {
   const resolved = resolvePhase(state?.mode, state?.phase);
   if (resolved !== state?.phase) {
     const from = state.phase;
@@ -513,7 +540,7 @@ const normalizeState = (state, stateFile, migrate = false) => {
     if (migrate) {
       if (!Array.isArray(state.history)) state.history = [];
       state.history.push({ phase: resolved, migratedFrom: from, at: new Date().toISOString() });
-      writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+      writeStateSafe(root, stateFile, state);
     }
   }
   return state;
@@ -524,7 +551,7 @@ const loadState = (root, stateFile, { migrate = false } = {}) => {
     console.error(`No .kelin/state.json under ${root}; run init first`);
     process.exit(2);
   }
-  return normalizeState(JSON.parse(readFileSync(stateFile, 'utf8')), stateFile, migrate);
+  return normalizeState(root, JSON.parse(readFileSync(stateFile, 'utf8')), stateFile, migrate);
 };
 
 const checkAcceptance = (acceptanceFile, verifyFile, missing, root) => {
@@ -539,7 +566,8 @@ const checkAcceptance = (acceptanceFile, verifyFile, missing, root) => {
     missing.push('verify.json (unreadable)');
     return;
   }
-  const specIds = Array.isArray(spec?.checks) ? spec.checks.map((c) => c?.id).filter((id) => typeof id === 'string' && id.trim()) : [];
+  const checksList = Array.isArray(spec?.checks) ? spec.checks : [];
+  const specIds = checksList.map((c) => c?.id).filter((id) => typeof id === 'string' && id.trim());
   if (!specIds.length) {
     missing.push('verify.json (checks must be a non-empty array)');
     return;
@@ -560,22 +588,45 @@ const checkAcceptance = (acceptanceFile, verifyFile, missing, root) => {
     missing.push(`acceptance.json (verdict is ${receipt.verdict || 'missing'}, expected VERIFIED)`);
     return;
   }
+  if (receipt.worktreeMutated === true) {
+    missing.push('acceptance.json (worktree mutated during checks)');
+    return;
+  }
   const currentSpecHash = createHash('sha256').update(readFileSync(verifyFile)).digest('hex');
   if (receipt.specHash !== currentSpecHash) {
     missing.push('acceptance.json (stale: verify.json changed or specHash missing)');
+    return;
+  }
+  const rootReal = existsSync(root) ? realpathSync(root) : path.resolve(root);
+  const specCwdRaw = typeof spec?.cwd === 'string' && spec.cwd.trim() ? path.resolve(rootReal, spec.cwd) : rootReal;
+  const specCwdReal = existsSync(specCwdRaw) ? realpathSync(specCwdRaw) : '';
+  if (!specCwdReal || !isWithinDir(rootReal, specCwdReal)) {
+    missing.push('verify.json (cwd does not exist or escapes root)');
+    return;
+  }
+  const receiptCwdReal = typeof receipt.cwd === 'string' && existsSync(receipt.cwd) ? realpathSync(receipt.cwd) : '';
+  if (!receiptCwdReal || receiptCwdReal !== specCwdReal) {
+    missing.push(`acceptance.json (cwd mismatch: expected ${specCwdReal})`);
     return;
   }
   if (!Array.isArray(receipt.requiredIds) || specIds.some((id) => !receipt.requiredIds.includes(id))) {
     missing.push('acceptance.json (requiredIds missing or incomplete)');
     return;
   }
+  const checkMap = new Map(checksList.filter((c) => c?.id).map((c) => [c.id, c]));
   const rowMap = new Map(Array.isArray(receipt.rows) ? receipt.rows.map((r) => [r?.id, r]) : []);
   const failedOrMissing = specIds.find((id) => {
     const row = rowMap.get(id);
-    return !row || row.skipped || row.timedOut || row.error || row.exit !== 0;
+    if (!row || row.skipped || row.timedOut || row.error || row.exit !== 0) return true;
+    const def = checkMap.get(id);
+    const expRaw = typeof def?.cwd === 'string' && def.cwd.trim() ? path.resolve(specCwdReal, def.cwd) : specCwdReal;
+    const expReal = existsSync(expRaw) ? realpathSync(expRaw) : '';
+    if (!expReal || !isWithinDir(rootReal, expReal)) return true;
+    const rowReal = typeof row.cwd === 'string' && existsSync(row.cwd) ? realpathSync(row.cwd) : '';
+    return !rowReal || rowReal !== expReal;
   });
   if (failedOrMissing) {
-    missing.push(`acceptance.json (required check not passing: ${failedOrMissing})`);
+    missing.push(`acceptance.json (required check not passing or cwd mismatch: ${failedOrMissing})`);
     return;
   }
   if (isGitRepo(root)) {
@@ -714,26 +765,45 @@ const inspect = (root, dir, state) => {
       checkAcceptance(acceptanceFile, verifyFile, missing, root);
     }
   }
-  if (state.phase === 'ship' && !missing.length) {
-    const shipBody = readFileSync(path.join(dir, 'ship.md'), 'utf8').trim();
-    if (!shipBody) {
-      missing.push('ship.md (empty)');
-    } else if (state.mode !== 'light' && isGitRepo(root)) {
-      if (!computeWorktreeFingerprint) {
-        missing.push('review.json (fingerprint helper unavailable in Git repo)');
+  if (state.phase === 'ship') {
+    if (!existsSync(path.join(dir, 'ship.md')) || !readFileSync(path.join(dir, 'ship.md'), 'utf8').trim()) {
+      missing.push('ship.md (missing or empty)');
+    }
+    if (!existsSync(acceptanceFile)) {
+      if (!missing.includes('acceptance.json (missing)')) missing.push('acceptance.json (missing)');
+    } else {
+      checkAcceptance(acceptanceFile, verifyFile, missing, root);
+    }
+    if (state.mode !== 'light') {
+      const reviewPath = path.join(dir, 'review.md');
+      if (!existsSync(reviewPath)) {
+        missing.push('review.md (missing before ship)');
       } else {
-        const wt = computeWorktreeFingerprint(root);
-        if (wt.isGit) {
-          const stampFile = path.join(dir, 'review.json');
-          const parsedStamp = existsSync(stampFile) ? parseJsonSafe(readFileSync(stampFile, 'utf8')) : { ok: false };
-          const reviewPath = path.join(dir, 'review.md');
-          const expectedHash = existsSync(reviewPath) ? createHash('sha256').update(readFileSync(reviewPath, 'utf8')).digest('hex') : null;
-          if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
-            missing.push('review.json (stale before ship)');
-          } else if (parsedStamp.value?.verdict === 'blocked') {
-            missing.push('review.json (verdict is blocked before ship)');
-          } else if (expectedHash && parsedStamp.value?.reportHash !== expectedHash) {
-            missing.push('review.json (stale: review.md changed before ship)');
+        const reviewRaw = readFileSync(reviewPath, 'utf8');
+        const reviewBody = reviewRaw.trim();
+        if (!reviewBody || !/(P0|P1|P2|P3|结论|无问题|通过|none)/i.test(reviewBody)) {
+          missing.push('review.md (must summarize findings or explicit clean verdict)');
+        } else if (!hasUnresolvedHighSeverity) {
+          missing.push('review.md (kelin-review validator unavailable)');
+        } else if (hasUnresolvedHighSeverity(reviewRaw)) {
+          missing.push('review.md (unresolved P0/P1 findings before ship)');
+        } else if (isGitRepo(root)) {
+          if (!computeWorktreeFingerprint) {
+            missing.push('review.json (fingerprint helper unavailable in Git repo)');
+          } else {
+            const wt = computeWorktreeFingerprint(root);
+            if (wt.isGit) {
+              const stampFile = path.join(dir, 'review.json');
+              const parsedStamp = existsSync(stampFile) ? parseJsonSafe(readFileSync(stampFile, 'utf8')) : { ok: false };
+              const expectedHash = createHash('sha256').update(reviewRaw).digest('hex');
+              if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
+                missing.push('review.json (stale before ship)');
+              } else if (parsedStamp.value?.verdict === 'blocked') {
+                missing.push('review.json (verdict is blocked before ship)');
+              } else if (parsedStamp.value?.reportHash !== expectedHash) {
+                missing.push('review.json (stale: review.md changed before ship)');
+              }
+            }
           }
         }
       }
@@ -837,8 +907,7 @@ function main(argv = process.argv.slice(2)) {
       archived = path.relative(root, archivePlan.archiveDir);
     }
     mkdirSync(dir, { recursive: true });
-    assertSafeWriteTarget(root, stateFile);
-    const crossModule = argv.includes('--cross-module') || mode === 'legacy' || /(跨模块|多模块|cross[- ]?module|架构重构)/i.test(taskArg);
+    const crossModule = argv.includes('--cross-module') || mode === 'legacy' || hasCrossModuleHint(taskArg);
     const now = new Date().toISOString();
     const state = {
       runId: randomUUID(),
@@ -849,7 +918,7 @@ function main(argv = process.argv.slice(2)) {
       started: now,
       history: [{ phase: 'intake', at: now }],
     };
-    writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    writeStateSafe(root, stateFile, state);
     const phases = phasesFor(mode);
     const meta = phaseMeta('intake', mode);
     const payload = {
@@ -911,7 +980,7 @@ function main(argv = process.argv.slice(2)) {
     }
     state.phase = phases[index + 1];
     state.history.push({ phase: state.phase, at: new Date().toISOString() });
-    writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    writeStateSafe(root, stateFile, state);
     const nextMeta = phaseMeta(state.phase, state.mode);
     console.log(JSON.stringify({
       ok: true,
@@ -939,7 +1008,7 @@ function main(argv = process.argv.slice(2)) {
     }
     state.phase = phases[index - 1];
     state.history.push({ phase: state.phase, at: new Date().toISOString(), rewind: reason });
-    writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`);
+    writeStateSafe(root, stateFile, state);
     console.log(JSON.stringify({ ok: true, phase: state.phase, reason }, null, 2));
     process.exit(0);
   }

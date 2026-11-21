@@ -107,12 +107,14 @@ export function evaluateRatchet(spec, { root, baseSpec = null, today = new Date(
       baseCounts.set(key, (baseCounts.get(key) || 0) + (Number.isInteger(entry.count) && entry.count > 0 ? entry.count : 1));
     }
 
-    if (baseRules.has(rule.id)) {
+    if (baseSpec) {
       const refRule = baseRules.get(rule.id);
       const refCounts = new Map();
-      for (const entry of refRule.baseline || []) {
-        const key = `${entry.file}\0${normalizeLine(entry.match)}`;
-        refCounts.set(key, (refCounts.get(key) || 0) + (Number.isInteger(entry.count) && entry.count > 0 ? entry.count : 1));
+      if (refRule) {
+        for (const entry of refRule.baseline || []) {
+          const key = `${entry.file}\0${normalizeLine(entry.match)}`;
+          refCounts.set(key, (refCounts.get(key) || 0) + (Number.isInteger(entry.count) && entry.count > 0 ? entry.count : 1));
+        }
       }
       for (const [key, currentCount] of baseCounts) {
         const prevCount = refCounts.get(key) || 0;
@@ -183,6 +185,22 @@ export function evaluateRatchet(spec, { root, baseSpec = null, today = new Date(
         return { file, match, count };
       });
     updatedRules.push({ ...rule, baseline: nextBaseline });
+  }
+
+  if (baseSpec) {
+    const specRuleIds = new Set(rules.map((r) => r?.id).filter(Boolean));
+    for (const [baseId, refRule] of baseRules) {
+      if (!specRuleIds.has(baseId)) {
+        baselineRegressions.push({
+          rule: baseId,
+          file: 'ratchet.json',
+          match: String(refRule.pattern || baseId).slice(0, 120),
+          baseCount: (refRule.baseline || []).length,
+          currentCount: 0,
+          kind: 'removed-rule',
+        });
+      }
+    }
   }
 
   return {

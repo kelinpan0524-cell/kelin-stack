@@ -367,6 +367,7 @@ deps = {
     "kelin-review": ["kelin-verify-stack"],
     "kelin-ship": ["kelin-review", "kelin-verify-stack"],
     "kelin-release": ["kelin-review", "kelin-verify-stack"],
+    "kelin-verify-stack": ["kelin-plan"],
     "kelin-ci": ["kelin-agents", "kelin-map", "kelin-verify", "kelin-review", "kelin-guard"],
 }
 seen = []

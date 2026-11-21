@@ -145,6 +145,30 @@ test('assertions check skill calls, files and responses', async () => {
     { toolCalls: [{ name: 'Skill', input: { skill: 'pstack:demo' } }], response: 'DONE', fixtureDir: dir, marker: 'VPS-ABC' },
   );
   assert.deepEqual(results.map((entry) => entry.ok), [true, true, true, true, true]);
+  assert.equal(results[0].value, 'pstack:demo');
+
+  const pluginStub = await mkdtemp(path.join(tmpdir(), 'vps-plugin-'));
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(path.join(pluginStub, 'skills', 'kelin-plan', 'scripts'), { recursive: true });
+  await writeFile(path.join(pluginStub, 'skills', 'kelin-plan', 'scripts', 'check-plan.mjs'), 'export function validatePlanMarkdown() { return { ok: true, planHash: "0123456789abcdef" }; }\n');
+  await writeFile(path.join(dir, 'plan.md'), '# ok\n');
+  const planRes = await evaluateAssertions([{ id: 'p', type: 'plan_valid', path: 'plan.md' }], {
+    toolCalls: [],
+    response: '',
+    fixtureDir: dir,
+    marker: '',
+    pluginRoot: pluginStub,
+  });
+  assert.equal(planRes[0].ok, true);
+
+  assert.throws(
+    () => completeEvidence({
+      features: ['zcode:manifest'],
+      observations: [{ feature: 'zcode:manifest', ok: false, assertions: [{ id: 'a', ok: true }], artifacts: [{ path: 'a.json', sha256: 'a'.repeat(64) }] }],
+      failure: '',
+    }),
+    /Observation failed/,
+  );
 });
 
 test('assertions fail on the wrong skill and missing files', async () => {

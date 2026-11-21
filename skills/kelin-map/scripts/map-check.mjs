@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -15,9 +15,11 @@ for (let i = 0; i < rawArgs.length; i += 1) {
   }
 }
 const configDir = path.dirname(path.resolve(file));
-let base = explicitRoot
+const anchor = explicitRoot
   ? path.resolve(explicitRoot)
   : (path.basename(configDir) === '.kelin' ? path.dirname(configDir) : configDir);
+let base = anchor;
+const isWithin = (parentReal, childReal) => childReal === parentReal || childReal.startsWith(`${parentReal}${path.sep}`);
 
 const glob = (pattern) => {
   if (!pattern.includes('*')) return (target) => target === pattern;
@@ -27,12 +29,15 @@ const glob = (pattern) => {
   return (target) => regex.test(target);
 };
 
-const walk = async (root, rel = '') => {
+const walk = async (root, rel = '', boundaryReal = '') => {
   const entries = await readdir(path.join(root, rel), { withFileTypes: true });
   const out = [];
   for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
     const next = rel ? `${rel}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) out.push(...(await walk(root, next)));
+    const full = path.join(root, next);
+    if (boundaryReal && !isWithin(boundaryReal, realpathSync(full))) continue;
+    if (entry.isDirectory()) out.push(...(await walk(root, next, boundaryReal)));
     else if (entry.isFile()) out.push(next);
   }
   return out;
@@ -47,11 +52,28 @@ try {
 }
 
 const problems = [];
-const roots = Array.isArray(spec.roots) ? spec.roots : [];
-const owners = Array.isArray(spec.owners) ? spec.owners : [];
-const nonRuntime = Array.isArray(spec.nonRuntime) ? spec.nonRuntime : [];
+const roots = Array.isArray(spec?.roots) ? spec.roots : [];
+const owners = Array.isArray(spec?.owners) ? spec.owners : [];
+const nonRuntime = Array.isArray(spec?.nonRuntime) ? spec.nonRuntime : [];
+const anchorReal = existsSync(anchor) ? realpathSync(anchor) : path.resolve(anchor);
 
-if (typeof spec.base === 'string' && spec.base) base = path.resolve(configDir, spec.base);
+if (typeof spec?.base === 'string' && spec.base) {
+  if (explicitRoot) {
+    if (path.isAbsolute(spec.base)) {
+      problems.push(`unsafe base outside --root: ${spec.base}`);
+    } else {
+      const candidate = path.resolve(anchorReal, spec.base);
+      const candidateReal = existsSync(candidate) ? realpathSync(candidate) : candidate;
+      if (!isWithin(anchorReal, candidateReal)) {
+        problems.push(`unsafe base outside --root: ${spec.base}`);
+      } else {
+        base = candidateReal;
+      }
+    }
+  } else {
+    base = path.resolve(configDir, spec.base);
+  }
+}
 if (!roots.length) problems.push('roots is empty');
 if (!owners.length) problems.push('owners is empty');
 
@@ -59,19 +81,26 @@ for (const root of roots) {
   if (typeof root !== 'string' || !root || root.startsWith('/') || root.includes('..')) problems.push(`unsafe root: ${root}`);
 }
 for (const entry of [...owners, ...nonRuntime.map((pattern) => ({ pattern }))]) {
-  if (typeof entry.pattern !== 'string' || !entry.pattern || entry.pattern.startsWith('/') || entry.pattern.includes('..')) {
-    problems.push(`unsafe pattern: ${entry.pattern}`);
+  if (typeof entry?.pattern !== 'string' || !entry.pattern || entry.pattern.startsWith('/') || entry.pattern.includes('..')) {
+    problems.push(`unsafe pattern: ${entry?.pattern}`);
   }
 }
 for (const owner of owners) {
-  if (!owner.feature) problems.push(`owner without feature: ${owner.pattern}`);
-  if (!owner.verify) problems.push(`owner without verify: ${owner.pattern}`);
+  if (!owner?.feature) problems.push(`owner without feature: ${owner?.pattern}`);
+  if (!owner?.verify) problems.push(`owner without verify: ${owner?.pattern}`);
 }
 
 const files = [];
+const baseReal = existsSync(base) ? realpathSync(base) : path.resolve(base);
 for (const root of roots) {
   try {
-    const found = await walk(path.join(base, root));
+    const targetDir = path.join(base, root);
+    const targetReal = realpathSync(targetDir);
+    if (!isWithin(baseReal, targetReal) || (explicitRoot && !isWithin(anchorReal, targetReal))) {
+      problems.push(`unsafe root escaping base: ${root}`);
+      continue;
+    }
+    const found = await walk(targetReal, '', targetReal);
     for (const rel of found) files.push(`${root}/${rel}`);
   } catch (error) {
     problems.push(`cannot walk ${root}: ${error.message}`);

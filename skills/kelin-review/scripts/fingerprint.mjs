@@ -77,8 +77,9 @@ export function computeWorktreeFingerprint(rootDir) {
       continue;
     }
     if (!st.isFile()) continue;
+    const modeTag = (st.mode & 0o111) !== 0 ? 'x' : 'r';
     const hashed = gitStrict(['hash-object', '--no-filters', '--', rel], repo);
-    hashes.push(`${rel}:${hashed.trim()}`);
+    hashes.push(`${rel}:${modeTag}:${hashed.trim()}`);
   }
 
   const fingerprint = createHash('sha256')

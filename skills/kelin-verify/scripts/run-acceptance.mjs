@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -242,11 +242,12 @@ function installSignalCleanup(state) {
   };
 }
 
-function runCheck(check, base, state) {
+function runCheck(check, checkCwd, state) {
   if (check.skipped) {
     return Promise.resolve({
       id: check.id,
       cmd: check.cmd,
+      cwd: checkCwd,
       exit: null,
       timedOut: false,
       skipped: true,
@@ -258,7 +259,7 @@ function runCheck(check, base, state) {
   }
   return new Promise((resolve) => {
     const started = Date.now();
-    const cwd = check.cwd ? path.resolve(base, check.cwd) : base;
+    const cwd = checkCwd;
     let stdout = '';
     let stderr = '';
     let timedOut = false;
@@ -281,6 +282,7 @@ function runCheck(check, base, state) {
       resolve({
         id: check.id,
         cmd: check.cmd,
+        cwd,
         exit: -1,
         timedOut: false,
         skipped: false,
@@ -304,6 +306,7 @@ function runCheck(check, base, state) {
       resolve({
         id: check.id,
         cmd: check.cmd,
+        cwd,
         exit: exitCode ?? -1,
         timedOut,
         skipped: false,
@@ -378,32 +381,70 @@ async function main() {
 
   // Specs inside .kelin/ describe checks at the repository root unless overridden.
   const defaultBase = path.basename(specDir) === '.kelin' ? path.dirname(specDir) : specDir;
-  const anchor = parsed.root ? path.resolve(parsed.root) : defaultBase;
-  const base = validated.cwd ? path.resolve(anchor, validated.cwd) : anchor;
+  const anchorRaw = parsed.root ? path.resolve(parsed.root) : defaultBase;
+  const baseRaw = validated.cwd ? path.resolve(anchorRaw, validated.cwd) : anchorRaw;
+  const isInside = (parentReal, childReal) => childReal === parentReal || childReal.startsWith(`${parentReal}${path.sep}`);
+
+  let anchorReal;
+  let baseReal;
+  const checkCwds = [];
+  try {
+    anchorReal = realpathSync(anchorRaw);
+    baseReal = realpathSync(baseRaw);
+    if (!isInside(anchorReal, baseReal)) {
+      throw new Error(`verify.json cwd escapes root: ${validated.cwd}`);
+    }
+    for (const check of validated.checks) {
+      const target = check.cwd ? path.resolve(baseReal, check.cwd) : baseReal;
+      const resolved = realpathSync(target);
+      if (!isInside(anchorReal, resolved)) {
+        throw new Error(`check "${check.id}" cwd escapes root: ${check.cwd}`);
+      }
+      checkCwds.push(resolved);
+    }
+  } catch (error) {
+    console.error(`${parsed.file}: ${error.message}`);
+    process.exitCode = 2;
+    return;
+  }
+
   const computeWorktreeFingerprint = await loadComputeFingerprint();
-  const worktree = computeWorktreeFingerprint
-    ? computeWorktreeFingerprint(base)
+  const worktreeBefore = computeWorktreeFingerprint
+    ? computeWorktreeFingerprint(baseReal)
     : { isGit: false, fingerprint: null, head: null };
   const checks = validated.checks;
 
   const state = { activeChild: null, interrupted: false };
   const removeSignalCleanup = installSignalCleanup(state);
   const rows = [];
+  let mutatedMidRun = false;
   try {
-    for (const check of checks) {
+    for (let i = 0; i < checks.length; i += 1) {
       if (state.interrupted) return;
-      rows.push(await runCheck(check, base, state));
+      rows.push(await runCheck(checks[i], checkCwds[i], state));
+      if (worktreeBefore.isGit && computeWorktreeFingerprint) {
+        const afterEach = computeWorktreeFingerprint(baseReal);
+        if (afterEach.fingerprint !== worktreeBefore.fingerprint) mutatedMidRun = true;
+      }
     }
   } finally {
     if (!state.interrupted) removeSignalCleanup();
   }
   if (state.interrupted) return;
 
+  const worktreeAfter = computeWorktreeFingerprint
+    ? computeWorktreeFingerprint(baseReal)
+    : { isGit: false, fingerprint: null, head: null };
+  const worktreeMutated =
+    mutatedMidRun
+    || (Boolean(worktreeBefore.isGit || worktreeAfter.isGit)
+      && worktreeBefore.fingerprint !== worktreeAfter.fingerprint);
+
   const isPassed = (row) => !row.skipped && row.exit === 0 && !row.timedOut && !row.error;
   const failed = rows.filter((row) => !isPassed(row));
   const hasSkipped = rows.some((row) => row.skipped);
   let verdict = 'VERIFIED';
-  if (!validated.baselineComparable || hasSkipped) verdict = 'INCONCLUSIVE';
+  if (!validated.baselineComparable || hasSkipped || worktreeMutated) verdict = 'INCONCLUSIVE';
   else if (failed.length > 0) verdict = 'NOT VERIFIED';
   const ok = verdict === 'VERIFIED';
 
@@ -411,9 +452,11 @@ async function main() {
     ok,
     verdict,
     specHash,
-    worktreeFingerprint: worktree.fingerprint,
-    head: worktree.head,
-    cwd: base,
+    worktreeFingerprint: worktreeAfter.fingerprint,
+    worktreeMutated,
+    head: worktreeAfter.head,
+    root: anchorReal,
+    cwd: baseReal,
     requiredIds: checks.map((c) => c.id),
     total: rows.length,
     failed: failed.length,

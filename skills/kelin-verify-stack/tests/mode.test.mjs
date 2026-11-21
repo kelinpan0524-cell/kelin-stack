@@ -459,4 +459,61 @@ test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P
   const rtRes = JSON.parse(run(['route', '--task', '继续'], roDir).stdout);
   assert.equal(rtRes.resume.phase, 'audit');
   assert.equal(await readFile(path.join(roDir, '.kelin', 'state.json'), 'utf8'), rawLegacy);
+
+  // P1-8: routeTask forwards --task and --cross-module into nextArgs
+  const crossRoute = JSON.parse(run(['route', '--task', '实现跨模块计费'], await mkdtemp(path.join(tmpdir(), 'kelin-route-cm-'))).stdout);
+  assert.ok(crossRoute.nextArgs.includes('--task'));
+  assert.ok(crossRoute.nextArgs.includes('--cross-module'));
+
+  // P1-9b: symlinked .kelin/state.json refused by advance and audit migration
+  const symStateDir = await mkdtemp(path.join(tmpdir(), 'kelin-symstate-'));
+  const outsideStateTarget = await mkdtemp(path.join(tmpdir(), 'kelin-symstate-out-'));
+  const targetStateFile = path.join(outsideStateTarget, 'victim.json');
+  await writeFile(targetStateFile, JSON.stringify({ runId: 's', mode: 'light', phase: 'intake', history: [] }));
+  await mkdir(path.join(symStateDir, '.kelin'), { recursive: true });
+  await symlink(targetStateFile, path.join(symStateDir, '.kelin', 'state.json'));
+  assert.notEqual(run(['advance'], symStateDir).code, 0);
+  assert.equal(JSON.parse(await readFile(targetStateFile, 'utf8')).phase, 'intake');
+
+  // P1-3 & P1-7: wrong-cwd acceptance rejected; ship checks acceptance and review.md even after delete
+  const shipGateDir = await mkdtemp(path.join(tmpdir(), 'kelin-ship-gate-'));
+  await mkdir(path.join(shipGateDir, 'sub'), { recursive: true });
+  await writeFile(path.join(shipGateDir, 'sub', 'verify.json'), JSON.stringify({ checks: [{ id: 'c1', cmd: 'node -e "process.exit(0)"' }] }));
+  const wrongAcc = execFileSync(process.execPath, [runAcceptance, path.join(shipGateDir, 'sub', 'verify.json'), '--root', path.join(shipGateDir, 'sub'), '--json'], { encoding: 'utf8' });
+  await writeFile(path.join(shipGateDir, 'verify.json'), readFile(path.join(shipGateDir, 'sub', 'verify.json'), 'utf8') ? await readFile(path.join(shipGateDir, 'sub', 'verify.json'), 'utf8') : '');
+  assert.equal(run(['init', '--mode', 'light'], shipGateDir).code, 0);
+  assert.equal(run(['advance'], shipGateDir).code, 0);
+  await artifact(shipGateDir, 'goal.md', '# 目标\n验证\n');
+  await artifact(shipGateDir, 'plan.md', validLightPlan);
+  assert.equal(run(['advance'], shipGateDir).code, 0);
+  await artifact(shipGateDir, 'build.md', '完成\n');
+  assert.equal(run(['advance'], shipGateDir).code, 0);
+  await artifact(shipGateDir, 'verify.json', await readFile(path.join(shipGateDir, 'sub', 'verify.json'), 'utf8'));
+  await artifact(shipGateDir, 'acceptance.json', wrongAcc);
+  const wrongCwdAdv = run(['advance'], shipGateDir);
+  assert.equal(wrongCwdAdv.code, 1);
+  assert.match(wrongCwdAdv.stdout, /cwd mismatch/);
+  await writeValidAcceptance(shipGateDir);
+  assert.equal(run(['advance'], shipGateDir).code, 0);
+  await artifact(shipGateDir, 'ship.md', 'ready\n');
+  await artifact(shipGateDir, 'acceptance.json', '{"ok":false}\n');
+  const shipStale = run(['advance'], shipGateDir);
+  assert.equal(shipStale.code, 1);
+  assert.match(shipStale.stdout, /acceptance\.json/);
+
+  // P1-14: feature-map spec.base cannot escape --root
+  const escapeMapRoot = await mkdtemp(path.join(tmpdir(), 'kelin-map-esc-'));
+  const otherMapSrc = await mkdtemp(path.join(tmpdir(), 'kelin-map-other-'));
+  await mkdir(path.join(otherMapSrc, 'src'), { recursive: true });
+  await writeFile(path.join(otherMapSrc, 'src', 'x.mjs'), 'export const x = 1;\n');
+  assert.equal(run(['init', '--mode', 'legacy'], escapeMapRoot).code, 0);
+  assert.equal(run(['advance'], escapeMapRoot).code, 0);
+  await artifact(
+    escapeMapRoot,
+    'feature-map.json',
+    JSON.stringify({ base: path.relative(escapeMapRoot, otherMapSrc), roots: ['src'], owners: [{ pattern: 'src/**', feature: 'x', verify: 'true' }] }),
+  );
+  const mapEscAdv = run(['advance'], escapeMapRoot);
+  assert.equal(mapEscAdv.code, 1);
+  assert.match(mapEscAdv.stdout, /unsafe base/);
 });

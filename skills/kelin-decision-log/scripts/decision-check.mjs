@@ -21,8 +21,37 @@ const warnings = [];
 const header = 'ts\tphase\tdecision\twhy\tevidence\tresult';
 const phases = /^(设计|实现|验证|发布|复盘|start|design|build|verify|release|retro)$/i;
 const results = /^(待验证|有效|有害|pending|valid|harmful|ok|start)$/i;
-const pointer = /(?:[0-9a-f]{7,40}|https?:\/\/[A-Za-z0-9.-]+(?::\d+)?(?:\/\S*)?|[\w./-]+:\d+|[\w./-]+\.(?:json|md|log|txt|tsv|xlsx|png|jpe?g|pdf)\b|PR\s*#?\d+|#\d+|agent-[\w-]+|session-[\w-]+)/i;
+const nonUrlPointer = /(?:[0-9a-f]{7,40}|[\w./-]+:\d+|[\w./-]+\.(?:json|md|log|txt|tsv|xlsx|png|jpe?g|pdf)\b|PR\s*#?\d+|#\d+|agent-[\w-]+|session-[\w-]+)/i;
 const isoTsRe = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+
+const isValidIsoTimestamp = (ts) => {
+  if (!isoTsRe.test(ts)) return false;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(ts);
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() + 1 === mo && dt.getUTCDate() === d && !Number.isNaN(Date.parse(ts));
+};
+
+const isTraceableEvidence = (text) => {
+  const urlTokens = String(text).match(/https?:\/\/\S+/gi) || [];
+  const validUrl = urlTokens.some((raw) => {
+    const cleaned = raw.replace(/[),.;!?]+$/, '');
+    try {
+      const u = new URL(cleaned);
+      const h = u.hostname;
+      if (!h || h.startsWith('.') || h.endsWith('.')) return false;
+      return h === 'localhost' || /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(h) || /^\[[0-9a-f:]+\]$/i.test(h);
+    } catch {
+      return false;
+    }
+  });
+  if (validUrl) return true;
+  const withoutUrls = String(text).replace(/https?:\/\/\S+/gi, ' ').trim();
+  return nonUrlPointer.test(withoutUrls);
+};
 
 let substantiveRows = 0;
 let startMarkers = 0;
@@ -40,7 +69,7 @@ else {
     const rowProblemsBefore = problems.length;
     const [tsCell, phase, decision, why, evidence, result] = cells;
     const ts = tsCell.trim();
-    if (!ts || !isoTsRe.test(ts) || Number.isNaN(Date.parse(ts))) {
+    if (!ts || !isValidIsoTimestamp(ts)) {
       problems.push(`row ${index + 1}: invalid ISO ts ${ts || '(empty)'}`);
     }
     const isStartPhase = /^start$/i.test(phase.trim());
@@ -49,7 +78,7 @@ else {
     if (!decision.trim()) problems.push(`row ${index + 1}: decision is empty`);
     if (!why.trim()) problems.push(`row ${index + 1}: why is empty`);
     if (!evidence.trim()) problems.push(`row ${index + 1}: evidence is empty`);
-    else if (!pointer.test(evidence)) problems.push(`row ${index + 1}: evidence is not a parseable pointer (commit/PR/file:line/artifact)`);
+    else if (!isTraceableEvidence(evidence)) problems.push(`row ${index + 1}: evidence is not a parseable pointer (commit/PR/file:line/artifact)`);
     if (!results.test(result)) problems.push(`row ${index + 1}: invalid result ${result}`);
     if (isStartPhase || isStartResult) {
       if (!(isStartPhase && isStartResult)) problems.push(`row ${index + 1}: start marker must set both phase and result to start`);

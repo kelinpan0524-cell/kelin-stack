@@ -5,58 +5,136 @@ import { fileURLToPath } from 'node:url';
 
 const TYPES = ['arch', 'test', 'type', 'lint', 'ci', 'agents'];
 
+const splitShellSegments = (cmdText, depth = 0) => {
+  if (depth > 2) return [cmdText.trim()].filter(Boolean);
+  const segments = [];
+  let cur = '';
+  let quote = '';
+  let escaped = false;
+  for (let i = 0; i < cmdText.length; i += 1) {
+    const ch = cmdText[i];
+    const next = cmdText[i + 1];
+    if (escaped) {
+      cur += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\' && quote !== "'") {
+      cur += ch;
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (ch === quote) quote = '';
+      cur += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === ';' || ch === '|') {
+      if (ch === '|' && next === '|') i += 1;
+      if (cur.trim()) segments.push(cur.trim());
+      cur = '';
+      continue;
+    }
+    if (ch === '&' && next === '&') {
+      if (cur.trim()) segments.push(cur.trim());
+      cur = '';
+      i += 1;
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) segments.push(cur.trim());
+
+  const out = [];
+  for (const seg of segments) {
+    let body = seg.replace(/^[\s({]+/, '').trim();
+    while (/^(?:env\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]*)\s+/.test(body)) {
+      body = body.replace(/^(?:env\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]*)\s+/, '');
+    }
+    if (/^(?:echo|printf|true|:)(?:\s|$)/.test(body)) continue;
+    const subshell = /^(?:sh|bash|zsh)\s+(?:-[a-z]*c|-lc)\s+(['"])([\s\S]*)\1$/.exec(body);
+    if (subshell) {
+      out.push(...splitShellSegments(subshell[2], depth + 1));
+    } else if (body) {
+      out.push(body);
+    }
+  }
+  return out;
+};
+
 const extractActiveLines = (rawText, filePath) => {
   const isYaml = /\.(?:ya?ml)$/i.test(filePath);
   const rawLines = String(rawText).split(/\r?\n/);
   const cleaned = rawLines.map((line) => line.replace(/^\s*#.*$/, '').replace(/\s+#.*$/, ''));
-  const echoOnlyRe = /^(?:echo|printf|true|:)\b/;
   if (!isYaml) {
-    return cleaned
-      .map((line) => line.trim())
-      .filter((line) => line && !echoOnlyRe.test(line));
+    const out = [];
+    for (const line of cleaned) {
+      const trimmed = line.trim();
+      if (trimmed) out.push(...splitShellSegments(trimmed));
+    }
+    return out;
   }
 
   const disabledFalseRe = /^if:\s*(?:\$\{\{\s*)?false(?:\s*\}\})?$/i;
+  const continueOnErrRe = /^continue-on-error:\s*(?:\$\{\{\s*)?true(?:\s*\}\})?$/i;
   const active = [];
   let jobsIndent = -1;
   let jobKeyIndent = -1;
-  let jobDisabled = false;
+  let currentJob = null;
   let stepsIndent = -1;
-  let stepItemIndent = -1;
-  let stepLines = [];
+  let currentStep = null;
 
   const flushStep = () => {
-    if (!stepLines.length) return;
-    const stepDisabled = jobDisabled || stepLines.some((l) => disabledFalseRe.test(l.replace(/^\s*-\s*/, '').trim()));
-    if (!stepDisabled) {
-      let inRunBlock = false;
-      let runKeyIndent = -1;
-      for (const rawLine of stepLines) {
-        const stripped = rawLine.replace(/^(\s*)-\s+/, '$1  ');
-        const indent = stripped.search(/\S/);
-        const trimmed = stripped.trim();
-        if (!trimmed) continue;
-        if (inRunBlock) {
-          if (indent > runKeyIndent) {
-            if (!echoOnlyRe.test(trimmed)) active.push(trimmed);
-            continue;
+    if (!currentStep) return;
+    currentJob?.steps.push(currentStep);
+    currentStep = null;
+  };
+
+  const flushJob = () => {
+    flushStep();
+    if (!currentJob) return;
+    if (!currentJob.disabled) {
+      for (const stepLines of currentJob.steps) {
+        const stepDisabled = stepLines.some((raw) => {
+          const t = raw.replace(/^\s*-\s*/, '').trim();
+          return disabledFalseRe.test(t) || continueOnErrRe.test(t);
+        });
+        if (stepDisabled) continue;
+        let inRunBlock = false;
+        let runKeyIndent = -1;
+        for (const rawLine of stepLines) {
+          const stripped = rawLine.replace(/^(\s*)-\s+/, '$1  ');
+          const indent = stripped.search(/\S/);
+          const trimmed = stripped.trim();
+          if (!trimmed) continue;
+          if (inRunBlock) {
+            if (indent > runKeyIndent) {
+              active.push(...splitShellSegments(trimmed));
+              continue;
+            }
+            inRunBlock = false;
+            runKeyIndent = -1;
           }
-          inRunBlock = false;
-          runKeyIndent = -1;
-        }
-        const runMatch = /^run:\s*(.*)$/.exec(trimmed);
-        if (runMatch) {
-          const rhs = runMatch[1].trim();
-          if (/^[|>][+-]?\s*$/.test(rhs)) {
-            inRunBlock = true;
-            runKeyIndent = indent;
-          } else if (rhs && !echoOnlyRe.test(rhs)) {
-            active.push(rhs);
+          const runMatch = /^run:\s*(.*)$/.exec(trimmed);
+          if (runMatch) {
+            const rhs = runMatch[1].trim();
+            if (/^[|>][+-]?\s*$/.test(rhs)) {
+              inRunBlock = true;
+              runKeyIndent = indent;
+            } else if (rhs) {
+              active.push(...splitShellSegments(rhs));
+            }
           }
         }
       }
     }
-    stepLines = [];
+    currentJob = null;
+    stepsIndent = -1;
   };
 
   for (const line of cleaned) {
@@ -66,54 +144,47 @@ const extractActiveLines = (rawText, filePath) => {
     if (stepsIndent >= 0 && indent <= stepsIndent && !(indent === stepsIndent && /^\s*-\s+/.test(line))) {
       flushStep();
       stepsIndent = -1;
-      stepItemIndent = -1;
     }
     if (jobsIndent >= 0 && indent <= jobsIndent) {
-      flushStep();
+      flushJob();
       jobsIndent = -1;
       jobKeyIndent = -1;
-      jobDisabled = false;
-      stepsIndent = -1;
-      stepItemIndent = -1;
     }
     if (/^jobs:\s*$/.test(trimmed)) {
-      flushStep();
+      flushJob();
       jobsIndent = indent;
       jobKeyIndent = -1;
-      jobDisabled = false;
       continue;
     }
     if (jobsIndent >= 0 && indent > jobsIndent && stepsIndent < 0 && !trimmed.startsWith('-')) {
-      if (jobKeyIndent < 0 && /^[A-Za-z0-9_.-]+:\s*$/.test(trimmed)) {
+      if ((jobKeyIndent < 0 || indent === jobKeyIndent) && /^[A-Za-z0-9_.-]+:\s*$/.test(trimmed)) {
+        flushJob();
         jobKeyIndent = indent;
-      } else if (indent === jobKeyIndent && /^[A-Za-z0-9_.-]+:\s*$/.test(trimmed)) {
-        flushStep();
-        jobDisabled = false;
-        stepsIndent = -1;
-        stepItemIndent = -1;
+        currentJob = { disabled: false, steps: [] };
+        continue;
       }
     }
     if (/^steps:\s*$/.test(trimmed)) {
+      if (!currentJob) currentJob = { disabled: false, steps: [] };
       flushStep();
       stepsIndent = indent;
-      stepItemIndent = -1;
       continue;
     }
-    if (stepsIndent >= 0 && /^\s*-\s+/.test(line) && (stepItemIndent < 0 || indent <= stepItemIndent)) {
+    if (stepsIndent >= 0 && /^\s*-\s+/.test(line) && (!currentStep || indent <= (currentStep._itemIndent ?? indent))) {
       flushStep();
-      stepItemIndent = indent;
-      stepLines.push(line);
+      currentStep = [line];
+      currentStep._itemIndent = indent;
       continue;
     }
-    if (stepLines.length) {
-      stepLines.push(line);
+    if (stepsIndent >= 0 && currentStep) {
+      currentStep.push(line);
       continue;
     }
-    if (jobsIndent >= 0 && disabledFalseRe.test(trimmed)) {
-      jobDisabled = true;
+    if (currentJob && (disabledFalseRe.test(trimmed) || continueOnErrRe.test(trimmed))) {
+      currentJob.disabled = true;
     }
   }
-  flushStep();
+  flushJob();
   return active;
 };
 

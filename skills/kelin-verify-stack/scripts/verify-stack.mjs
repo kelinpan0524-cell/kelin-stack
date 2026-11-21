@@ -347,6 +347,7 @@ async function runVerification(options) {
         response: outcome.response,
         fixtureDir,
         marker,
+        pluginRoot,
       });
       const exitAssertion = { id: 'session-exit', type: 'process', ok: outcome.exitCode === 0, detail: `exit ${outcome.exitCode}${outcome.timedOut ? ' (timeout)' : ''}` };
       const artifacts = await collectArtifacts(fixtureDir, sessionDir, output);
@@ -435,7 +436,7 @@ export async function publish(options) {
       const expectedSkill = skillName && receipt.plugin?.name ? `${receipt.plugin.name}:${skillName}` : '';
       const assertions = Array.isArray(obs.assertions) ? obs.assertions : [];
       const hasSkillAssertion = assertions.some(
-        (a) => a.type === 'skill_called' && a.ok === true && (!expectedSkill || a.value === expectedSkill),
+        (a) => a.type === 'skill_called' && a.ok === true && (!expectedSkill || !a.value || a.value === expectedSkill),
       );
       if (!hasSkillAssertion) {
         throw new Refused(`Refusing to publish under --require-live: missing passing skill_called assertion for ${obs.feature || obs.case || 'live case'}`);
@@ -466,11 +467,13 @@ export async function publish(options) {
         const calls = [];
         for (const rawLine of txText.split('\n')) {
           if (!rawLine.trim()) continue;
+          let row;
           try {
-            const row = JSON.parse(rawLine);
-            for (const c of row?.response?.toolCalls || []) calls.push(c);
+            row = JSON.parse(rawLine);
           } catch {
+            throw new Refused(`Malformed transcript line under --require-live: ${observation.transcript}`);
           }
+          for (const c of row?.response?.toolCalls || []) calls.push(c);
         }
         const matchedCall = calls.some(
           (call) => String(call?.name || '').toLowerCase() === 'skill'

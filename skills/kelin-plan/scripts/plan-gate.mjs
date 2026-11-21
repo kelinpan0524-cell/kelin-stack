@@ -18,6 +18,7 @@ export function validatePlanGate(spec, { baseDir = process.cwd(), planFile = '',
   else if (lenses.length < 2) add('missing-lenses', 'at least two review lenses are required');
   if (!Array.isArray(spec.decisions)) add('invalid-decisions', 'decisions must be an array');
 
+  const fmt = (v) => (typeof v === 'string' ? v : JSON.stringify(v) ?? typeof v);
   const names = new Set();
   for (const [idx, lens] of lenses.entries()) {
     if (!lens || typeof lens !== 'object' || Array.isArray(lens)) {
@@ -25,18 +26,21 @@ export function validatePlanGate(spec, { baseDir = process.cwd(), planFile = '',
       continue;
     }
     const name = typeof lens.name === 'string' ? lens.name.trim() : '';
+    const label = name || `lenses[${idx}]`;
     if (!name) add('lens-name', `lenses[${idx}]: lens without name`);
     else if (names.has(name)) add('duplicate-lens', name);
     if (name) names.add(name);
-    if (!['self', 'subagent'].includes(lens.reviewer)) add('lens-reviewer', `${name || `lenses[${idx}]`}: reviewer must be self or subagent`);
-    if (!Array.isArray(lens.findings)) add('lens-findings', `${name || `lenses[${idx}]`}: findings must be an array`);
+    if (typeof lens.reviewer !== 'string' || !['self', 'subagent'].includes(lens.reviewer)) {
+      add('lens-reviewer', `${label}: reviewer must be self or subagent`);
+    }
+    if (!Array.isArray(lens.findings)) add('lens-findings', `${label}: findings must be an array`);
     if (requireResolved) {
       const hasSummary = typeof lens.summary === 'string' && lens.summary.trim().length > 0;
       if (!hasSummary) {
-        add('empty-lens-review', `${name || `lenses[${idx}]`}: provide non-empty summary`);
+        add('empty-lens-review', `${label}: provide non-empty summary`);
       }
       if (lens.verdict !== 'approved') {
-        add('lens-not-approved', `${name || `lenses[${idx}]`}: verdict must be approved (got ${lens.verdict || 'missing'})`);
+        add('lens-not-approved', `${label}: verdict must be approved (got ${fmt(lens.verdict ?? 'missing')})`);
       }
     }
   }

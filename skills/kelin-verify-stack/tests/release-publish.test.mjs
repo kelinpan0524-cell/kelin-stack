@@ -255,4 +255,109 @@ test('publish() rejects invalid gitHead & missing Skill transcript call; release
   await writeFile(accFile, JSON.stringify(tampered));
   const badPlan = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', accFile], { encoding: 'utf8' }).stdout);
   assert.equal(badPlan.gates.receipt.ok, false);
+
+  // P1-2, P1-3, P1-4, P1-5: release rejects mutated/wrong-cwd acceptance, obs.ok:false or modified artifact verify-stack receipt, and unverified CI
+  await mkdir(path.join(dir, 'subpkg'), { recursive: true });
+  await writeFile(path.join(dir, 'subpkg', 'verify.json'), JSON.stringify({ checks: [{ id: 'c1', cmd: 'node -e "process.exit(0)"' }] }));
+  const subAccOut = execFileSync(process.execPath, [runAcc, path.join(dir, 'subpkg', 'verify.json'), '--root', path.join(dir, 'subpkg'), '--json'], { encoding: 'utf8' });
+  await writeFile(accFile, subAccOut);
+  const wrongCwdRel = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', accFile], { encoding: 'utf8' }).stdout);
+  assert.equal(wrongCwdRel.gates.receipt.ok, false);
+  assert.match(wrongCwdRel.gates.receipt.reason, /cwd mismatch/);
+
+  const mutatedAcc = JSON.parse(accOut);
+  mutatedAcc.worktreeMutated = true;
+  await writeFile(accFile, JSON.stringify(mutatedAcc));
+  const mutatedRel = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', accFile], { encoding: 'utf8' }).stdout);
+  assert.equal(mutatedRel.gates.receipt.ok, false);
+  assert.match(mutatedRel.gates.receipt.reason, /worktree mutation/);
+
+  // verify-stack receipt with ok:false observation & modified artifact must fail release.mjs
+  const curHead = git(['rev-parse', 'HEAD']);
+  const vsDir = await mkdtemp(path.join(tmpdir(), 'kelin-rel-vs-'));
+  const artFile = path.join(vsDir, 'art.json');
+  await writeFile(artFile, '{"ok":true}\n');
+  const vsReceiptFile = path.join(vsDir, 'receipt.json');
+  const headTree = (await hashTree(dir)).hash;
+  await writeFile(vsReceiptFile, JSON.stringify({
+    ok: true,
+    tool: 'kelin-verify-stack',
+    plugin: { name: 'demo', version: '0.1.0', gitHead: curHead, dirty: false, treeHash: headTree, treeHashAfter: headTree },
+    features: ['zcode:manifest'],
+    expectedCases: [{ feature: 'zcode:manifest', caseId: 'c1' }],
+    observations: [{ feature: 'zcode:manifest', case: 'c1', kind: 'static', ok: false, assertions: [{ id: 'a', ok: true }], artifacts: [{ path: 'art.json', sha256: sha256('{"ok":true}\n') }] }],
+  }));
+  const badObsRel = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', vsReceiptFile], { encoding: 'utf8' }).stdout);
+  assert.equal(badObsRel.gates.receipt.ok, false);
+  assert.match(badObsRel.gates.receipt.reason, /Observation failed/);
+
+  await writeFile(vsReceiptFile, JSON.stringify({
+    ok: true,
+    tool: 'kelin-verify-stack',
+    plugin: { name: 'demo', version: '0.1.0', gitHead: curHead, dirty: false, treeHash: headTree, treeHashAfter: headTree },
+    features: ['zcode:manifest'],
+    expectedCases: [{ feature: 'zcode:manifest', caseId: 'c1' }],
+    observations: [{ feature: 'zcode:manifest', case: 'c1', kind: 'static', ok: true, assertions: [{ id: 'a', ok: true }], artifacts: [{ path: 'art.json', sha256: sha256('{"ok":true}\n') }] }],
+  }));
+  await writeFile(artFile, '{"tampered":true}\n');
+  const tamperedArtRel = JSON.parse(spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', vsReceiptFile], { encoding: 'utf8' }).stdout);
+  assert.equal(tamperedArtRel.gates.receipt.ok, false);
+  assert.match(tamperedArtRel.gates.receipt.reason, /artifact modified/);
+
+  // release.mjs blocks --publish --confirm when CI check cannot verify commit (even with valid acceptance receipt)
+  const { rm } = await import('node:fs/promises');
+  await rm(path.join(dir, 'subpkg'), { recursive: true, force: true });
+  await writeFile(accFile, accOut);
+  const blockedCi = spawnSync(process.execPath, [releaseScript, '--root', dir, '--receipt', accFile, '--publish', '--confirm'], { encoding: 'utf8' });
+  assert.equal(blockedCi.status, 1);
+  assert.match(blockedCi.stderr, /CI check failed/);
+
+  // P1-1: real evaluateAssertions output succeeds with publish({ requireLive: true })
+  const { evaluateAssertions } = await import('../scripts/harness.mjs');
+  const evalRunDir = await mkdtemp(path.join(tmpdir(), 'kelin-pub-real-eval-'));
+  const evalSessionDir = path.join(evalRunDir, 'sessions', 's1');
+  const evalFixtureDir = path.join(evalSessionDir, 'fixture');
+  await mkdir(evalFixtureDir, { recursive: true });
+  await writeFile(path.join(evalFixtureDir, 'ans.md'), 'hello\n');
+  const realTx = `${JSON.stringify({ response: { toolCalls: [{ name: 'Skill', input: { skill: 'demo:kelin-plan' } }] } })}\n`;
+  await writeFile(path.join(evalSessionDir, 'rollout.jsonl'), realTx);
+  const realEval = await evaluateAssertions(
+    [{ id: 'skill-load', type: 'skill_called', value: 'demo:kelin-plan' }],
+    { toolCalls: [{ name: 'Skill', input: { skill: 'demo:kelin-plan' } }], response: 'DONE', fixtureDir: evalFixtureDir, marker: '' },
+  );
+  const realArts = await collectArtifacts(evalFixtureDir, evalSessionDir, evalRunDir);
+  const cleanTree = (await hashTree(dir)).hash;
+  await writeFile(path.join(evalRunDir, 'gate.md'), '## gate\nPASS\n');
+  await writeFile(path.join(evalRunDir, 'receipt.json'), JSON.stringify({
+    ok: true,
+    verificationLevel: 'live',
+    sessionsRun: 1,
+    plugin: { name: 'demo', root: dir, gitHead: curHead, dirty: false, treeHash: cleanTree, treeHashAfter: cleanTree },
+    features: ['zcode:skill-invocation:kelin-plan'],
+    expectedCases: [{ feature: 'zcode:skill-invocation:kelin-plan', caseId: 's1' }],
+    observations: [{
+      feature: 'zcode:skill-invocation:kelin-plan',
+      case: 's1',
+      kind: 'live',
+      skill: 'kelin-plan',
+      ok: true,
+      transcript: 'sessions/s1/rollout.jsonl',
+      transcriptHash: sha256(realTx),
+      assertions: realEval,
+      artifacts: realArts,
+    }],
+  }));
+  const fakeBin = await mkdtemp(path.join(tmpdir(), 'kelin-fake-gh-'));
+  const { chmodSync } = await import('node:fs');
+  const ghPath = path.join(fakeBin, 'gh');
+  await writeFile(ghPath, '#!/bin/sh\necho \'{"html_url":"https://example.invalid/c/1"}\'\n');
+  chmodSync(ghPath, 0o755);
+  const prevPath = process.env.PATH || '';
+  process.env.PATH = `${fakeBin}:${prevPath}`;
+  try {
+    const published = await publish({ confirm: true, repo: 'o/r', pr: 1, run: evalRunDir, requireLive: true });
+    assert.equal(published.sha, curHead);
+  } finally {
+    process.env.PATH = prevPath;
+  }
 });

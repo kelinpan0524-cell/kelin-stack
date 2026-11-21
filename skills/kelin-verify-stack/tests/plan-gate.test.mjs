@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 const checkPlan = path.resolve(import.meta.dirname, '..', '..', 'kelin-plan', 'scripts', 'check-plan.mjs');
 const planGate = path.resolve(import.meta.dirname, '..', '..', 'kelin-plan', 'scripts', 'plan-gate.mjs');
@@ -228,4 +229,53 @@ test('check-plan ignores fenced code blocks, rejects empty checkboxes and bare b
   const nullCodes = JSON.parse(nullGate.stdout).problems.map((p) => p.code);
   assert.ok(nullCodes.includes('invalid-lens'));
   assert.ok(nullCodes.includes('invalid-decisions'));
+
+  // P2-4, P2-5, P3-2: 4-backtick outer fence, multiline HTML comment, uppercase [X] task ID, and null-prototype verdict
+  const nestedFencePlan = [
+    '# 目标',
+    '真目标',
+    '',
+    '# 验收标准',
+    '- [ ] `node -e "process.exit(0)"` 通过',
+    '',
+    '````markdown',
+    '# 方案与取舍',
+    '```',
+    '# 任务拆解',
+    '- [ ] 假任务 / 验证：`true`',
+    '```',
+    '````',
+    '<!--',
+    '# 方案与取舍',
+    '注释方案',
+    '# 本期不做',
+    '- 注释项',
+    '# 风险与回滚',
+    '注释风险',
+    '-->',
+  ].join('\n');
+  await writeFile(planFile, nestedFencePlan);
+  assert.equal(run(checkPlan, [planFile], dir).status, 1);
+
+  const upperPlan = validPlan
+    .replace('- [ ] 单元 1：流式写入', '- [X] 单元 1：流式写入')
+    .replace('- [ ] 单元 2：接导出入口', '- [X] 单元 2：接导出入口');
+  await writeFile(planFile, upperPlan);
+  assert.equal(run(checkPlan, [planFile], dir).status, 0);
+
+  const { validatePlanGate } = await import(pathToFileURL(planGate).href);
+  const weirdVerdict = Object.create(null);
+  const weirdRes = validatePlanGate(
+    {
+      plan: 'plan.md',
+      lenses: [
+        { name: 'product', reviewer: 'self', summary: 's', verdict: weirdVerdict, findings: [] },
+        { name: 'engineering', reviewer: 'self', summary: 's', verdict: 'approved', findings: [] },
+      ],
+      decisions: [],
+    },
+    { baseDir: dir, planFile, requireResolved: true },
+  );
+  assert.equal(weirdRes.ok, false);
+  assert.ok(weirdRes.problems.some((p) => p.code === 'lens-not-approved'));
 });

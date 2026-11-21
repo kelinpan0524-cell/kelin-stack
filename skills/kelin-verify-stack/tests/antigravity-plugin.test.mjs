@@ -180,6 +180,11 @@ test('install.sh installs clean Antigravity plugin, guards unsafe targets, handl
     const routedCopy = spawnSync(process.execPath, [path.join(copiedSkillsDir, 'kelin-mode', 'scripts', 'mode.mjs'), 'route', '--task', '修 bug', '--root', fakeHome], { encoding: 'utf8' });
     assert.equal(routedCopy.status, 0, routedCopy.stderr);
     assert.equal(JSON.parse(routedCopy.stdout).mode, 'fix');
+
+    // --subset kelin-verify-stack includes kelin-plan so plan_valid runs inside copied subset
+    const vsSubset = spawnSync('bash', [installer, '--host', 'codex', '--scope', 'project', '--path', fakeHome, '--subset', 'kelin-verify-stack'], { encoding: 'utf8', env });
+    assert.equal(vsSubset.status, 0, vsSubset.stdout + vsSubset.stderr);
+    assert.equal(existsSync(path.join(copiedSkillsDir, 'kelin-plan', 'scripts', 'check-plan.mjs')), true);
   } finally {
     await rm(fakeHome, { recursive: true, force: true });
   }

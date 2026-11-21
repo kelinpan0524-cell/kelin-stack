@@ -243,7 +243,7 @@ for (const item of allItems) {
   const exact = existingMeta.find((meta) => !claimedExisting.has(meta.file) && (
     (ep && meta.entrypoint === ep)
     || meta.heading === item.feature.name
-    || (ep && meta.heading === `页面或接口 ${ep}`)
+    || (ep && ep !== item.routePath && meta.heading === `页面或接口 ${ep}`)
     || (meta.file === item.name && (!meta.entrypoint || meta.entrypoint === ep))
   ));
   if (exact) {
@@ -335,22 +335,30 @@ if (conflicts.length && !force && !sync) {
   process.exit(1);
 }
 
-const spliceRowsIntoTable = (doc, missingRows) => {
+const splitHeaderCells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+
+const findFeatureTable = (doc) => {
   const lines = doc.split(/\r?\n/);
-  let tableSepIdx = -1;
   for (let i = 0; i < lines.length - 1; i += 1) {
-    if (/^\s*\|\s*(?:ID|功能)\s*\|/.test(lines[i]) && /^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[i + 1])) {
-      tableSepIdx = i + 1;
-      break;
+    if (!lines[i].includes('|')) continue;
+    const hCells = splitHeaderCells(lines[i]);
+    const sepCells = splitHeaderCells(lines[i + 1]);
+    if (
+      hCells.length >= 4
+      && sepCells.length === hCells.length
+      && sepCells.every((c) => /^:?-{3,}:?$/.test(c))
+      && /^(?:id|编号|功能)$/i.test(hCells[0])
+    ) {
+      const fiveCol = hCells.length >= 5 && /^(?:id|编号)$/i.test(hCells[0]);
+      let insertAt = i + 1;
+      while (insertAt + 1 < lines.length && lines[insertAt + 1].includes('|')) {
+        insertAt += 1;
+      }
+      const tableCells = lines.slice(i + 2, insertAt + 1).map((row) => splitHeaderCells(row));
+      return { lines, fiveCol, insertAt, tableCells };
     }
   }
-  if (tableSepIdx < 0) return `${doc.trimEnd()}\n${missingRows.join('\n')}\n`;
-  let insertAt = tableSepIdx;
-  while (insertAt + 1 < lines.length && /^\s*\|/.test(lines[insertAt + 1])) {
-    insertAt += 1;
-  }
-  const updated = [...lines.slice(0, insertAt + 1), ...missingRows, ...lines.slice(insertAt + 1)];
-  return `${updated.join('\n').replace(/\n+$/, '')}\n`;
+  return { lines, fiveCol: doc.includes('| ID |'), insertAt: -1, tableCells: [] };
 };
 
 if (sync && !force) {
@@ -360,14 +368,17 @@ if (sync && !force) {
     await mkdir(path.dirname(file.path), { recursive: true });
     if (file.kind === 'index' && existsSync(file.path)) {
       const current = await readFile(file.path, 'utf8');
-      const fiveCol = current.includes('| ID |');
+      const tableInfo = findFeatureTable(current);
       const missingRows = featureFiles
-        .filter((item) => !matchedByPlannedName.has(item.name) && !current.includes(`| ${item.id} |`) && !current.includes(`| ${item.feature.name} |`))
-        .map((item) => (fiveCol
+        .filter((item) => !matchedByPlannedName.has(item.name) && !tableInfo.tableCells.some((cells) => cells[0] === item.id || cells[0] === item.feature.name || cells[1] === item.feature.name))
+        .map((item) => (tableInfo.fiveCol
           ? featureRow(item.feature)
           : `| ${item.feature.name} | ${item.feature.howToReach} | ${item.feature.drive} | ${item.feature.endState} |`));
       if (missingRows.length) {
-        await writeFile(file.path, spliceRowsIntoTable(current, missingRows));
+        const nextDoc = tableInfo.insertAt >= 0
+          ? `${[...tableInfo.lines.slice(0, tableInfo.insertAt + 1), ...missingRows, ...tableInfo.lines.slice(tableInfo.insertAt + 1)].join('\n').replace(/\n+$/, '')}\n`
+          : `${current.trimEnd()}\n${missingRows.join('\n')}\n`;
+        await writeFile(file.path, nextDoc);
         written.push(path.relative(root, file.path));
       } else {
         preservedOut.push(path.relative(root, file.path));

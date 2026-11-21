@@ -140,7 +140,22 @@ test('audit-check handles fences, header schema and escaped pipes; decision-chec
 
   const bareUrl = await write('decisions-bare-url.tsv', [
     'ts\tphase\tdecision\twhy\tevidence\tresult',
-    '2026-11-11T00:05:00Z\t设计\t选 A\t理由\thttps://\t待验证',
+    '2026-02-30T00:05:00Z\t设计\t选 A\t理由\thttps://.\t待验证',
   ].join('\n'));
-  assert.equal(run(decisionCheck, bareUrl).status, 1);
+  const bareUrlOut = run(decisionCheck, bareUrl);
+  assert.equal(bareUrlOut.status, 1);
+  assert.match(bareUrlOut.stdout, /invalid ISO ts/);
+  assert.match(bareUrlOut.stdout, /parseable pointer/);
+
+  const outerPipeless = await write('audit-pipeless.md', [
+    '<!--',
+    '## 覆盖声明',
+    'ignored html comment table',
+    '-->',
+    '## 覆盖声明',
+    '面 | 状态 | 范围',
+    '--- | --- | ---',
+    '正确性 | 已审 | src/a.ts',
+  ].join('\n'));
+  assert.equal(run(auditCheck, outerPipeless).status, 0);
 });

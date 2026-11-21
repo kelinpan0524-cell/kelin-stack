@@ -144,11 +144,14 @@ const add = (tag, file, line, kind, evidence) => {
 let oldFile = '';
 let newFile = '';
 let activeFile = '';
+let renameFrom = '';
+let renameTo = '';
 let isDeletedFile = false;
 let newLine = 0;
 let oldLine = 0;
 const changedFiles = new Set();
 const deletedFiles = new Set();
+const renamedOutOfGate = [];
 const hunks = [];
 let current = null;
 
@@ -238,13 +241,34 @@ const flushHunk = () => {
   current = null;
 };
 
+const flushRename = () => {
+  if (renameFrom && renameTo && isGatePath(renameFrom) && !isGatePath(renameTo)) {
+    if (isTest(renameFrom)) add('RH-1', renameFrom, 1, 'renamed', `renamed test out of gate: ${renameFrom} -> ${renameTo}`);
+    else if (isSnapshot(renameFrom)) add('RH-3', renameFrom, 1, 'renamed', `renamed snapshot out of gate: ${renameFrom} -> ${renameTo}`);
+    else add('RH-14', renameFrom, 1, 'renamed', `renamed gate file out of gate: ${renameFrom} -> ${renameTo}`);
+  }
+  renameFrom = '';
+  renameTo = '';
+};
+
 for (const line of diff.split('\n')) {
   if (line.startsWith('diff --git ')) {
     flushHunk();
+    flushRename();
     oldFile = '';
     newFile = '';
     activeFile = '';
     isDeletedFile = false;
+    continue;
+  }
+  if (line.startsWith('rename from ')) {
+    renameFrom = unquoteGitPath(line.slice('rename from '.length));
+    if (renameFrom) changedFiles.add(renameFrom);
+    continue;
+  }
+  if (line.startsWith('rename to ')) {
+    renameTo = unquoteGitPath(line.slice('rename to '.length));
+    if (renameTo) changedFiles.add(renameTo);
     continue;
   }
   if (line.startsWith('--- ')) {
@@ -275,9 +299,13 @@ for (const line of diff.split('\n')) {
   } else if (line.startsWith('-') && !line.startsWith('---')) {
     current.removed.push({ text: line.slice(1), code: '', line: oldLine });
     oldLine += 1;
+  } else if (line.startsWith(' ')) {
+    oldLine += 1;
+    newLine += 1;
   }
 }
 flushHunk();
+flushRename();
 
 const testFiles = [...changedFiles].filter((f) => isTest(f) && !deletedFiles.has(f));
 const snapshotFiles = [...changedFiles].filter(isSnapshot);
@@ -286,16 +314,17 @@ const deletedGateFiles = [...deletedFiles].filter(isGatePath).sort();
 const snapshotHasOwner = (snapFile) => {
   if (!testFiles.length) return false;
   const snapBase = path.basename(snapFile).replace(/\.snap$/, '');
-  const snapStem = snapBase.replace(/\.(test|spec)\.[cm]?[jt]sx?$/i, '').split('.')[0];
   const snapDir = path.dirname(snapFile).replace(/(?:^|\/)__snapshots__$/, '');
+  const snapStem = snapBase.replace(/\.(test|spec)\.[cm]?[jt]sx?$/i, '');
   if (/\.(test|spec)\./i.test(snapBase)) {
     return testFiles.some((tf) => {
       const tfDir = path.dirname(tf);
       const sameFamilyDir = tfDir === snapDir || snapDir === '';
-      return sameFamilyDir && (path.basename(tf) === snapBase || (snapStem && path.basename(tf).startsWith(`${snapStem}.`)));
+      const tfStem = path.basename(tf).replace(/\.(test|spec)\.[cm]?[jt]sx?$/i, '');
+      return sameFamilyDir && (path.basename(tf) === snapBase || (snapStem && tfStem === snapStem));
     });
   }
-  return testFiles.some((tf) => tf.endsWith(`/${snapBase}`) || tf === snapBase || (snapStem && path.basename(tf).startsWith(`${snapStem}.`)) || path.dirname(tf) === snapDir);
+  return testFiles.some((tf) => tf.endsWith(`/${snapBase}`) || tf === snapBase || (snapStem && path.basename(tf).replace(/\.(test|spec)\.[cm]?[jt]sx?$/i, '') === snapStem) || path.dirname(tf) === snapDir);
 };
 
 for (const deleted of deletedGateFiles) {
@@ -334,7 +363,10 @@ for (const hunk of hunks) {
       if (/\bnot implemented\b|expect\(true\)\.toBe\(true\)|expect\(1\)\.toBe\(1\)|\bassert True\b|\bpass\s*(#.*)?$/.test(entry.code) || /\b(TODO|FIXME)\b/.test(entry.comments)) {
         add('RH-4', changedFile, entry.line, 'added', entry.text);
       }
-      if (/(\.skip\s*\(|\bxit\s*\(|\bxdescribe\s*\(|@pytest\.mark\.skip|unittest\.skip|\bt\.Skip\(|@Ignore\b)/.test(entry.code)) {
+      if (
+        /(\.skip\s*\(|\bxit\s*\(|\bxdescribe\s*\(|@pytest\.mark\.skip|unittest\.skip|\bt\.Skip\(|@Ignore\b)/.test(entry.code) ||
+        /(?:^|[^\w.$])(?:it|test|describe)\s*\([^)]*,\s*\{[^}]*\bskip\s*:\s*(?=\S)(?!false\b|0\b|null\b|undefined\b|['"]{2})[^,}]+/.test(entry.code)
+      ) {
         add('RH-1', changedFile, entry.line, 'added', entry.text);
       }
       if (/process\.env\.(CI|NODE_ENV|GITHUB_ACTIONS|GITLAB_CI|BUILDKITE|CIRCLECI)\b/.test(entry.code)) {
@@ -347,8 +379,12 @@ for (const hunk of hunks) {
   }
 
   if (!hunk.deleted && (gatePath || isCodeFile(changedFile))) {
+    const isPy = /\.py$/i.test(changedFile);
+    const suppressRe = isPy
+      ? /^\s*#\s*(?:noqa|type:\s*ignore)\b/
+      : /(?:^|\s)(?:\/\/|\/\*+|\*)\s*(?:@ts-ignore|@ts-expect-error|eslint-disable(?:-next-line|-line)?)\b/;
     for (const entry of hunk.added) {
-      if (/eslint-disable|@ts-ignore|@ts-expect-error|# noqa|# type: ignore/.test(entry.comments)) {
+      if (suppressRe.test(entry.comments)) {
         add('RH-13', changedFile, entry.line, 'added', entry.text);
       }
     }

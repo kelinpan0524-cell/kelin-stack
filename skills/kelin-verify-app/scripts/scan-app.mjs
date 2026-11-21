@@ -51,12 +51,12 @@ const slugify = (value) => value.toLowerCase().replace(/[^a-z0-9-]+/g, '-').repl
 
 const makeFeatureId = (kind, method, routeOrName, seen) => {
   const hash = createHash('sha256').update(`${kind}:${method}:${routeOrName}`).digest('hex').slice(0, 6);
-  const slug = kind === 'cli'
-    ? `cli-${slugify(routeOrName)}`
-    : kind === 'api'
-      ? `api-${method.toLowerCase()}-${slugify(routeOrName === '/' ? 'root' : routeOrName)}`
-      : `page-${slugify(routeOrName === '/' ? 'home' : routeOrName)}`;
-  const id = `${slug}-${hash}`;
+  const rawSlug = slugify(
+    kind === 'cli' ? routeOrName : routeOrName === '/' ? (kind === 'api' ? 'root' : 'home') : routeOrName,
+  );
+  const boundedSlug = rawSlug.slice(0, 48).replace(/-+$/g, '') || 'item';
+  const prefix = kind === 'cli' ? 'cli' : kind === 'api' ? `api-${method.toLowerCase()}` : 'page';
+  const id = `${prefix}-${boundedSlug}-${hash}`;
   seen.add(id);
   return id;
 };

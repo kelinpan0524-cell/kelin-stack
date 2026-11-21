@@ -130,6 +130,7 @@ export function requiredSessionCount(cases) {
 }
 
 function validateRecord(record, label) {
+  if (record.ok !== true) throw new Error(`Observation failed: ${label}`);
   if (!record.assertions?.length) throw new Error(`No assertions: ${label}`);
   if (record.assertions.some((assertion) => !assertion.ok)) throw new Error(`Failed assertion: ${label}/${record.assertions.find((a) => !a.ok).id}`);
   if (!record.artifacts?.length) throw new Error(`No artifacts: ${label}`);

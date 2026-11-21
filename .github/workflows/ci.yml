@@ -19,7 +19,20 @@ jobs:
       - run: node skills/kelin-evals/scripts/drift-check.mjs --root .
       - run: node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
       - run: node skills/kelin-guard/scripts/guard-check.mjs guards.json
-      - run: node skills/kelin-guard/scripts/ratchet-check.mjs ratchet.json --check --base-ref "origin/${{ github.base_ref || github.event.repository.default_branch || 'main' }}"
+      - name: ratchet
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] && [ -n "${{ github.event.before }}" ]; then
+            BASE_REF="${{ github.event.before }}"
+          else
+            BASE_REF="origin/${{ github.event.repository.default_branch || 'main' }}"
+          fi
+          if [ ! -f ratchet.json ] && git cat-file -e "${BASE_REF}:ratchet.json" 2>/dev/null; then
+            echo "ratchet.json removed relative to ${BASE_REF}" >&2
+            exit 1
+          fi
+          node skills/kelin-guard/scripts/ratchet-check.mjs ratchet.json --check --base-ref "$BASE_REF"
       - run: node skills/kelin-neat/scripts/neat-check.mjs neat.json
       - run: node skills/kelin-evals/scripts/skill-eval.mjs --root .
       - run: node skills/kelin-docs/scripts/gen-docs.mjs --check

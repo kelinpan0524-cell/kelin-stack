@@ -275,7 +275,7 @@ test('review & fingerprint hardening: unborn HEAD, JS regex literals, per-hunk e
   const fp2 = JSON.parse(run(unborn, reviewCheck, ['--print']).stdout).fingerprint;
   assert.notEqual(fp1, fp2);
 
-  // Regex literal /\/\*/ does not swallow following // @ts-ignore as a block comment; regex /test\.skip\(/ does not trigger RH-1
+  // Regex literal must not turn the following line into a block comment; regex /test\.skip\(/ does not trigger RH-1
   const dir = await repo();
   await writeFile(
     path.join(dir, 'src/app.mjs'),
@@ -357,4 +357,68 @@ test('review & fingerprint hardening: unborn HEAD, JS regex literals, per-hunk e
   const staleByMd = run(cleanDir, reviewCheck);
   assert.equal(staleByMd.status, 1);
   assert.equal(JSON.parse(staleByMd.stdout).status, 'STALE');
+
+  // P1-6: ordinary prose like "account is closed" and positive counts like "P1: 1 fixed" must stay BLOCKED
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: Requests fail when an account is closed\n');
+  assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 1);
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\nP1: 1 fixed in progress\n');
+  assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 1);
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: missing validation (fixed)\n结论：无问题\n');
+  assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 0);
+
+  // P2-11 & P2-12: --write --review custom.md honored by default check; chmod +x invalidates untracked receipt
+  const { chmodSync, unlinkSync } = await import('node:fs');
+  unlinkSync(path.join(cleanDir, '.kelin', 'review.md'));
+  const customRev = path.join(cleanDir, 'custom-review.md');
+  await writeFile(customRev, `# Review\nWorktree-Fingerprint: ${JSON.parse(run(cleanDir, reviewCheck, ['--print']).stdout).fingerprint}\n结论：通过\n`);
+  assert.equal(run(cleanDir, reviewCheck, ['--write', '--review', customRev]).status, 0);
+  assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'CURRENT');
+  await writeFile(customRev, '# Review\nedited\n');
+  assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'STALE');
+  await writeFile(path.join(cleanDir, 'new-script.sh'), '#!/bin/sh\necho hi\n');
+  assert.equal(run(cleanDir, reviewCheck, ['--write', '--review', customRev]).status, 0);
+  chmodSync(path.join(cleanDir, 'new-script.sh'), 0o755);
+  assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'STALE');
+
+  // P1-13, P2-1, P2-2, P2-3, P3-1: gate rename, { skip: true }, exact snapshot owner stem, prose directive, diff context line numbers
+  const gDir = await repo();
+  await mkdir(path.join(gDir, 'tests', '__snapshots__'), { recursive: true });
+  await writeFile(path.join(gDir, 'tests/account.login.test.mjs'), "test('login', () => { assert.equal(1, 1); });\n");
+  await writeFile(path.join(gDir, 'tests/account.logout.test.mjs'), "test('logout', () => { assert.equal(1, 1); });\n");
+  await writeFile(path.join(gDir, 'tests/__snapshots__/account.login.test.mjs.snap'), 'exports[`l`] = `1`;\n');
+  git(gDir, ['add', '-A']);
+  git(gDir, ['commit', '-qm', 'snap setup']);
+  await writeFile(path.join(gDir, 'tests/account.logout.test.mjs'), "test('logout', { skip: false }, () => { assert.equal(2, 2); });\n");
+  await writeFile(path.join(gDir, 'tests/__snapshots__/account.login.test.mjs.snap'), 'exports[`l`] = `2`;\n');
+  const mismatchSnap = JSON.parse(run(gDir, gateScan, ['--base', 'HEAD']).stdout);
+  assert.ok(mismatchSnap.findings.some((f) => f.tag === 'RH-3'));
+  assert.equal(mismatchSnap.findings.some((f) => f.tag === 'RH-1'), false, '{ skip: false } must pass');
+
+  await writeFile(path.join(gDir, 'tests/account.logout.test.mjs'), "test('logout', { skip: true }, () => { assert.equal(2, 2); });\n");
+  assert.ok(JSON.parse(run(gDir, gateScan, ['--base', 'HEAD']).stdout).findings.some((f) => f.tag === 'RH-1'));
+
+  await writeFile(path.join(gDir, 'src/app.mjs'), '// Explain how @ts-ignore behaves in prose\nexport const a = 1;\n');
+  assert.equal(JSON.parse(run(gDir, gateScan, ['--base', 'HEAD']).stdout).findings.some((f) => f.tag === 'RH-13'), false);
+
+  const renameDir = await repo();
+  git(renameDir, ['mv', 'tests/app.test.mjs', 'src/moved.txt']);
+  git(renameDir, ['commit', '-qm', 'rename test out of gate']);
+  const renameScan = JSON.parse(run(renameDir, gateScan, ['--base', 'HEAD~1']).stdout);
+  assert.ok(renameScan.gateFiles.includes('tests/app.test.mjs'));
+  assert.ok(renameScan.findings.some((f) => f.tag === 'RH-1' && f.kind === 'renamed'));
+
+  const ctxDiff = path.join(gDir, 'ctx.diff');
+  await writeFile(ctxDiff, [
+    'diff --git a/tests/app.test.mjs b/tests/app.test.mjs',
+    '--- a/tests/app.test.mjs',
+    '+++ b/tests/app.test.mjs',
+    '@@ -1,4 +1,5 @@',
+    ' const keep1 = 1;',
+    ' const keep2 = 2;',
+    ' const keep3 = 3;',
+    '+test.skip("later", () => {});',
+    ' const keep4 = 4;',
+  ].join('\n'));
+  const ctxRes = JSON.parse(run(gDir, gateScan, ['--file', ctxDiff]).stdout);
+  assert.equal(ctxRes.findings[0]?.line, 4);
 });

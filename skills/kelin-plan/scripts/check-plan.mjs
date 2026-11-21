@@ -6,16 +6,56 @@ import { fileURLToPath } from 'node:url';
 
 const stripFenced = (raw) => {
   const out = [];
-  let fence = '';
-  for (const line of String(raw).split(/\r?\n/)) {
-    const trimmed = line.trim();
-    const match = /^(`{3,}|~{3,})/.exec(trimmed);
-    if (match) {
-      if (!fence) fence = match[1][0];
-      else if (fence === match[1][0] && trimmed.length >= 3) fence = '';
-      continue;
+  let fenceChar = '';
+  let fenceLen = 0;
+  let inComment = false;
+  for (const rawLine of String(raw).split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!inComment) {
+      const fenceMatch = /^(`{3,}|~{3,})/.exec(trimmed);
+      if (!fenceChar && fenceMatch) {
+        fenceChar = fenceMatch[1][0];
+        fenceLen = fenceMatch[1].length;
+        continue;
+      }
+      if (fenceChar) {
+        const closeMatch = new RegExp(`^${fenceChar === '~' ? '~' : '`'}{${fenceLen},}\\s*$`);
+        if (closeMatch.test(trimmed)) {
+          fenceChar = '';
+          fenceLen = 0;
+        }
+        continue;
+      }
     }
-    if (!fence) out.push(line);
+    let line = rawLine;
+    let rebuilt = '';
+    while (line.length) {
+      if (inComment) {
+        const end = line.indexOf('-->');
+        if (end < 0) {
+          line = '';
+          break;
+        }
+        inComment = false;
+        line = line.slice(end + 3);
+      } else {
+        const start = line.indexOf('<!--');
+        if (start < 0) {
+          rebuilt += line;
+          line = '';
+          break;
+        }
+        rebuilt += line.slice(0, start);
+        const end = line.indexOf('-->', start + 4);
+        if (end < 0) {
+          inComment = true;
+          line = '';
+          break;
+        }
+        line = line.slice(end + 3);
+      }
+    }
+    if (!inComment || rebuilt.trim()) out.push(rebuilt);
   }
   return out;
 };
@@ -81,7 +121,7 @@ export function validatePlanMarkdown(raw, level = 'standard') {
       const taskNodes = new Map();
       const normalizeId = (token) => token.trim().replace(/\s+/g, '').toLowerCase();
       tasks.forEach((line, index) => {
-        const body = line.replace(/^\s*- \[[ x]\]\s*/, '');
+        const body = boxText(line);
         const labelMatch = /^(?:(?:单元|任务|step|unit|pr)\s*[#-]?\s*\d+|[A-Za-z]+-\d+|T\d+|U\d+)/i.exec(body);
         const id = labelMatch ? normalizeId(labelMatch[0]) : `t${index + 1}`;
         if (taskNodes.has(id)) {

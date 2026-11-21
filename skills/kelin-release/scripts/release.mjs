@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -114,6 +114,9 @@ const evaluateReceipt = async () => {
     if (receipt.verdict !== 'VERIFIED') {
       return { ok: false, provided: true, reason: `acceptance verdict is ${receipt.verdict || 'missing'}, expected VERIFIED` };
     }
+    if (receipt.worktreeMutated === true) {
+      return { ok: false, provided: true, reason: 'acceptance receipt flagged worktree mutation during checks' };
+    }
     const specFile = verifyPathOpt
       ? path.resolve(root, verifyPathOpt)
       : ['.kelin/verify.json', 'verify.json'].map((rel) => path.join(root, rel)).find((p) => existsSync(p));
@@ -131,16 +134,37 @@ const evaluateReceipt = async () => {
     } catch (error) {
       return { ok: false, provided: true, reason: `unreadable verify.json: ${error.message}` };
     }
-    const specIds = Array.isArray(spec?.checks) ? spec.checks.map((c) => c?.id).filter((id) => typeof id === 'string' && id.trim()) : [];
+    const rootReal = realpathSync(root);
+    const isInside = (parentReal, childReal) => childReal === parentReal || childReal.startsWith(`${parentReal}${path.sep}`);
+    const specBaseRaw = typeof spec?.cwd === 'string' && spec.cwd.trim() ? path.resolve(rootReal, spec.cwd) : rootReal;
+    if (!existsSync(specBaseRaw)) {
+      return { ok: false, provided: true, reason: `verify.json cwd does not exist: ${spec.cwd}` };
+    }
+    const expectedBase = realpathSync(specBaseRaw);
+    if (!isInside(rootReal, expectedBase)) {
+      return { ok: false, provided: true, reason: 'verify.json cwd escapes project root' };
+    }
+    if (typeof receipt.cwd !== 'string' || !existsSync(receipt.cwd) || realpathSync(receipt.cwd) !== expectedBase) {
+      return { ok: false, provided: true, reason: `acceptance receipt cwd mismatch (got ${receipt.cwd || 'missing'}, expected ${expectedBase})` };
+    }
+    const checksList = Array.isArray(spec?.checks) ? spec.checks : [];
+    const specIds = checksList.map((c) => c?.id).filter((id) => typeof id === 'string' && id.trim());
     if (!specIds.length || !Array.isArray(receipt.requiredIds) || specIds.some((id) => !receipt.requiredIds.includes(id))) {
       return { ok: false, provided: true, reason: 'acceptance receipt missing requiredIds' };
     }
+    const checkMap = new Map(checksList.filter((c) => c?.id).map((c) => [c.id, c]));
     const rowMap = new Map(Array.isArray(receipt.rows) ? receipt.rows.map((r) => [r?.id, r]) : []);
     const bad = specIds.find((id) => {
       const row = rowMap.get(id);
-      return !row || row.skipped || row.timedOut || row.error || row.exit !== 0;
+      if (!row || row.skipped || row.timedOut || row.error || row.exit !== 0) return true;
+      const checkDef = checkMap.get(id);
+      const expCwdRaw = typeof checkDef?.cwd === 'string' && checkDef.cwd.trim() ? path.resolve(expectedBase, checkDef.cwd) : expectedBase;
+      if (!existsSync(expCwdRaw)) return true;
+      const expCwd = realpathSync(expCwdRaw);
+      if (!isInside(rootReal, expCwd)) return true;
+      return typeof row.cwd !== 'string' || !existsSync(row.cwd) || realpathSync(row.cwd) !== expCwd;
     });
-    if (bad) return { ok: false, provided: true, reason: `acceptance check not passing: ${bad}` };
+    if (bad) return { ok: false, provided: true, reason: `acceptance check not passing or cwd mismatch: ${bad}` };
     if (head || branch || existsSync(path.join(root, '.git'))) {
       if (!computeWorktreeFingerprint) {
         return { ok: false, provided: true, reason: 'fingerprint validator unavailable for acceptance receipt' };
@@ -179,6 +203,38 @@ const evaluateReceipt = async () => {
     } catch (error) {
       return { ok: false, provided: true, reason: `incomplete receipt evidence: ${error.message}` };
     }
+    const runDir = realpathSync(path.dirname(resolved));
+    const safeRunFile = (rel) => {
+      if (typeof rel !== 'string' || !rel.trim()) return null;
+      const target = path.resolve(runDir, rel);
+      if (target !== runDir && !target.startsWith(`${runDir}${path.sep}`)) return null;
+      return existsSync(target) ? realpathSync(target) : null;
+    };
+    for (const obs of receipt.observations || []) {
+      if (obs?.ok !== true) {
+        return { ok: false, provided: true, reason: `observation failed for ${obs?.feature || 'unknown'}` };
+      }
+      for (const art of obs.artifacts || []) {
+        const artFile = safeRunFile(art?.path);
+        if (!artFile || !artFile.startsWith(`${runDir}${path.sep}`)) {
+          return { ok: false, provided: true, reason: `missing or unsafe receipt artifact: ${art?.path || 'unknown'}` };
+        }
+        const actualSha = createHash('sha256').update(readFileSync(artFile)).digest('hex');
+        if (actualSha !== art.sha256) {
+          return { ok: false, provided: true, reason: `receipt artifact modified: ${art.path}` };
+        }
+      }
+      if (obs.transcript) {
+        const txFile = safeRunFile(obs.transcript);
+        if (!txFile || !txFile.startsWith(`${runDir}${path.sep}`)) {
+          return { ok: false, provided: true, reason: `missing or unsafe receipt transcript: ${obs.transcript}` };
+        }
+        const actualTxSha = createHash('sha256').update(readFileSync(txFile)).digest('hex');
+        if (actualTxSha !== obs.transcriptHash) {
+          return { ok: false, provided: true, reason: `receipt transcript modified: ${obs.transcript}` };
+        }
+      }
+    }
     if (hashTree && status === '') {
       const actualTree = await hashTree(root);
       if (actualTree.hash !== receipt.plugin.treeHash) {
@@ -191,7 +247,32 @@ const evaluateReceipt = async () => {
   return { ok: false, provided: true, reason: 'unrecognized receipt schema' };
 };
 
+const evaluateCi = () => {
+  if (!head) return { ok: false, reason: 'no HEAD commit for CI lookup' };
+  const origin = git(['remote', 'get-url', 'origin'], true);
+  if (!origin) return { ok: false, reason: 'no git origin remote configured' };
+  try {
+    const raw = execFileSync(
+      'gh',
+      ['run', 'list', '--commit', head, '--json', 'name,status,conclusion,headSha'],
+      { cwd: root, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const runs = JSON.parse(raw).filter((r) => !r.headSha || r.headSha === head);
+    if (!runs.length) return { ok: false, reason: `no GitHub Actions runs found for commit ${head.slice(0, 12)}` };
+    const incomplete = runs.filter((r) => r.status !== 'completed');
+    if (incomplete.length) return { ok: false, reason: `CI still running on ${head.slice(0, 12)}: ${incomplete.map((r) => r.name).join(', ')}` };
+    const failed = runs.filter((r) => !['success', 'neutral', 'skipped'].includes(r.conclusion));
+    if (failed.length) return { ok: false, reason: `CI failed on ${head.slice(0, 12)}: ${failed.map((r) => `${r.name}(${r.conclusion})`).join(', ')}` };
+    const passed = runs.filter((r) => r.conclusion === 'success');
+    if (!passed.length) return { ok: false, reason: `no passing CI runs on ${head.slice(0, 12)}` };
+    return { ok: true, commit: head, runs: runs.length };
+  } catch (error) {
+    return { ok: false, reason: `gh run list failed: ${String(error.message || error).slice(0, 160)}` };
+  }
+};
+
 const receiptCheck = await evaluateReceipt();
+const ciCheck = evaluateCi();
 const branchAllowed = allowBranch || ['main', 'master'].includes(branch);
 
 const plan = {
@@ -210,6 +291,7 @@ const plan = {
   gates: {
     clean: status === '',
     branchAllowed,
+    ci: ciCheck,
     receipt: receiptCheck,
   },
   mode: publish ? 'publish' : 'dry-run',
@@ -233,6 +315,10 @@ if (!branchAllowed) {
 }
 if (!skipReceipt && !receiptCheck.ok) {
   console.error(`Receipt check failed: ${receiptCheck.reason}`);
+  process.exit(1);
+}
+if (!ciCheck.ok) {
+  console.error(`CI check failed: ${ciCheck.reason}`);
   process.exit(1);
 }
 

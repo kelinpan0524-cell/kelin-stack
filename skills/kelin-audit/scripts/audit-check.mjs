@@ -5,16 +5,56 @@ import { fileURLToPath } from 'node:url';
 
 const stripFenced = (raw) => {
   const out = [];
-  let fence = '';
-  for (const line of String(raw).split(/\r?\n/)) {
-    const trimmed = line.trim();
-    const match = /^(`{3,}|~{3,})/.exec(trimmed);
-    if (match) {
-      if (!fence) fence = match[1][0];
-      else if (fence === match[1][0] && trimmed.length >= 3) fence = '';
-      continue;
+  let fenceChar = '';
+  let fenceLen = 0;
+  let inComment = false;
+  for (const rawLine of String(raw).split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!inComment) {
+      const fenceMatch = /^(`{3,}|~{3,})/.exec(trimmed);
+      if (!fenceChar && fenceMatch) {
+        fenceChar = fenceMatch[1][0];
+        fenceLen = fenceMatch[1].length;
+        continue;
+      }
+      if (fenceChar) {
+        const closeMatch = new RegExp(`^${fenceChar === '~' ? '~' : '`'}{${fenceLen},}\\s*$`);
+        if (closeMatch.test(trimmed)) {
+          fenceChar = '';
+          fenceLen = 0;
+        }
+        continue;
+      }
     }
-    if (!fence) out.push(line);
+    let line = rawLine;
+    let rebuilt = '';
+    while (line.length) {
+      if (inComment) {
+        const end = line.indexOf('-->');
+        if (end < 0) {
+          line = '';
+          break;
+        }
+        inComment = false;
+        line = line.slice(end + 3);
+      } else {
+        const start = line.indexOf('<!--');
+        if (start < 0) {
+          rebuilt += line;
+          line = '';
+          break;
+        }
+        rebuilt += line.slice(0, start);
+        const end = line.indexOf('-->', start + 4);
+        if (end < 0) {
+          inComment = true;
+          line = '';
+          break;
+        }
+        line = line.slice(end + 3);
+      }
+    }
+    if (!inComment || rebuilt.trim()) out.push(rebuilt);
   }
   return out;
 };
@@ -56,16 +96,35 @@ export function validateAuditReport(text) {
   } else {
     const end = lines.slice(start + 1).findIndex((line) => /^#{1,3}\s+/.test(line));
     const section = lines.slice(start + 1, end < 0 ? undefined : start + 1 + end);
-    const allTableLines = section.filter((line) => /^\s*\|/.test(line) || (!/^\s*[-*+>0-9]/.test(line) && /[^\\]\|/.test(line)));
-    if (allTableLines.length < 2 || !isSeparatorRow(allTableLines[1])) {
+    let headerIdx = -1;
+    let sepCells = [];
+    let headerCells = [];
+    for (let i = 0; i < section.length - 1; i += 1) {
+      const h = section[i];
+      const s = section[i + 1];
+      if (!h.includes('|') || !isSeparatorRow(s)) continue;
+      const hCells = splitTableRow(h);
+      const sCells = splitTableRow(s);
+      if (hCells.length >= 2 && hCells.length === sCells.length) {
+        headerIdx = i;
+        headerCells = hCells;
+        sepCells = sCells;
+        break;
+      }
+    }
+    if (headerIdx < 0 || !sepCells.length) {
       problems.push('覆盖声明 table missing separator row');
     } else {
-      const headerCells = splitTableRow(allTableLines[0]);
       const statusCol = headerCells.findIndex((h) => /^(状态|status)$/i.test(h));
       if (statusCol < 0) {
         problems.push('覆盖声明 table missing 状态/status header column');
       } else {
-        rows = allTableLines.slice(2).filter((line) => !isSeparatorRow(line));
+        for (let i = headerIdx + 2; i < section.length; i += 1) {
+          const line = section[i];
+          if (!line.trim()) break;
+          if (!line.includes('|') || isSeparatorRow(line)) break;
+          rows.push(line);
+        }
         if (!rows.length) problems.push('覆盖声明 has no data rows');
         const exactStatus = /^(已审|部分|未审|audited|partial|not assessed|n\/a)$/i;
         let audited = 0;

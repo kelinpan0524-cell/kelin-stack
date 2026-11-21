@@ -264,4 +264,44 @@ test('guard-check rejects disabled CI steps/echoes/basename collisions and ratch
   const regJson = JSON.parse(regRes.stdout);
   assert.equal(regJson.baselineRegressions.length, 1);
   assert.equal(regJson.baselineRegressions[0].kind, 'added-baseline-entry');
+
+  // P1-11: renamed rule ID with seeded baseline & removed rule ID both report baselineRegressions
+  await writeFile(rCfg, JSON.stringify({
+    version: 1,
+    rules: [{
+      id: 'no-log-renamed',
+      include: ['src/**/*.mjs'],
+      pattern: 'console\\.log',
+      baseline: [
+        { file: 'src/a.mjs', match: 'console.log(1);', count: 1 },
+        { file: 'src/a.mjs', match: 'console.log(2);', count: 1 },
+      ],
+      exceptions: [],
+    }],
+  }, null, 2));
+  const renamedRes = run(ratchetCheck, [rCfg, '--check', '--base-ref', 'HEAD'], rDir);
+  assert.equal(renamedRes.status, 1);
+  const renamedRegs = JSON.parse(renamedRes.stdout).baselineRegressions;
+  assert.ok(renamedRegs.some((r) => r.kind === 'removed-rule' && r.rule === 'no-log'));
+  assert.ok(renamedRegs.some((r) => r.kind === 'added-baseline-entry' && r.rule === 'no-log-renamed'));
+
+  // P1-12: job if:false after steps, continue-on-error:true, and compound echo/sh -c bypasses must fail guard-check
+  await writeFile(path.join(dir, '.github', 'workflows', 'ci.yml'), [
+    'jobs:',
+    '  post_if_false:',
+    '    steps:',
+    '      - run: node src/rule.mjs',
+    '    if: false',
+    '  cont_err:',
+    '    steps:',
+    '      - continue-on-error: true',
+    '        run: node src/rule.mjs',
+    '  compound_echo:',
+    '    steps:',
+    '      - run: true && FOO=1 echo "node src/rule.mjs"',
+    '      - run: sh -c \'echo "node --test tests/target.test.mjs"\'',
+  ].join('\n'));
+  const ciBypassRes = run(guardCheck, [gFile], dir);
+  assert.equal(ciBypassRes.status, 1);
+  assert.equal(JSON.parse(ciBypassRes.stdout).problems.length, 2);
 });

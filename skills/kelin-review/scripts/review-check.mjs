@@ -24,12 +24,13 @@ const stripFenced = (text) => {
 
 export function hasUnresolvedHighSeverity(markdown) {
   const clean = stripFenced(markdown);
+  const explicitClosureRe = /(?:(?:\(|\[|【|\|\s*)(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)(?:\s*\)|\s*\]|】|\s*\||$)|(?:状态|status)\s*[:：]\s*(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)(?=$|[\s|,.;:!?。；，]))/i;
   for (const rawLine of clean.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || /^\|?[\s:-]+\|[\s|:-]*$/.test(line)) continue;
-    if (/^[-*+]\s*\[[xX]\]/.test(line)) continue;
-    if (/(已修复|已解决|已关闭|\b(?:fixed|resolved|closed|wontfix|dismissed)\b)/i.test(line)) continue;
     if (/\bP[01]\s*[:=]\s*[1-9]\d*\b/i.test(line)) return true;
+    if (/^[-*+]\s*\[[xX]\]/.test(line)) continue;
+    if (!/^[-*+]\s*\[\s\]/.test(line) && explicitClosureRe.test(line)) continue;
 
     const scrubbed = line
       .replace(/\bP0\s*[-–—~]\s*P[123]\b/gi, '')
@@ -63,11 +64,43 @@ const main = () => {
     process.exit(2);
   }
 
+  const stampFile = path.join(wt.repo, '.kelin', 'review.json');
   const defaultReviewFile = path.join(wt.repo, '.kelin', 'review.md');
-  const activeReviewPath = reviewFile ? path.resolve(root, reviewFile) : (existsSync(defaultReviewFile) ? defaultReviewFile : '');
-  if (reviewFile && !existsSync(activeReviewPath)) {
-    console.error(`${reviewFile}: not found`);
-    process.exit(2);
+  const inspectMode = !args.includes('--write') && !args.includes('--print');
+  let stampData = null;
+  if (inspectMode && !reviewFile && existsSync(stampFile)) {
+    try {
+      stampData = JSON.parse(readFileSync(stampFile, 'utf8'));
+    } catch {
+      stampData = null;
+    }
+  }
+
+  const repoReal = realpathSync(wt.repo);
+  const isInsideRepo = (candidateReal) => candidateReal === repoReal || candidateReal.startsWith(`${repoReal}${path.sep}`);
+  let activeReviewPath = '';
+  let missingStampedReport = false;
+  if (reviewFile) {
+    const rawTarget = path.resolve(root, reviewFile);
+    if (!existsSync(rawTarget)) {
+      console.error(`${reviewFile}: not found`);
+      process.exit(2);
+    }
+    activeReviewPath = realpathSync(rawTarget);
+  } else if (inspectMode && stampData && typeof stampData.reportFile === 'string' && stampData.reportFile) {
+    const candidate = path.resolve(repoReal, stampData.reportFile);
+    if (!existsSync(candidate)) {
+      missingStampedReport = true;
+    } else {
+      const candidateReal = realpathSync(candidate);
+      if (isInsideRepo(candidateReal)) {
+        activeReviewPath = candidateReal;
+      } else {
+        missingStampedReport = true;
+      }
+    }
+  } else if (existsSync(defaultReviewFile)) {
+    activeReviewPath = realpathSync(defaultReviewFile);
   }
 
   let reportHash = null;
@@ -86,11 +119,9 @@ const main = () => {
     files: wt.files,
     verdict: reportVerdict,
     reportHash,
-    ...(activeReviewPath ? { reportFile: path.relative(wt.repo, activeReviewPath) } : {}),
+    ...(activeReviewPath ? { reportFile: isInsideRepo(activeReviewPath) ? path.relative(repoReal, activeReviewPath) : activeReviewPath } : {}),
     createdAt: new Date().toISOString(),
   };
-
-  const stampFile = path.join(wt.repo, '.kelin', 'review.json');
 
   if (args.includes('--print')) {
     console.log(JSON.stringify(record, null, 2));
@@ -107,8 +138,7 @@ const main = () => {
 
   let expected = '';
   let source = '';
-  let stampData = null;
-  let staleByReport = false;
+  let staleByReport = missingStampedReport;
   let blocked = reportVerdict === 'blocked';
 
   if (reviewFile) {
@@ -116,13 +146,7 @@ const main = () => {
     expected = match ? match[1].toLowerCase() : '';
     source = reviewFile;
   } else if (existsSync(stampFile)) {
-    try {
-      stampData = JSON.parse(readFileSync(stampFile, 'utf8'));
-      expected = stampData?.fingerprint || '';
-    } catch {
-      stampData = null;
-      expected = '';
-    }
+    expected = stampData?.fingerprint || '';
     source = path.relative(wt.repo, stampFile);
     if (stampData) {
       if (stampData.verdict === 'blocked') blocked = true;

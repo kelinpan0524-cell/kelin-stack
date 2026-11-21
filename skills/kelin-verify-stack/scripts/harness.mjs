@@ -189,7 +189,11 @@ export async function evaluateAssertions(assertions, ctx) {
         case 'plan_valid': {
           const target = safeJoin(ctx.fixtureDir, rule.path);
           const body = existsSync(target) ? await readFile(target, 'utf8') : '';
-          const checker = path.resolve(import.meta.dirname, '..', '..', 'kelin-plan', 'scripts', 'check-plan.mjs');
+          const pluginChecker = ctx.pluginRoot
+            ? path.resolve(ctx.pluginRoot, 'skills', 'kelin-plan', 'scripts', 'check-plan.mjs')
+            : '';
+          const fallbackChecker = path.resolve(import.meta.dirname, '..', '..', 'kelin-plan', 'scripts', 'check-plan.mjs');
+          const checker = pluginChecker && existsSync(pluginChecker) ? pluginChecker : fallbackChecker;
           const { validatePlanMarkdown } = await import(pathToFileURL(checker).href);
           const res = validatePlanMarkdown(body, rule.level || 'standard');
           ok = res.ok;
@@ -203,7 +207,8 @@ export async function evaluateAssertions(assertions, ctx) {
       ok = false;
       note = caught.message;
     }
-    results.push({ id, type: rule.type, ok, detail: note.slice(0, 400) });
+    const extra = rule.type === 'skill_called' || rule.type === 'tool_called' ? { value } : {};
+    results.push({ id, type: rule.type, ok, ...extra, detail: note.slice(0, 400) });
   }
   return results;
 }

@@ -272,6 +272,7 @@ test('large piped --json output (>65536 bytes) flushes without truncation', asyn
 });
 
 test('runs .kelin/verify.json from repo root, emits verdict/hashes, and marks skipped or non-comparable runs INCONCLUSIVE', async () => {
+  const { realpathSync } = await import('node:fs');
   const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-kelindir-'));
   await writeFile(path.join(dir, 'marker.txt'), 'hello\n');
   const kelinDir = path.join(dir, '.kelin');
@@ -286,7 +287,7 @@ test('runs .kelin/verify.json from repo root, emits verdict/hashes, and marks sk
   assert.equal(okRes.status, 0, okRes.stderr);
   const okPayload = JSON.parse(okRes.stdout);
   assert.equal(okPayload.verdict, 'VERIFIED');
-  assert.equal(okPayload.cwd, dir);
+  assert.equal(okPayload.cwd, realpathSync(dir));
   assert.match(okPayload.specHash, /^[a-f0-9]{64}$/);
   assert.deepEqual(okPayload.requiredIds, ['read-root']);
 
@@ -308,4 +309,37 @@ test('runs .kelin/verify.json from repo root, emits verdict/hashes, and marks sk
   const nonComp = run([specFile, '--json'], dir);
   assert.equal(nonComp.status, 1);
   assert.equal(JSON.parse(nonComp.stdout).verdict, 'INCONCLUSIVE');
+});
+
+test('run-acceptance detects mid-run worktree mutation and refuses check cwd escaping --root', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-mut-'));
+  const git = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 'v@example.invalid']);
+  git(['config', 'user.name', 'v']);
+  await writeFile(path.join(dir, 'tracked.txt'), 'v1\n');
+  git(['add', 'tracked.txt']);
+  git(['commit', '-qm', 'init']);
+
+  const specFile = path.join(dir, 'verify.json');
+  await writeFile(specFile, JSON.stringify({
+    checks: [{ id: 'mutate', cmd: 'node -e "require(\'node:fs\').writeFileSync(\'tracked.txt\', \'mutated\')"' }],
+  }));
+  const mutRes = run([specFile, '--json'], dir);
+  assert.equal(mutRes.status, 1);
+  const mutPayload = JSON.parse(mutRes.stdout);
+  assert.equal(mutPayload.worktreeMutated, true);
+  assert.equal(mutPayload.verdict, 'INCONCLUSIVE');
+
+  // Escape check.cwd must fail before executing earlier checks
+  const sentinel = path.join(dir, 'ran.txt');
+  await writeFile(specFile, JSON.stringify({
+    checks: [
+      { id: 'c1', cmd: `node -e 'require("node:fs").writeFileSync(${JSON.stringify(sentinel)}, "1")'` },
+      { id: 'c2', cmd: 'true', cwd: '../..' },
+    ],
+  }));
+  const escRes = run([specFile, '--root', dir, '--json'], dir);
+  assert.equal(escRes.status, 2);
+  assert.equal(existsSync(sentinel), false);
 });

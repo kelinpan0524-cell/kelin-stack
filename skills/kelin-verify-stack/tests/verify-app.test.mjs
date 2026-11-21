@@ -208,4 +208,24 @@ test('generate handles ambiguous legacy API headings, table-footer splicing, and
   const noteIdx = updatedReadme.indexOf('## 手工说明');
   assert.ok(extraIdx > 0 && noteIdx > extraIdx, 'new table rows must be spliced above trailing notes');
   assert.match(updatedReadme, /不要破坏这段备注/);
+
+  // P2-7, P2-8, P2-9: page+API shared path triggers ambiguousLegacy, compact |ID| stays 5-col, deep route ID bounded <= 72 chars
+  const mixDir = await mkdtemp(path.join(tmpdir(), 'kelin-va-mix-'));
+  await writeFile(path.join(mixDir, 'package.json'), JSON.stringify({ name: 'mix' }));
+  await mkdir(path.join(mixDir, 'app', 'items'), { recursive: true });
+  await writeFile(path.join(mixDir, 'app', 'items', 'page.tsx'), 'export default function P() { return null; }\n');
+  await mkdir(path.join(mixDir, 'src'), { recursive: true });
+  await writeFile(
+    path.join(mixDir, 'src', 'r.ts'),
+    "app.get('/items', () => {});\napp.get('/' + 'segment/'.repeat(12) + 'leaf', () => {});\napp.get('/very/deep/" + Array.from({ length: 16 }, (_, i) => `seg${i}`).join('/') + "', () => {});\n",
+  );
+  await mkdir(path.join(mixDir, '.zcode', 'skills', 'verify-mix', 'features'), { recursive: true });
+  await writeFile(path.join(mixDir, '.zcode', 'skills', 'verify-mix', 'features', '01-items.md'), '# 页面或接口 /items\nMIX\n');
+  await writeFile(path.join(mixDir, '.zcode', 'skills', 'verify-mix', 'features', 'README.md'), '|ID|功能|用户怎么到达|怎么驱动|成功的样子|\n|---|---|---|---|---|\n|old|旧功能|访问 /old|点|ok|\n');
+  const mixSync = JSON.parse(run(generate, ['--root', mixDir, '--write', '--sync'], mixDir).stdout);
+  assert.equal(mixSync.diff.ambiguousLegacy?.length, 1);
+  assert.ok(mixSync.diff.added.every((name) => name.replace(/\.md$/, '').length <= 72));
+  const mixReadme = await readFile(path.join(mixDir, '.zcode', 'skills', 'verify-mix', 'features', 'README.md'), 'utf8');
+  const newRows = mixReadme.trim().split('\n').slice(3);
+  assert.ok(newRows.every((r) => r.split('|').length - 2 === 5), `compact 5-col table must emit 5-col rows: ${mixReadme}`);
 });
