@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { validateAuditReport } from '../../kelin-audit/scripts/audit-check.mjs';
+import { validatePlanMarkdown } from '../../kelin-plan/scripts/check-plan.mjs';
+import { validatePlanGate } from '../../kelin-plan/scripts/plan-gate.mjs';
 import { computeWorktreeFingerprint } from '../../kelin-review/scripts/fingerprint.mjs';
 
 export const PHASE_TABLE = {
@@ -117,6 +119,27 @@ const inspect = (state) => {
     const auditFile = path.join(dir, 'audit.md');
     const result = validateAuditReport(readFileSync(auditFile, 'utf8'));
     if (!result.ok) missing.push(`audit.md (${result.problems.join('; ')})`);
+  }
+  if (state.phase === 'design' && !missing.length) {
+    const planFile = path.join(dir, 'plan.md');
+    const planBody = readFileSync(planFile, 'utf8');
+    if (/^#{1,3}\s+/m.test(planBody)) {
+      const level = state.mode === 'light' ? 'light' : 'standard';
+      const checkedPlan = validatePlanMarkdown(planBody, level);
+      if (!checkedPlan.ok) missing.push(`plan.md (${checkedPlan.problems.join('; ')})`);
+    }
+    const gateFile = path.join(dir, 'plan-gate.json');
+    if (existsSync(gateFile)) {
+      try {
+        const gateSpec = JSON.parse(readFileSync(gateFile, 'utf8'));
+        const checkedGate = validatePlanGate(gateSpec, { baseDir: dir, planFile, requireResolved: true });
+        if (!checkedGate.ok) {
+          missing.push(`plan-gate.json (${checkedGate.problems.map((p) => `${p.code}: ${p.detail}`).join('; ')})`);
+        }
+      } catch (error) {
+        missing.push(`plan-gate.json (${error.message})`);
+      }
+    }
   }
   if (state.phase === 'verify' && !missing.length) {
     checkAcceptance(acceptanceFile, verifyFile, missing);

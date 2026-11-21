@@ -17,6 +17,7 @@ jobs:
       - run: node skills/kelin-evals/scripts/drift-check.mjs --root .
       - run: node skills/kelin-agents/scripts/agents-check.mjs AGENTS.md
       - run: node skills/kelin-guard/scripts/guard-check.mjs guards.json
+      - run: node skills/kelin-guard/scripts/ratchet-check.mjs ratchet.json --check
       - run: node skills/kelin-neat/scripts/neat-check.mjs neat.json
       - run: node skills/kelin-evals/scripts/skill-eval.mjs --root .
       - run: node skills/kelin-docs/scripts/gen-docs.mjs --check

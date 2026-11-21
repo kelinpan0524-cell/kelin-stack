@@ -543,8 +543,20 @@ async function checkTools(ctx) {
   }
   const kelinPlanGate = path.join(ctx.pluginRoot, 'skills/kelin-plan/scripts/plan-gate.mjs');
   if (existsSync(kelinPlanGate)) {
+    const planFile = path.join(ctx.tempDir, 'gate-plan.md');
+    const planBody = '# 目标\n验证 gate\n\n# 验收标准\n- [ ] `node -v` 退出 0\n';
+    await writeFile(planFile, planBody);
+    const planHash = sha256(planBody);
     const gateFile = path.join(ctx.tempDir, 'plan-gate.json');
-    const base = { lenses: [{ name: 'product', reviewer: 'self', findings: [] }, { name: 'engineering', reviewer: 'self', findings: [] }], decisions: [{ id: 'D1', question: 'scope?', recommendation: 'keep', status: 'approved' }] };
+    const base = {
+      plan: 'gate-plan.md',
+      planHash,
+      lenses: [
+        { name: 'product', reviewer: 'self', verdict: 'approved', summary: 'scope ok', findings: [] },
+        { name: 'engineering', reviewer: 'self', verdict: 'approved', summary: 'types ok', findings: [] },
+      ],
+      decisions: [{ id: 'D1', question: 'scope?', recommendation: 'keep', status: 'approved' }],
+    };
     await writeFile(gateFile, JSON.stringify(base));
     const resolved = await run(process.execPath, [kelinPlanGate, gateFile, '--require-resolved'], { timeoutMs: 30_000 });
     await writeFile(gateFile, JSON.stringify({ ...base, decisions: [{ ...base.decisions[0], status: 'pending' }] }));

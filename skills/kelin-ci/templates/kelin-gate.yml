@@ -25,3 +25,6 @@ jobs:
       - name: guards
         run: |
           if [ -f guards.json ]; then node .kelin/ci/guard-check.mjs guards.json; else echo "no guards.json"; fi
+      - name: ratchet
+        run: |
+          if [ -f ratchet.json ]; then node .kelin/ci/ratchet-check.mjs ratchet.json --check; else echo "no ratchet.json"; fi

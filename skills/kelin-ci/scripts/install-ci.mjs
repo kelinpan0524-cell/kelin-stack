@@ -24,6 +24,7 @@ const vendored = [
   ['map-check.mjs', path.resolve(skillDir, '..', 'kelin-map', 'scripts', 'map-check.mjs')],
   ['run-acceptance.mjs', path.resolve(skillDir, '..', 'kelin-verify', 'scripts', 'run-acceptance.mjs')],
   ['guard-check.mjs', path.resolve(skillDir, '..', 'kelin-guard', 'scripts', 'guard-check.mjs')],
+  ['ratchet-check.mjs', path.resolve(skillDir, '..', 'kelin-guard', 'scripts', 'ratchet-check.mjs')],
 ];
 
 const wrote = [];

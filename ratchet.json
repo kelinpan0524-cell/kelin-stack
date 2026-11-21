@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "no-bare-console-log-in-hooks",
+      "include": ["hooks/**/*.mjs"],
+      "exclude": [],
+      "pattern": "\\bconsole\\.log\\s*\\(",
+      "message": "hook 脚本严禁调用 console.log，否则会破坏宿主 JSON 协议输出",
+      "remedy": "改用 process.stdout.write(JSON.stringify(...)) 或将诊断信息写入 process.stderr.write",
+      "baseline": [],
+      "exceptions": []
+    },
+    {
+      "id": "no-raw-node-skills-invocation",
+      "include": ["skills/**/SKILL.md"],
+      "exclude": ["skills/kelin-evals/SKILL.md", "skills/kelin-verify-stack/**"],
+      "pattern": "node\\s+skills/",
+      "message": "SKILL.md 不得硬编码仓库相对路径 node skills/...",
+      "remedy": "改用 node \"$SKILL_DIR\"/scripts/... 或 ../<skill>/scripts/...，保障跨宿主安装可运行",
+      "baseline": [],
+      "exceptions": []
+    },
+    {
+      "id": "no-solo-zcode-commit-prefix",
+      "include": ["skills/**/SKILL.md"],
+      "exclude": ["skills/kelin-verify-stack/**"],
+      "pattern": "git commit -m\\s+[\"']\\[ZCode\\]|提交信息带\\s*`?\\[ZCode\\]`?$",
+      "message": "SKILL.md 不得写死单宿主 [ZCode] 提交前缀",
+      "remedy": "改为「当前宿主前缀（如 [Antigravity] / [Codex] / [ZCode]）」",
+      "baseline": [],
+      "exceptions": []
+    }
+  ]
+}
