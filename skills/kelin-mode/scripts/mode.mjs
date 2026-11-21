@@ -107,18 +107,23 @@ export function phaseMeta(phase, currentMode = 'feature') {
   };
 }
 
+const parseJsonSafe = (raw) => {
+  try {
+    return { ok: true, value: JSON.parse(raw), error: '' };
+  } catch (error) {
+    return { ok: false, value: null, error: error instanceof Error ? error.message : String(error) };
+  }
+};
+
 const findVerifySkillsInRoot = (projectRoot) => {
   const found = [];
   for (const rel of ['.zcode/skills', '.agents/skills']) {
     const base = path.join(projectRoot, rel);
-    if (!existsSync(base)) continue;
-    try {
-      for (const name of readdirSync(base)) {
-        if (/^verify-[a-z0-9][a-z0-9-]{0,62}$/.test(name) && existsSync(path.join(base, name, 'SKILL.md'))) {
-          found.push(`${rel}/${name}`);
-        }
+    if (!existsSync(base) || !statSync(base).isDirectory()) continue;
+    for (const name of readdirSync(base)) {
+      if (/^verify-[a-z0-9][a-z0-9-]{0,62}$/.test(name) && existsSync(path.join(base, name, 'SKILL.md'))) {
+        found.push(`${rel}/${name}`);
       }
-    } catch {
     }
   }
   return [...new Set(found)].sort();
@@ -139,13 +144,11 @@ export function routeTask(task, projectRoot = process.cwd()) {
   const statePath = path.join(root, '.kelin', 'state.json');
   let resume = null;
   if (existsSync(statePath)) {
-    try {
-      const existing = JSON.parse(readFileSync(statePath, 'utf8'));
-      if (existing && typeof existing === 'object' && MODES.includes(existing.mode) && existing.phase && existing.phase !== 'done' && PHASE_TABLE[existing.phase]) {
-        const meta = phaseMeta(existing.phase, existing.mode);
-        resume = { mode: existing.mode, phase: existing.phase, activeSkills: meta.activeSkills, humanSummary: meta.humanSummary };
-      }
-    } catch {
+    const parsedState = parseJsonSafe(readFileSync(statePath, 'utf8'));
+    const existing = parsedState.ok ? parsedState.value : null;
+    if (existing && typeof existing === 'object' && MODES.includes(existing.mode) && existing.phase && existing.phase !== 'done' && PHASE_TABLE[existing.phase]) {
+      const meta = phaseMeta(existing.phase, existing.mode);
+      resume = { mode: existing.mode, phase: existing.phase, activeSkills: meta.activeSkills, humanSummary: meta.humanSummary };
     }
   }
 
@@ -251,11 +254,8 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
     pushCheck('agents-workflow', 'ready', 'AGENTS.md 已包含 kelin 工作流块');
   } else if (apply) {
     const res = spawnSync(process.execPath, [path.join(SKILLS_DIR, 'kelin-agents', 'scripts', 'ensure-workflow.mjs'), agentsFile], { encoding: 'utf8' });
-    let action = res.status === 0 ? 'applied' : 'failed';
-    try {
-      action = JSON.parse(res.stdout).action || action;
-    } catch {
-    }
+    const parsed = parseJsonSafe(res.stdout);
+    const action = (parsed.ok && parsed.value?.action) || (res.status === 0 ? 'applied' : 'failed');
     pushCheck('agents-workflow', res.status === 0 ? 'applied' : 'error', res.status === 0 ? `已更新 AGENTS.md (${action})` : (res.stderr || res.stdout).trim().slice(0, 160));
     if (res.status === 0) actions.push({ step: 'ensure-workflow', file: 'AGENTS.md', action });
   } else {
@@ -309,11 +309,8 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
     pushCheck('precommit', 'skipped', '当前目录不是 Git 仓库，跳过提交前检查');
   } else {
     const preCheck = spawnSync(process.execPath, [precommitScript, dirRoot, '--check'], { encoding: 'utf8' });
-    let preAction = 'missing';
-    try {
-      preAction = JSON.parse(preCheck.stdout).action || preAction;
-    } catch {
-    }
+    const parsedPre = parseJsonSafe(preCheck.stdout);
+    const preAction = (parsedPre.ok && parsedPre.value?.action) || 'missing';
     if (preAction === 'installed') {
       pushCheck('precommit', 'ready', '已安装 kelin pre-commit 检查');
     } else if (preAction === 'foreign') {
@@ -333,21 +330,14 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   let budgetInfo = null;
   const budgetRes = spawnSync(process.execPath, [path.join(SKILLS_DIR, 'kelin-mode', 'scripts', 'budget.mjs')], { encoding: 'utf8' });
   if (budgetRes.status === 0) {
-    try {
-      budgetInfo = JSON.parse(budgetRes.stdout);
-    } catch {
-    }
+    const parsedBudget = parseJsonSafe(budgetRes.stdout);
+    budgetInfo = parsedBudget.ok ? parsedBudget.value : null;
   }
   pushCheck('budget', budgetInfo ? 'ready' : 'unknown', budgetInfo ? `建议最多并发 ${budgetInfo.maxAgents} 个子代理` : '未能读取内存预算');
 
   const safetyEnv = (process.env.KELIN_SAFETY || '').trim().toLowerCase();
-  let safetyVal = safetyEnv;
-  if (!safetyVal) {
-    try {
-      safetyVal = readFileSync(path.join(homedir(), '.kelin', 'safety.mode'), 'utf8').trim().toLowerCase();
-    } catch {
-    }
-  }
+  const safetyFile = path.join(homedir(), '.kelin', 'safety.mode');
+  const safetyVal = safetyEnv || (existsSync(safetyFile) ? readFileSync(safetyFile, 'utf8').trim().toLowerCase() : '');
   pushCheck('safety', safetyVal || 'off', `PreToolUse 安全模式=${safetyVal || 'off'}（默认仅提示；strict 为强拦）`);
 
   const delegateFile = path.join(homedir(), '.kelin', 'delegate.json');
@@ -527,11 +517,8 @@ function main(argv = process.argv.slice(2)) {
     }
     let archived = '';
     if (existsSync(stateFile)) {
-      let existing = null;
-      try {
-        existing = JSON.parse(readFileSync(stateFile, 'utf8'));
-      } catch {
-      }
+      const parsedExisting = parseJsonSafe(readFileSync(stateFile, 'utf8'));
+      const existing = parsedExisting.ok ? parsedExisting.value : null;
       if (existing && existing.phase === 'done') {
         const historyDir = path.join(dir, 'history');
         mkdirSync(historyDir, { recursive: true });

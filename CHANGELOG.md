@@ -1,5 +1,15 @@
 # Changelog
 
+# 0.22.0（2026-11-21）
+
+全面对齐上游 `pstack` / `open-pstack` 工程强约束，并落地 `kelin-mode` 零门槛自动化：
+
+- **可信证据与发布门禁绑定**：`kelin-verify/run-acceptance` 支持 `--root` 与多维哈希（`specHash` / `worktreeFingerprint` / `requiredIds` / 三值 `verdict`）；`kelin-audit` 强制覆盖声明表并接入 `audit` 只读状态机轨道；`kelin-verify-stack` 与 `kelin-release` 绑定 `gitHead`、`treeHash`、`verificationLevel` 与 `--require-live`；`kelin-benchmark` 与 `kelin-decision-log` 封堵零工作量定向结论与缺相漏验。
+- **门禁静态扫描补盲（`kelin-review` / `kelin-ship`）**：新增注释通道 `extractComments()`，精准捕获注释里的 `RH-13`、`try/catch {}` 跨行吞异常、整文件删除测例/快照、C 转义路径与无关快照篡改，同步修正字符串字面量与更严格超时收紧的误报；`preflight --strict-gates` 强制拦截。
+- **计划门禁与 Guard 棘轮机制**：`kelin-plan` 升级 `check-plan.mjs`（依赖环检测、单任务 `- verify:` 与 `planHash`）与 `plan-gate.mjs`（双镜头审查与决策哈希绑定）；`kelin-guard` 新增 `arch` 架构防线、`enforcedIn` 机制检查、例外到期校验与 `ratchet-check.mjs --strict-shrink` 只减不增计数棘轮；`kelin-refine` 等补齐注释审改分离与溯源规则。
+- **项目验证与跨宿主冒烟验证**：`kelin-verify-app` 保留 HTTP 方法、`limit` 提至 30、生成稳定 ID 与现有测试框架探测，并支持 `--write --sync` 增量同步不覆盖手改；`kelin-verify-stack` 支持多用例 `(feature, caseId)` 回执校验，并新增离线零 token `smoke --host antigravity|codex`。
+- **`kelin-mode` 零门槛丝滑接入**：`mode.mjs` 新增只读预览 `setup`（`--apply` 接入 `AGENTS.md`、`.gitignore`、`kelin-policy.json` 及可选 `--with-verify-app`/`--with-precommit`）与 `route` 自动路由（按任务判定模式、companion skills、`needsGrill` 与续跑检测）；`init --task` 自动选模式并在上一轮 `done` 后自动归档到 `.kelin/history/`；`SessionStart` 同步注入配套技能与未接入提示。
+
 # 0.21.0（2026-11-20）
 
 - **验收 CLI 升级（吸收 `cli-for-agent` / `verify-this`）**：`skills/kelin-verify/scripts/run-acceptance.mjs` 新增 `--help`/`-h`（带示例）、纯 stdout `--json`（可直接重定向给 `kelin-mode` 的 `acceptance.json`）、执行前整份规格校验（缺参/重复 id/小数或越界 `timeoutMs`/含 NUL 字符/未知参数立即退出 2 且零副作用，兼容旧 `"5000"` 与 `0`）、进程组超时终止（`SIGTERM` → 宽限 `SIGKILL`）与大输出防截断；`kelin-mode/scripts/mode.mjs` 在 `refine` 阶段补齐 `acceptance.json` 的 `ok:true` 校验；新增单元测试 `verify-acceptance.test.mjs`。
