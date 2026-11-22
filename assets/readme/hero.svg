@@ -67,15 +67,15 @@
 
     <!-- Phase breadcrumb -->
     <g transform="translate(20 62)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700">
-      <text x="0" y="18" fill="#64748B">plan</text>
-      <text x="52" y="18" fill="#475569">→</text>
-      <text x="76" y="18" fill="#64748B">build</text>
-      <text x="138" y="18" fill="#475569">→</text>
-      <text x="162" y="18" fill="#38BDF8">verify</text>
-      <text x="234" y="18" fill="#475569">→</text>
-      <text x="258" y="18" fill="#4ADE80">review</text>
-      <text x="330" y="18" fill="#475569">→</text>
-      <text x="354" y="18" fill="#F8FAFC">ship</text>
+      <text x="0" y="18" fill="#64748B">design</text>
+      <text x="68" y="18" fill="#475569">→</text>
+      <text x="92" y="18" fill="#64748B">build</text>
+      <text x="152" y="18" fill="#475569">→</text>
+      <text x="176" y="18" fill="#38BDF8">verify</text>
+      <text x="246" y="18" fill="#475569">→</text>
+      <text x="270" y="18" fill="#4ADE80">review</text>
+      <text x="340" y="18" fill="#475569">→</text>
+      <text x="364" y="18" fill="#F8FAFC">ship</text>
     </g>
 
     <!-- Receipt rows -->

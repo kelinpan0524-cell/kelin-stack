@@ -8,9 +8,9 @@
 </p>
 
 <p align="center">
-  <a href="#快速安装">快速安装</a> ·
-  <a href="#两句话启动">两句话启动</a> ·
-  <a href="#硬机制">硬机制</a> ·
+  <a href="#按宿主安装">快速安装</a> ·
+  <a href="#日常只记两句话">两句话启动</a> ·
+  <a href="#七道硬机制">硬机制</a> ·
   <a href="#40-个命令全景">40 个命令</a> ·
   <a href="./docs/support-matrix.md">跨宿主矩阵</a> ·
   <a href="#开发与自检">开发与自检</a>
@@ -78,16 +78,16 @@ $ node skills/kelin-health/scripts/health.mjs --root .
   <img src="./assets/readme/section-workflow.svg" width="100%" alt="02 · 两句话启动，每关门禁推进">
 </p>
 
-<h2 id="两句话启动">日常只记两句话</h2>
+## 日常只记两句话
 
 安装后，Antigravity 与 ZCode 在新会话会自动注入当前工作区状态与入口（Codex 通过 `ensure-workflow.mjs` 写入 `AGENTS.md` 路由块触发）。不用背 40 个命令名：
 
-1. **新仓库接入**：说 **`kelin mode setup`**（对应 `node "$SKILL_DIR"/scripts/mode.mjs setup --root .`）。先只读预览缺什么（`AGENTS.md`、`.gitignore`、`kelin-policy.json`、本地验证手册、`pre-commit`、内存预算与安全钩子），确认后再加 `--apply` 写入。
+1. **新仓库接入**：说 **`kelin mode setup`**（在仓库根运行对应 `node skills/kelin-mode/scripts/mode.mjs setup --root .`；装为插件后由 Agent 自动定位 `$SKILL_DIR` 执行）。先只读预览缺什么（`AGENTS.md`、`.gitignore`、`kelin-policy.json`、本地验证手册、`pre-commit`、内存预算与安全钩子），确认后再加 `--apply` 写入。
 2. **直接交办任务**：说 **`用 kelin mode 帮我做 <需求>`**，自动运行 `route` 判定模式并挂载当前阶段配套 skill（模糊需求先触发 `kelin-grill` 问透，前端带上 `kelin-ui`），缺产物就不允许 `advance`。
 3. **连续迭代不打架**：上一轮跑到 `done` 后，下一轮直接 `init` 会把旧记录归档到 `.kelin/history/`；没跑完的任务下个会话接续执行。
 
 <p align="center">
-  <img src="./assets/readme/workflow.svg" width="100%" alt="kelin-mode 状态机：route 自动分流五种模式，按十个阶段产物门禁推进">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="kelin-mode 状态机：route 自动分流五种模式，展示 feature/fix/legacy 十阶段门禁链路（light 7 阶段，audit 5 阶段）">
 </p>
 
 ### 五种模式按任务复杂度分流
@@ -102,7 +102,7 @@ $ node skills/kelin-health/scripts/health.mjs --root .
 
 阶段判定细节与 `plan`/`refine`/`verify` 三档规则见 [kelin-mode](skills/kelin-mode/SKILL.md)。
 
-<h2 id="硬机制">七道硬机制</h2>
+## 七道硬机制
 
 | 机制 | 负责脚本 / Skill | 实际拦住什么问题 |
 | --- | --- | --- |
@@ -126,7 +126,7 @@ $ node skills/kelin-health/scripts/health.mjs --root .
   <img src="./assets/readme/section-install.svg" width="100%" alt="03 · 三宿主一套源，装好就能用">
 </p>
 
-<h2 id="快速安装">按宿主安装</h2>
+## 按宿主安装
 
 三宿主共用同一套 `skills/`、`agents/` 与钩子脚本。安装器幂等、写入前打印目标清单、不覆盖非 `kelin-*` 内容，`--uninstall` 只清理清单自有条目。各宿主能力边界与实测版本见 [跨宿主支持矩阵](docs/support-matrix.md)。
 
@@ -188,7 +188,7 @@ node skills/kelin-agents/scripts/ensure-workflow.mjs --global codex --dry-run
 
 ---
 
-<h2 id="40-个命令全景">40 个命令全景</h2>
+## 40 个命令全景
 
 命令统一带 `kelin-` 前缀，避免与宿主内置命令重名。完整字段与脚本/live 索引见自动生成文档 [docs/skills.md](docs/skills.md)。
 
@@ -225,7 +225,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --live --outpu
 | --- | --- | --- |
 | `run --all`（静态） / `smoke` | 0 | 每次改动与日常提交 |
 | 单个 live 功能 | 约 42 万 tokens（多命中缓存，10-20 秒） | 只改单个 skill 后定向复核 |
-| `run --all --live`（10 个配方） | 约 420 万 tokens（约 3 分钟，串行不并发） | 发版前、大改多个 skill 后 |
+| `run --all --live`（18 个 live 配方） | 按单个约 42 万 tokens 估算，串行执行（历史 10 个配方实测约 420 万 tokens、3 分钟） | 发版前、大改多个 skill 后 |
 | 单个子代理 | 10 万级上下文（最多 2 个） | 明确窄任务，小改用 `kelin-mode light` |
 
 **安全与刻意不做**：
@@ -237,7 +237,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --live --outpu
 
 ---
 
-<h2 id="开发与自检">开发与自检</h2>
+## 开发与自检
 
 <details>
 <summary>本地全套检查命令（CI 同款 10 项检查 + 双宿主冒烟）</summary>
