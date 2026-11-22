@@ -53,8 +53,19 @@ test('parseCliArgs handles = values, -- separator, and missing values', () => {
   assert.equal(ok.values['--prompt'], 'a=b');
   assert.equal(ok.flags.has('--dry-run'), true);
 
-  const missing = parseCliArgs(['run', '--prompt']);
-  assert.match(missing.error, /missing value/);
+  const literal = parseCliArgs(['run', '--prompt=--dry-run', '--dry-run']);
+  assert.equal(literal.values['--prompt'], '--dry-run');
+  assert.equal(literal.flags.has('--dry-run'), true);
+
+  for (const bad of [
+    ['run', '--prompt'],
+    ['run', '--prompt', '--dry-run'],
+    ['run', '--prompt', '--', 'task'],
+    ['run', '--role', '--workspace', '/tmp'],
+  ]) {
+    const res = parseCliArgs(bad);
+    assert.match(res.error || '', /missing value/, `expected missing value for ${JSON.stringify(bad)}`);
+  }
 });
 
 function runWithOpenStdin(cmdArgs, env) {
@@ -194,6 +205,48 @@ test('CLI flag parsing supports = syntax and rejects missing values or invalid t
     );
     assert.notEqual(missingVal.status, 0);
     assert.match(missingVal.stdout, /missing value/i);
+
+    const dryRunGuard = path.join(dir, 'called.txt');
+    const codexGuardStub = `#!/usr/bin/env node
+require('node:fs').writeFileSync(${JSON.stringify(dryRunGuard)}, 'ran');
+`;
+    await writeFile(path.join(binDir, 'codex'), codexGuardStub);
+    await chmod(path.join(binDir, 'codex'), 0o755);
+
+    const swallowedDryRun = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--workspace', dir, '--prompt', '--dry-run'],
+      { env, encoding: 'utf8' },
+    );
+    assert.notEqual(swallowedDryRun.status, 0);
+    assert.match(swallowedDryRun.stdout, /missing value/i);
+    assert.equal(spawnSync('test', ['-e', dryRunGuard]).status, 1, 'runner must not execute when --dry-run follows missing --prompt value');
+
+    const literalDryPrompt = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--workspace', dir, '--prompt=--dry-run', '--dry-run'],
+      { env, encoding: 'utf8' },
+    );
+    assert.equal(literalDryPrompt.status, 0, literalDryPrompt.stdout + literalDryPrompt.stderr);
+    assert.equal(JSON.parse(literalDryPrompt.stdout).status, 'DRY_RUN');
+
+    const subMsTimeout = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--workspace', dir, '--timeout', '0.0001', '--prompt', 'hi'],
+      { env, encoding: 'utf8' },
+    );
+    assert.notEqual(subMsTimeout.status, 0);
+    assert.equal(JSON.parse(subMsTimeout.stdout).ok, false);
+
+    for (const badArgs of [
+      ['run', '--runner', 'codex', '--workspace', dir, '--prompt=-'],
+      ['run', '--runner', 'codex', '--workspace', dir, '--session', 's1'],
+    ]) {
+      const badCodex = spawnSync(process.execPath, [delegateScript, ...badArgs], { env, encoding: 'utf8' });
+      assert.notEqual(badCodex.status, 0);
+      assert.equal(JSON.parse(badCodex.stdout).ok, false);
+      assert.equal(spawnSync('test', ['-e', dryRunGuard]).status, 1, 'codex must not spawn on invalid prompt');
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -222,6 +275,30 @@ setTimeout(() => {}, 10000);
     assert.equal(payload.status, 'ERROR');
     assert.equal(payload.timed_out, true);
     assert.match(payload.stderr, /TAIL_REASON/);
+
+    const gracefulOnTerm = `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const outFile = args[args.indexOf('-o') + 1];
+process.on('SIGTERM', () => {
+  fs.writeFileSync(outFile, 'partial output');
+  process.exit(0);
+});
+setTimeout(() => {}, 10000);
+`;
+    await writeFile(path.join(binDir, 'codex'), gracefulOnTerm);
+    await chmod(path.join(binDir, 'codex'), 0o755);
+
+    const sigRes = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--role', 'review', '--workspace', dir, '--timeout', '1', '--prompt', 'hi'],
+      { env, encoding: 'utf8', timeout: 10000 },
+    );
+    assert.notEqual(sigRes.status, 0);
+    const sigPayload = JSON.parse(sigRes.stdout);
+    assert.equal(sigPayload.ok, false);
+    assert.equal(sigPayload.status, 'ERROR');
+    assert.equal(sigPayload.timed_out, true);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
