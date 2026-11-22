@@ -60,6 +60,7 @@ test('parseCliArgs handles = values, -- separator, and missing values', () => {
   for (const bad of [
     ['run', '--prompt'],
     ['run', '--prompt', '--dry-run'],
+    ['run', '--prompt', '--role=review'],
     ['run', '--prompt', '--', 'task'],
     ['run', '--role', '--workspace', '/tmp'],
   ]) {
@@ -221,6 +222,23 @@ require('node:fs').writeFileSync(${JSON.stringify(dryRunGuard)}, 'ran');
     assert.notEqual(swallowedDryRun.status, 0);
     assert.match(swallowedDryRun.stdout, /missing value/i);
     assert.equal(spawnSync('test', ['-e', dryRunGuard]).status, 1, 'runner must not execute when --dry-run follows missing --prompt value');
+
+    const swallowedRoleEq = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--workspace', dir, '--prompt', '--role=review'],
+      { env, encoding: 'utf8' },
+    );
+    assert.notEqual(swallowedRoleEq.status, 0);
+    assert.match(swallowedRoleEq.stdout, /missing value/i);
+    assert.equal(spawnSync('test', ['-e', dryRunGuard]).status, 1, 'runner must not execute when --role=review follows missing --prompt value');
+
+    const overMaxTimeout = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--workspace', dir, '--timeout', '2147453.647', '--prompt', 'hi'],
+      { env, encoding: 'utf8' },
+    );
+    assert.notEqual(overMaxTimeout.status, 0);
+    assert.equal(JSON.parse(overMaxTimeout.stdout).ok, false);
 
     const literalDryPrompt = spawnSync(
       process.execPath,

@@ -20,6 +20,7 @@ const BOOL_FLAGS = new Set(['--dry-run', '--scan', '--help', '-h']);
 const KNOWN_FLAGS = new Set([...VALUE_FLAGS, ...BOOL_FLAGS]);
 const MAX_OUTPUT_CHARS = 12000;
 const MAX_STDERR_CHARS = 2000;
+const MAX_TIMEOUT_SEC = 2147453;
 
 export function resolveRole(role, config, explicitRunner) {
   if (explicitRunner) return { runner: explicitRunner, source: 'explicit' };
@@ -53,7 +54,9 @@ export function parseCliArgs(argv) {
     }
     if (VALUE_FLAGS.has(token)) {
       const next = argv[i + 1];
-      if (i + 1 >= argv.length || next === '--' || KNOWN_FLAGS.has(next)) {
+      const nextEq = next ? next.indexOf('=') : -1;
+      const nextFlag = nextEq > 2 ? next.slice(0, nextEq) : next;
+      if (i + 1 >= argv.length || next === '--' || KNOWN_FLAGS.has(nextFlag)) {
         return { error: `missing value for ${token}` };
       }
       values[token] = next;
@@ -181,8 +184,8 @@ function main() {
   const timeoutMs = Math.trunc(timeoutSec * 1000);
   const dryRun = flags.has('--dry-run');
 
-  if (!Number.isFinite(timeoutSec) || timeoutMs < 1 || timeoutMs + 30000 > 2147483647) {
-    print({ ok: false, error: '--timeout must be a positive number (>= 0.001 and <= 2147453)' });
+  if (!Number.isFinite(timeoutSec) || timeoutSec > MAX_TIMEOUT_SEC || timeoutMs < 1) {
+    print({ ok: false, error: `--timeout must be a positive number (>= 0.001 and <= ${MAX_TIMEOUT_SEC})` });
   }
   if (!ROLES[role]) print({ ok: false, error: `unknown role: ${role} (review|critique|diagnose|implement)` });
   if (!existsSync(workspace)) print({ ok: false, error: `workspace not found: ${workspace}` });

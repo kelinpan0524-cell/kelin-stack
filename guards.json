@@ -47,8 +47,8 @@
     },
     {
       "id": "delegate-stdin-and-args",
-      "bug": "delegate.mjs inherited git stdin/stderr, failed on Codex prompts starting with '-', swallowed adjacent flags like --dry-run on missing values, hid timedOut/error on exit 0, and threw ERR_OUT_OF_RANGE on sub-ms timeout",
-      "rootCause": "execFileSync defaulted to inherit, runner spawnSync omitted explicit stdio ignore, Codex lacked -- separator and '-'/'empty' prompt validation, naive flag parsing consumed --dry-run, and main() ignored timedOut/error and non-integer ms",
+      "bug": "delegate.mjs leaked git stderr, broke '-' Codex prompts, swallowed --dry-run/--role=x flags, and hid timedOut/sub-ms errors",
+      "rootCause": "git execFileSync used default stdio, Codex missed -- and '-' guard, flag parser ate --flag=val, and main ignored timedOut/int ms",
       "guard": {
         "type": "test",
         "location": "skills/kelin-delegate/tests/delegate.test.mjs",
@@ -56,7 +56,7 @@
       },
       "enforcedIn": [".github/workflows/ci.yml"],
       "proof": {
-        "command": "revert parseCliArgs flag collision check, buildCodexArgs -- separator, or timedOut error check in delegate.mjs, then run node --test skills/kelin-delegate/tests/delegate.test.mjs",
+        "command": "revert parseCliArgs flag check or buildCodexArgs --, then node --test skills/kelin-delegate/tests/delegate.test.mjs",
         "expected": "fail-on-old"
       }
     }
