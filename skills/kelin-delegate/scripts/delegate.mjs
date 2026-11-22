@@ -88,7 +88,7 @@ function clipStderr(raw) {
 }
 
 function clipOutput(text) {
-  if (text.length <= MAX_OUTPUT_CHARS) return text;
+  if (text.length <= MAX_OUTPUT_CHARS + MAX_OUTPUT_TAIL_CHARS) return text;
   const omitted = text.length - MAX_OUTPUT_CHARS - MAX_OUTPUT_TAIL_CHARS;
   return `${text.slice(0, MAX_OUTPUT_CHARS)}\n...[omitted ${omitted} chars]...\n${text.slice(-MAX_OUTPUT_TAIL_CHARS)}`;
 }

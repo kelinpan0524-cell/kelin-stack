@@ -200,6 +200,10 @@ const main = () => {
   }
 
   if (args.includes('--write')) {
+    if (!activeReviewPath) {
+      console.error('--write requires a review report: pass --review FILE or write .kelin/review.md; stamping CURRENT without a report is invalid');
+      process.exit(2);
+    }
     mkdirSync(path.dirname(stampFile), { recursive: true });
     writeFileSync(stampFile, `${JSON.stringify(record, null, 2)}\n`);
     const blocked = reportVerdict === 'blocked';

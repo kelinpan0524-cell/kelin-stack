@@ -19,6 +19,8 @@ const repo = async () => {
   await mkdir(path.join(dir, 'tests'), { recursive: true });
   await mkdir(path.join(dir, 'src'), { recursive: true });
   await writeFile(path.join(dir, '.gitignore'), '.kelin/\n');
+  await mkdir(path.join(dir, '.kelin'), { recursive: true });
+  await writeFile(path.join(dir, '.kelin', 'review.md'), '## 审查结论\nP0: 0 / P1: 0\n');
   await writeFile(path.join(dir, 'tests/app.test.mjs'), "test('a', () => { assert.equal(1, 1); });\n");
   await writeFile(path.join(dir, 'src/app.mjs'), 'export const a = 1;\n');
   git(dir, ['add', '-A']);
