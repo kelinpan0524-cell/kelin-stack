@@ -29,7 +29,7 @@ node "$SKILL_DIR"/scripts/delegate.mjs config --set-role critique=host
 ## 跑
 
 ```sh
-node "$SKILL_DIR"/scripts/delegate.mjs run --role review --workspace "<项目绝对路径>" --prompt "<目标、边界、完成标准与真实验证命令>"
+node "$SKILL_DIR"/scripts/delegate.mjs run --role review --workspace "<项目绝对路径>" --timeout 600 --prompt "<目标、边界、完成标准与真实验证命令>"
 node "$SKILL_DIR"/scripts/delegate.mjs onboard --scan   # 看本机装了哪些 CLI
 ```
 
@@ -42,7 +42,7 @@ node "$SKILL_DIR"/scripts/delegate.mjs onboard --scan   # 看本机装了哪些 
 ## 续接
 
 ```sh
-node "$SKILL_DIR"/scripts/delegate.mjs run --role review --workspace "<原路径>" --session <上次的 session_id> --prompt "<只发新信息，不重复任务>"
+node "$SKILL_DIR"/scripts/delegate.mjs run --role review --workspace "<原路径>" --timeout 600 --session <上次的 session_id> --prompt "<只发新信息，不重复任务>"
 ```
 
 codex 与 antigravity 都支持续接（实测）；zcode 不支持，`resumable: false` 时开新任务补背景。
@@ -53,7 +53,7 @@ codex 与 antigravity 都支持续接（实测）；zcode 不支持，`resumable
 
 委托 `review` 须写明口径：只拦有可达触发、后果与证据的真实 P0/P1（纯假设与风格归 P2/P3）；常态 2 轮、收敛可定点复验至多 4 轮，复审只带上轮未关闭项、修复 diff 对比范围与验证证据（核对关闭情况及补丁直接回归，禁重扫全仓新挖坑）。
 
-委托审查的输出契约追加末行裁决：报告最后一行必须是机器可读裁决——无发现写 `CLEAN`、有发现写 `FINDINGS`；末行缺失或为空 = 审查失败，按 `kelin-review` 的"审查失败显性化"处理，禁止解读为"无发现"。
+委托审查的输出契约追加末行裁决：报告最后一行必须是机器可读裁决——无发现写 `CLEAN`、有发现写 `FINDINGS`；末行缺失或为空 = 审查失败，按 `kelin-review` 的"审查失败显性化"处理，禁止解读为"无发现"。裁决行从返回 JSON 的 `response` 字段读取；`response` 超长被截断时保留头部与尾部，末行裁决不会被截掉。
 
 委托命令必须显式带超时参数（`delegate.mjs run --timeout <秒>`）；超时或空输出按显性失败处理，给出可诊断信息（退出码、日志尾部），不得当"审查通过"。
 

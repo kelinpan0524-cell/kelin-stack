@@ -233,7 +233,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --live --outpu
 - 仓库不含凭据、客户业务表与联网上报代码；`preflight.mjs` 在提交前拦 `.xlsx`/`.env`/私钥与常见密钥特征。
 - 唯一会对外写入的 `verify-stack publish`（发 PR 评论与 commit status）必须显式传 `--confirm`，`run` 不会自动触发。
 - `kelin-delegate` 发送给外部 CLI 的提示词和文件会经过对应模型服务商，切勿放密钥或客户数据。
-- **刻意不做自动开 PR、自动合并、自动部署**：这些动作需要人拍板。
+- **自动开 PR、自动部署仍不做**；合并不再一律手动，走 `kelin-ship` 的自动合并门（六条全满足才可合并，触发部署的仓库仍需明确部署授权）。
 
 ---
 

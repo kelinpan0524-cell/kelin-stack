@@ -19,6 +19,7 @@ const VALUE_FLAGS = new Set(['--set-role', '--runner', '--role', '--workspace', 
 const BOOL_FLAGS = new Set(['--dry-run', '--scan', '--help', '-h']);
 const KNOWN_FLAGS = new Set([...VALUE_FLAGS, ...BOOL_FLAGS]);
 const MAX_OUTPUT_CHARS = 12000;
+const MAX_OUTPUT_TAIL_CHARS = 2000;
 const MAX_STDERR_CHARS = 2000;
 const MAX_TIMEOUT_SEC = 2147453;
 
@@ -84,6 +85,12 @@ function clipStderr(raw) {
   const text = raw ?? '';
   if (text.length <= MAX_STDERR_CHARS) return text;
   return `${text.slice(0, 400)}\n...\n${text.slice(-(MAX_STDERR_CHARS - 405))}`;
+}
+
+function clipOutput(text) {
+  if (text.length <= MAX_OUTPUT_CHARS) return text;
+  const omitted = text.length - MAX_OUTPUT_CHARS - MAX_OUTPUT_TAIL_CHARS;
+  return `${text.slice(0, MAX_OUTPUT_CHARS)}\n...[omitted ${omitted} chars]...\n${text.slice(-MAX_OUTPUT_TAIL_CHARS)}`;
 }
 
 function spawnRunner(bin, args, { workspace, timeoutMs }) {
@@ -235,7 +242,7 @@ function main() {
     error: result.error,
     elapsed_ms: Date.now() - started,
     workspace_dirty_after: gitStatus.slice(0, 800),
-    response: result.text.slice(0, MAX_OUTPUT_CHARS),
+    response: clipOutput(result.text),
     stderr: result.stderr || undefined,
     notes,
   });

@@ -270,6 +270,34 @@ require('node:fs').writeFileSync(${JSON.stringify(dryRunGuard)}, 'ran');
   }
 });
 
+test('long responses keep head and tail so the final verdict line survives truncation', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-delegate-truncate-'));
+  const binDir = path.join(dir, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const verboseAgy = `#!/usr/bin/env node
+const filler = 'F'.repeat(14000);
+process.stdout.write(JSON.stringify({ conversation_id: 'c1', response: filler + 'verdict below\\nCLEAN' }));
+`;
+  await writeFile(path.join(binDir, 'agy'), verboseAgy);
+  await chmod(path.join(binDir, 'agy'), 0o755);
+
+  const env = { ...process.env, HOME: dir, PATH: `${binDir}:${process.env.PATH}` };
+  try {
+    const res = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'antigravity', '--role', 'review', '--workspace', dir, '--timeout', '5', '--prompt', 'hi'],
+      { env, encoding: 'utf8', timeout: 15000 },
+    );
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    const payload = JSON.parse(res.stdout);
+    assert.match(payload.response, /\.\.\.\[/, 'truncation marker must be present');
+    assert.ok(payload.response.includes('verdict below'), 'head-side verdict intro must survive');
+    assert.ok(payload.response.endsWith('CLEAN'), 'final verdict line must survive truncation');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('timeout reports timed_out true and preserves trailing stderr', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'kelin-delegate-timeout-'));
   const binDir = path.join(dir, 'bin');
