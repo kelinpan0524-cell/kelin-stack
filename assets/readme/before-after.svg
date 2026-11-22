@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" role="img" aria-labelledby="title desc">
+  <title id="title">有无 Kelin Stack 门禁的工程工作流对比</title>
+  <desc id="desc">左侧展示无门禁时常见的问题：跳过规划、口头通过、暗改测试、过载卡死；右侧展示 Kelin Stack 如何用脚本和指纹逐关拦截。</desc>
+
+  <rect width="1200" height="440" rx="26" fill="#F1F5F9"/>
+  <rect x="1" y="1" width="1198" height="438" rx="25" fill="none" stroke="#E2E8F0" stroke-width="2"/>
+
+  <!-- Header -->
+  <g transform="translate(52 46)">
+    <text fill="#0284C7" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" letter-spacing="1.4">WHY GATES MATTER</text>
+    <text y="34" fill="#0F172A" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="28" font-weight="700">没有门禁靠自觉，有门禁靠机器留证</text>
+  </g>
+
+  <!-- Left panel: Without gates -->
+  <g transform="translate(52 106)">
+    <rect width="496" height="296" rx="18" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>
+    <text x="26" y="38" fill="#64748B" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">WITHOUT GATES · 凭感觉交付</text>
+
+    <g transform="translate(26 58)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="20" font-weight="500">
+      <rect width="444" height="48" rx="10" fill="#FEF2F2"/>
+      <text x="18" y="31" fill="#DC2626" font-weight="700">×</text>
+      <text x="44" y="31" fill="#334155">拿到需求直接改，写完发现方向错了</text>
+
+      <rect y="58" width="444" height="48" rx="10" fill="#FEF2F2"/>
+      <text x="18" y="89" fill="#DC2626" font-weight="700">×</text>
+      <text x="44" y="89" fill="#334155">回复“应该没问题”，拿不出命令输出</text>
+
+      <rect y="116" width="444" height="48" rx="10" fill="#FEF2F2"/>
+      <text x="18" y="147" fill="#DC2626" font-weight="700">×</text>
+      <text x="44" y="147" fill="#334155">为了变绿，悄悄删掉或放宽测试阈值</text>
+
+      <rect y="174" width="444" height="48" rx="10" fill="#FEF2F2"/>
+      <text x="18" y="205" fill="#DC2626" font-weight="700">×</text>
+      <text x="44" y="205" fill="#334155">开一堆子代理和构建，24GB 机器卡死</text>
+    </g>
+  </g>
+
+  <!-- Center Arrow -->
+  <g transform="translate(572 226)">
+    <circle cx="28" cy="28" r="28" fill="#0284C7"/>
+    <path d="M16 28h22M30 19l9 9-9 9" fill="none" stroke="#F8FAFC" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- Right panel: With Kelin Stack -->
+  <g transform="translate(652 106)">
+    <rect width="496" height="296" rx="18" fill="#0F172A"/>
+    <text x="26" y="38" fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">WITH KELIN-STACK · 机器门禁</text>
+
+    <g transform="translate(26 58)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="20" font-weight="500">
+      <rect width="444" height="48" rx="10" fill="#1E293B"/>
+      <text x="16" y="31" fill="#4ADE80" font-weight="700">✓</text>
+      <text x="44" y="31" fill="#F8FAFC">kelin-grill + check-plan：验收定清再写</text>
+
+      <rect y="58" width="444" height="48" rx="10" fill="#1E293B"/>
+      <text x="16" y="89" fill="#4ADE80" font-weight="700">✓</text>
+      <text x="44" y="89" fill="#F8FAFC">run-acceptance：真跑命令并留指纹</text>
+
+      <rect y="116" width="444" height="48" rx="10" fill="#1E293B"/>
+      <text x="16" y="147" fill="#4ADE80" font-weight="700">✓</text>
+      <text x="44" y="147" fill="#F8FAFC">gate-scan：删测试/降阈值只问人不偷改</text>
+
+      <rect y="174" width="444" height="48" rx="10" fill="#1E293B"/>
+      <text x="16" y="205" fill="#4ADE80" font-weight="700">✓</text>
+      <text x="44" y="205" fill="#F8FAFC">budget.mjs：硬顶 2 代理，严禁并行测试</text>
+    </g>
+  </g>
+</svg>

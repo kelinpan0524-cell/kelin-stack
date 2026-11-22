@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="510" viewBox="0 0 1200 510" role="img" aria-labelledby="title desc">
+  <title id="title">kelin-mode 自动路由与阶段门禁状态机</title>
+  <desc id="desc">用一句话触发 route 判定五种模式，并展示 feature/fix/legacy 完整十阶段链路（light 走 7 阶段、audit 走 5 阶段）的产物门禁。</desc>
+
+  <rect width="1200" height="510" rx="26" fill="#0B1220"/>
+  <rect x="1" y="1" width="1198" height="508" rx="25" fill="none" stroke="#1E293B" stroke-width="2"/>
+
+  <!-- Header -->
+  <g transform="translate(52 46)">
+    <text fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700" letter-spacing="1.4">STATE MACHINE · .kelin/state.json</text>
+    <text y="34" fill="#F8FAFC" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif" font-size="28" font-weight="700">两句话启动 · 完整十关链路（light 7 关 / audit 5 关）</text>
+  </g>
+
+  <!-- Top Routing Strip -->
+  <g transform="translate(52 102)">
+    <rect width="1096" height="58" rx="12" fill="#131F35" stroke="#1E293B" stroke-width="1.5"/>
+    <text x="20" y="36" fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" font-weight="700">&gt; 用 kelin mode 帮我做 &lt;需求&gt;</text>
+    <path d="M352 29h26M370 21l8 8-8 8" fill="none" stroke="#64748B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="394" y="36" fill="#94A3B8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" font-weight="600">mode.mjs route</text>
+    <path d="M562 29h26M580 21l8 8-8 8" fill="none" stroke="#64748B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- 5 mode pills -->
+    <g transform="translate(602 12)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">
+      <rect width="84" height="34" rx="8" fill="#1E293B"/><text x="42" y="23" text-anchor="middle" fill="#E2E8F0">light</text>
+      <rect x="96" width="98" height="34" rx="8" fill="#082F49" stroke="#38BDF8" stroke-width="1.5"/><text x="145" y="23" text-anchor="middle" fill="#38BDF8">feature</text>
+      <rect x="206" width="70" height="34" rx="8" fill="#1E293B"/><text x="241" y="23" text-anchor="middle" fill="#E2E8F0">fix</text>
+      <rect x="288" width="94" height="34" rx="8" fill="#1E293B"/><text x="335" y="23" text-anchor="middle" fill="#E2E8F0">legacy</text>
+      <rect x="394" width="82" height="34" rx="8" fill="#1E293B"/><text x="435" y="23" text-anchor="middle" fill="#E2E8F0">audit</text>
+    </g>
+  </g>
+
+  <!-- Row 1: 01 intake -> 05 verify -->
+  <g transform="translate(52 186)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+    <!-- 01 intake -->
+    <rect width="198" height="122" rx="14" fill="#0F172A" stroke="#1E293B" stroke-width="1.5"/>
+    <text x="16" y="32" fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">01 · intake</text>
+    <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">对齐规则边界</text>
+    <rect x="14" y="80" width="170" height="28" rx="7" fill="#1E293B"/>
+    <text x="99" y="100" text-anchor="middle" fill="#CBD5E1" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">AGENTS + policy</text>
+    <path d="M204 61h16M214 55l6 6-6 6" fill="none" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- 02 map -->
+    <g transform="translate(224 0)">
+      <rect width="198" height="122" rx="14" fill="#0F172A" stroke="#1E293B" stroke-width="1.5"/>
+      <text x="16" y="32" fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">02 · map</text>
+      <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">算影响与测试</text>
+      <rect x="14" y="80" width="170" height="28" rx="7" fill="#1E293B"/>
+      <text x="99" y="100" text-anchor="middle" fill="#CBD5E1" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">scope / map</text>
+      <path d="M204 61h16M214 55l6 6-6 6" fill="none" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- 03 design (Human gate) -->
+    <g transform="translate(448 0)">
+      <rect width="198" height="122" rx="14" fill="#082F49" stroke="#38BDF8" stroke-width="2"/>
+      <text x="16" y="32" fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">03 · design</text>
+      <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">写清验收计划</text>
+      <rect x="14" y="80" width="170" height="28" rx="7" fill="#0C4A6E"/>
+      <text x="99" y="100" text-anchor="middle" fill="#BAE6FD" font-size="16" font-weight="700">plan-gate · 等确认</text>
+      <path d="M204 61h16M214 55l6 6-6 6" fill="none" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- 04 build -->
+    <g transform="translate(672 0)">
+      <rect width="198" height="122" rx="14" fill="#0F172A" stroke="#1E293B" stroke-width="1.5"/>
+      <text x="16" y="32" fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">04 · build</text>
+      <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">红绿测试推进</text>
+      <rect x="14" y="80" width="170" height="28" rx="7" fill="#1E293B"/>
+      <text x="99" y="100" text-anchor="middle" fill="#CBD5E1" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">tdd + guard</text>
+      <path d="M204 61h16M214 55l6 6-6 6" fill="none" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- 05 verify -->
+    <g transform="translate(896 0)">
+      <rect width="198" height="122" rx="14" fill="#052E16" stroke="#22C55E" stroke-width="2"/>
+      <text x="16" y="32" fill="#4ADE80" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">05 · verify</text>
+      <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">真跑命令取证</text>
+      <rect x="14" y="80" width="170" height="28" rx="7" fill="#14532D"/>
+      <text x="99" y="100" text-anchor="middle" fill="#86EFAC" font-size="16" font-weight="700">指纹 VERIFIED</text>
+    </g>
+  </g>
+
+  <!-- Serpentine transition indicator Row 1 -> Row 2 -->
+  <path d="M1047 312v14H151v14" fill="none" stroke="#38BDF8" stroke-opacity="0.45" stroke-width="2.5" stroke-dasharray="6 6"/>
+  <path d="M145 334l6 8 6-8" fill="none" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Row 2: 06 review -> 10 done -->
+  <g transform="translate(52 346)" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+    <!-- 06 review -->
+    <rect width="198" height="122" rx="14" fill="#0F172A" stroke="#38BDF8" stroke-width="1.5"/>
+    <text x="16" y="32" fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">06 · review</text>
+    <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">门禁扫描自审</text>
+    <rect x="14" y="80" width="170" height="28" rx="7" fill="#1E293B"/>
+    <text x="99" y="100" text-anchor="middle" fill="#BAE6FD" font-size="16" font-weight="600">常态 2 轮 · 指纹</text>
+    <path d="M204 61h16M214 55l6 6-6 6" fill="none" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- 07 refine -->
+    <g transform="translate(224 0)">
+      <rect width="198" height="122" rx="14" fill="#0F172A" stroke="#1E293B" stroke-width="1.5"/>
+      <text x="16" y="32" fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">07 · refine</text>
+      <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">精简并重验</text>
+      <rect x="14" y="80" width="170" height="28" rx="7" fill="#1E293B"/>
+      <text x="99" y="100" text-anchor="middle" fill="#CBD5E1" font-size="16">改后重跑验收</text>
+      <path d="M204 61h16M214 55l6 6-6 6" fill="none" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- 08 ship -->
+    <g transform="translate(448 0)">
+      <rect width="198" height="122" rx="14" fill="#0F172A" stroke="#F59E0B" stroke-width="2"/>
+      <text x="16" y="32" fill="#FBBF24" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">08 · ship</text>
+      <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">预检与文档对齐</text>
+      <rect x="14" y="80" width="170" height="28" rx="7" fill="#451A03"/>
+      <text x="99" y="100" text-anchor="middle" fill="#FDE68A" font-size="16" font-weight="700">不自动部署</text>
+      <path d="M204 61h16M214 55l6 6-6 6" fill="none" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- 09 reflect -->
+    <g transform="translate(672 0)">
+      <rect width="198" height="122" rx="14" fill="#0F172A" stroke="#1E293B" stroke-width="1.5"/>
+      <text x="16" y="32" fill="#38BDF8" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">09 · reflect</text>
+      <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">复盘沉淀教训</text>
+      <rect x="14" y="80" width="170" height="28" rx="7" fill="#1E293B"/>
+      <text x="99" y="100" text-anchor="middle" fill="#CBD5E1" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">decision-log</text>
+      <path d="M204 61h16M214 55l6 6-6 6" fill="none" stroke="#22C55E" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- 10 done -->
+    <g transform="translate(896 0)">
+      <rect width="198" height="122" rx="14" fill="#052E16" stroke="#22C55E" stroke-width="2"/>
+      <text x="16" y="32" fill="#4ADE80" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="17" font-weight="700">10 · done</text>
+      <text x="16" y="64" fill="#F8FAFC" font-size="21" font-weight="700">下轮自动归档</text>
+      <rect x="14" y="80" width="170" height="28" rx="7" fill="#14532D"/>
+      <text x="99" y="100" text-anchor="middle" fill="#86EFAC" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16">.kelin/history/</text>
+    </g>
+  </g>
+</svg>

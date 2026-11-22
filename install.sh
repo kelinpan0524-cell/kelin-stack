@@ -203,7 +203,7 @@ PY
   SKILL_COUNT=$(find "$SRC" -mindepth 2 -maxdepth 2 -name SKILL.md | wc -l | xargs)
   echo "宿主: ${HOST}  范围: ${SCOPE}（原生插件模式）"
   echo "目标目录: ${DEST}"
-  echo "包含组件: manifest(.antigravity-plugin) + ${SKILL_COUNT} skills + agents + rules/AGENTS.md + hooks.json + assets/logo.svg + docs"
+  echo "包含组件: manifest(.antigravity-plugin) + ${SKILL_COUNT} skills + agents + rules/AGENTS.md + hooks.json + assets + docs"
   echo "排除项: .git、.kelin、.github、evals、hooks/hooks.json（ZCode 专用）"
   if [[ -f "$HOME/.gemini/antigravity-cli/skills/$MANIFEST_NAME" ]]; then
     echo "提示：检测到旧版用户级目录 ${HOME}/.gemini/antigravity-cli/skills 仍有安装清单，可用 ./install.sh --host antigravity --scope user --clean-legacy 单独清理，不影响新装原生插件。"
@@ -221,6 +221,7 @@ PY
   cp "$REPO/hooks/pre-tool-use.mjs" "$STAGE/hooks/pre-tool-use.mjs"
   cp "$REPO/rules/AGENTS.md" "$STAGE/rules/AGENTS.md"
   cp "$REPO/assets/logo.svg" "$STAGE/assets/logo.svg"
+  [[ -d "$REPO/assets/readme" ]] && cp -R "$REPO/assets/readme" "$STAGE/assets/readme"
   for doc in README.md LICENSE NOTICE; do
     [[ -f "$REPO/$doc" ]] && cp "$REPO/$doc" "$STAGE/$doc"
   done

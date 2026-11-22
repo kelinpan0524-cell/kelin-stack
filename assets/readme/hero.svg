@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="390" viewBox="0 0 1200 390" role="img" aria-labelledby="title desc">
+  <title id="title">Kelin Stack：跨宿主工程工作流与可执行门禁插件</title>
+  <desc id="desc">适用于 Antigravity、ZCode 与 Codex 的工程工作流插件，用阶段产物、工作树指纹验收与门禁检查替代口头完成。</desc>
+
+  <defs>
+    <linearGradient id="hero-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1220"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="accent-line" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#22C55E"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="390" rx="26" fill="url(#hero-bg)"/>
+  <rect x="1" y="1" width="1198" height="388" rx="25" fill="none" stroke="#1E293B" stroke-width="2"/>
+
+  <!-- Blueprint structural lines -->
+  <path d="M0 58H1200M644 58V390" stroke="#1E293B" stroke-width="1.5"/>
+  <rect x="52" y="56" width="140" height="4" rx="2" fill="url(#accent-line)"/>
+
+  <!-- Top bar metadata -->
+  <g font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700">
+    <text x="52" y="36" fill="#38BDF8" letter-spacing="1.4">ANTIGRAVITY · ZCODE · CODEX</text>
+    <text x="618" y="36" text-anchor="end" fill="#94A3B8" font-weight="400">v0.22.0 · MIT</text>
+    <text x="676" y="36" fill="#94A3B8" font-weight="600">WORKFLOW &amp; GATE RECEIPT</text>
+    <circle cx="1142" cy="30" r="6" fill="#22C55E"/>
+  </g>
+
+  <!-- Left column: Native logo mark + Title + Plain-language promise + Verified counts -->
+  <g transform="translate(52 84)">
+    <g>
+      <rect width="60" height="60" rx="14" fill="#0F172A" stroke="#38BDF8" stroke-width="2.5"/>
+      <path d="M18 16v28M18 30l18-14M25 24l13 20" fill="none" stroke="#F8FAFC" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="44" cy="17" r="4" fill="#38BDF8"/>
+    </g>
+
+    <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif">
+      <text x="78" y="48" fill="#F8FAFC" font-size="52" font-weight="700" letter-spacing="-1">Kelin Stack</text>
+      <text x="0" y="108" fill="#E2E8F0" font-size="24" font-weight="700">把“大概没问题”变成可检查、可证明的交付流程</text>
+      <text x="0" y="144" fill="#94A3B8" font-size="20" font-weight="400">先想清、再做实、拿证据验收，最后按纪律交出去</text>
+    </g>
+
+    <!-- Fact pills -->
+    <g transform="translate(0 186)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="18" font-weight="700">
+      <rect width="128" height="44" rx="10" fill="#131F35" stroke="#1E293B" stroke-width="1.5"/>
+      <text x="64" y="28" text-anchor="middle" fill="#38BDF8">40 Skills</text>
+
+      <rect x="142" width="122" height="44" rx="10" fill="#131F35" stroke="#1E293B" stroke-width="1.5"/>
+      <text x="203" y="28" text-anchor="middle" fill="#F8FAFC">3 Agents</text>
+
+      <rect x="278" width="126" height="44" rx="10" fill="#131F35" stroke="#1E293B" stroke-width="1.5"/>
+      <text x="341" y="28" text-anchor="middle" fill="#F8FAFC">10 Checks</text>
+
+      <rect x="418" width="148" height="44" rx="10" fill="#052E16" stroke="#166534" stroke-width="1.5"/>
+      <text x="492" y="28" text-anchor="middle" fill="#4ADE80">131/131 Pass</text>
+    </g>
+  </g>
+
+  <!-- Right column: Real State & Gate Receipt Artifact -->
+  <g transform="translate(676 82)">
+    <rect width="476" height="278" rx="16" fill="#070D19" stroke="#1E293B" stroke-width="1.5"/>
+    <path d="M0 44H476" stroke="#1E293B" stroke-width="1.5"/>
+    <circle cx="22" cy="22" r="5.5" fill="#22C55E"/>
+    <text x="38" y="28" fill="#CBD5E1" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="600">kelin-mode · .kelin/state.json</text>
+
+    <!-- Phase breadcrumb -->
+    <g transform="translate(20 62)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace" font-size="16" font-weight="700">
+      <text x="0" y="18" fill="#64748B">design</text>
+      <text x="68" y="18" fill="#475569">→</text>
+      <text x="92" y="18" fill="#64748B">build</text>
+      <text x="152" y="18" fill="#475569">→</text>
+      <text x="176" y="18" fill="#38BDF8">verify</text>
+      <text x="246" y="18" fill="#475569">→</text>
+      <text x="270" y="18" fill="#4ADE80">review</text>
+      <text x="340" y="18" fill="#475569">→</text>
+      <text x="364" y="18" fill="#F8FAFC">ship</text>
+    </g>
+
+    <!-- Receipt rows -->
+    <g transform="translate(20 98)" font-family="ui-monospace,SFMono-Regular,Menlo,monospace">
+      <rect width="436" height="46" rx="10" fill="#111C33" stroke="#1E293B"/>
+      <text x="16" y="29" fill="#E2E8F0" font-size="18" font-weight="600">acceptance.json</text>
+      <rect x="242" y="8" width="182" height="30" rx="8" fill="#052E16"/>
+      <text x="333" y="29" text-anchor="middle" fill="#4ADE80" font-size="16" font-weight="700">VERIFIED · ok</text>
+
+      <rect y="58" width="436" height="46" rx="10" fill="#111C33" stroke="#1E293B"/>
+      <text x="16" y="87" fill="#E2E8F0" font-size="18" font-weight="600">review.json</text>
+      <rect x="242" y="66" width="182" height="30" rx="8" fill="#082F49"/>
+      <text x="333" y="87" text-anchor="middle" fill="#38BDF8" font-size="16" font-weight="700">CURRENT · P0:0</text>
+
+      <rect y="116" width="436" height="46" rx="10" fill="#111C33" stroke="#1E293B"/>
+      <text x="16" y="145" fill="#E2E8F0" font-size="18" font-weight="600">budget &amp; safety</text>
+      <rect x="242" y="124" width="182" height="30" rx="8" fill="#1E293B"/>
+      <text x="333" y="145" text-anchor="middle" fill="#CBD5E1" font-size="16" font-weight="700">max 2 · opt-in</text>
+    </g>
+  </g>
+</svg>

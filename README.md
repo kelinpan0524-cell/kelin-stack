@@ -1,161 +1,246 @@
-# Kelin Stack
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="Kelin Stack：适用于 Antigravity、ZCode 与 Codex 的跨宿主工程工作流插件，用阶段产物、工作树指纹验收与门禁检查替代口头完成。">
+</p>
 
-**跨宿主工作流插件（ZCode + Antigravity 原生插件，Codex 兼容）**：把“怎么把活干扎实”从口号变成一套能执行、能检查的流程。
+<p align="center">
+  <strong>给 AI 编程代理装上工程门禁：想清楚、先测试、拿证据验收、自审留指纹，再交出去。</strong><br>
+  一套 <code>skills/</code> + <code>agents/</code> + <code>hooks/</code> 源码，同时支持 Antigravity 原生插件、ZCode 插件市场与 Codex。
+</p>
 
-pstack 是为 Claude Code / Codex 写的，直接搬到 ZCode 和 Antigravity 会水土不服：命令撞名、钩子协议不同、依赖 bun、无头会话接法也不同。所以这里是重写，不是 fork。
-
-## 一个命令跑完：`/kelin-mode`
-
-`/kelin-mode` 是编排层。它先判断任务类型，再按阶段调用 skill；五个模式：`light`、`feature`、`fix`、`legacy`、`audit`。状态存在 `.kelin/state.json`，用 `mode.mjs` 推进，每个阶段有产物门禁。阶段顺序、命令和门禁规则见 [kelin-mode](skills/kelin-mode/SKILL.md)。
-
-**24GB 内存的硬限制**：最多 2 个子代理（1 写 1 读），不并行跑构建和测试，不整仓读文件，Node 脚本加 `--max-old-space-size=2048`；起代理前先跑 `node skills/kelin-mode/scripts/budget.mjs`，按它给的 `maxAgents` 决定并发。
-
-## 一条链路，四十个命令
-
-按阶段分组；每个命令的用途、是否有脚本、是否有 live 检查，见生成索引 [docs/skills.md](docs/skills.md)。
-
-- **想清楚**：`kelin-mode`、`kelin-goal`、`kelin-product`、`kelin-grill`（拷问）、`kelin-plan`（含设计草图）、`kelin-blast-radius`、`kelin-map`、`kelin-legacy`、`kelin-multirepo`、`kelin-ci`
-- **做扎实**：`kelin-tdd`、`kelin-correctness`、`kelin-verify`、`kelin-loop`、`kelin-safety`、`kelin-test-audit`
-- **交出去**：`kelin-review`、`kelin-delegate`、`kelin-ui`、`kelin-audit`、`kelin-refine`、`kelin-unslop`、`kelin-brief`、`kelin-decision-log`、`kelin-guard`、`kelin-ship`、`kelin-release`、`kelin-watch`
-- **接得住**：`kelin-recall`、`kelin-branches`（分支看板）、`kelin-agents`、`kelin-neat`、`kelin-reflect`、`kelin-principles`
-- **验证自己**：`kelin-verify-stack`、`kelin-verify-app`、`kelin-benchmark`、`kelin-health`、`kelin-evals`、`kelin-docs`
-
-命令统一带 `kelin-` 前缀，避免和 ZCode 内置命令、已装 skill 冲突。
-
-## 硬机制
-
-- **门禁完整性**：`kelin-review/scripts/gate-scan.mjs` 扫 diff 里被删的测试、被放宽的阈值、被关掉的检查；门禁类发现只问人不自动修。
-- **评审指纹**：`kelin-review/scripts/review-check.mjs` 把评审绑定到工作树；`STALE` 或 `UNVERIFIED` 不能当“审过了”。
-- **运行时安全（默认关闭，要求才开启）**：`kelin-safety` 三档——off 默认完全不启动；relaxed 只挡灾难级；strict 全量拦 `rm -rf /`、强推默认分支、冻结范围外写入。开关：`KELIN_SAFETY` 环境变量或 `echo strict > ~/.kelin/safety.mode`。
-- **性能取证**：`kelin-benchmark` 要求至少交替跑 5 次、报中位数和范围，结论只允许四选一。
-- **项目级验证**：`kelin-verify-app` 生成项目本地 `verify-<app>` skill，固定启动/体检/驱动/留证/清理五段。
-- **人话简报**：`kelin-brief` 先一句“现在等你什么”，再列决定、推荐、证据、风险。
-- **质量面板**：`kelin-health` 一次跑完测试、结构、文档、AGENTS、guards 检查，只报不改。
-
-## 三个子代理
-
-- `kelin-reviewer`：只报能证明的问题，每条带位置、触发条件、后果、改法；
-- `kelin-verifier`：只认命令输出和文件证据，不接受“理论上没问题”；
-- `kelin-worker`：通用执行代理，先读 `kelin-mode` 和 `kelin-principles`，不自行扩大范围，不嵌套子代理。
-
-## 验证器怎么工作
-
-`/kelin-verify-stack` 从 [open-pstack](https://github.com/ericlitman/open-pstack) 的验证思路改造而来，换成了 ZCode 原生实现：
-
-1. 体检：ZCode CLI、插件清单、登录凭据结构（只读键名）、输出目录；
-2. 分类：按改动路径算出该测哪些功能，未知路径直接拒绝；
-3. 真跑：启动无头 `zcode -p` 会话，从会话记录里确认 `Skill` 真的被调用；
-4. 断言：文件里必须出现随机标记或 skill 正文原句，模型自述不算；
-5. 回执：逐条断言、transcript 哈希、产物哈希、插件树哈希；
-6. 复核：出报告前重新校验所有哈希；插件树前后不一致直接判失败。
-
-它默认验证 kelin-stack 自己，也能验证任何 ZCode 插件：
+<p align="center">
+  <a href="#按宿主安装">快速安装</a> ·
+  <a href="#日常只记两句话">两句话启动</a> ·
+  <a href="#七道硬机制">硬机制</a> ·
+  <a href="#40-个命令全景">40 个命令</a> ·
+  <a href="./docs/support-matrix.md">跨宿主矩阵</a> ·
+  <a href="#开发与自检">开发与自检</a>
+</p>
 
 ```sh
-# 默认：只跑静态检查，不花 token
-node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --output /tmp/ks-static
-
-# 需要真会话时显式加 --live
-node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --live --output /tmp/ks-live
+# 最短体验路径（Antigravity 用户级原生插件）
+git clone https://github.com/kelinpan0524-cell/kelin-stack.git && cd kelin-stack
+./install.sh --host antigravity --scope user
 ```
 
-静态检查不花模型调用。live 检查每个功能约 42 万 tokens（大部分命中缓存）、10-20 秒；10 个 live 功能约 420 万 tokens、3 分钟。不并行，内存里同时只有一个会话。显式 `--feature zcode:skill-invocation:<名字>` 会直接跑 live；`--all` 和 `--changed` 默认只跑静态，加 `--live` 才跑配方。
+装好后在任何项目里只需说两句话：**`kelin mode setup`**（先体检再接入）和 **`用 kelin mode 帮我做 <需求>`**。
 
-## Token 预算
+---
 
-| 动作 | 实测消耗 | 什么时候用 |
+<p align="center">
+  <img src="./assets/readme/section-proof.svg" width="100%" alt="01 · 先给证据，再讲功能">
+</p>
+
+AI 写代码最常出事的地方不在语法，而在流程跳步：没想清需求就开工、没跑命令就说“应该没问题”、为了让测试变绿悄悄删掉断言、或者同时开四五个代理把 24GB 内存拖进 swap。
+
+**Kelin Stack 把“把活干扎实”拆成可运行的脚本和阶段门禁**：过不了脚本校验，状态机就不会放行到下一关。
+
+<p align="center">
+  <img src="./assets/readme/before-after.svg" width="100%" alt="有无 Kelin Stack 门禁对比：从口头完成变成可检查的产物与指纹验证">
+</p>
+
+### 真实运行输出（不是口头承诺）
+
+调用路由时，`/kelin-mode` 先判断任务模式、配套 skill 和环境缺口；交付前，`health.mjs` 一次跑完 7 类离线检查（本仓当前实测 `131/131` 单测通过）：
+
+```json
+$ node skills/kelin-mode/scripts/mode.mjs route --task "修复报价提交 500 报错" --root .
+{
+  "ok": true,
+  "mode": "fix",
+  "firstPhase": "intake",
+  "phases": ["intake", "map", "design", "build", "verify", "review", "refine", "ship", "reflect", "done"],
+  "activeSkills": ["kelin-recall", "kelin-agents"],
+  "needsGrill": false
+}
+```
+
+```json
+$ node skills/kelin-health/scripts/health.mjs --root .
+{
+  "ok": true,
+  "total": 7,
+  "failed": [],
+  "checks": [
+    { "id": "unit-tests", "ok": true, "summary": "pass 131 / fail 0" },
+    { "id": "offline",    "ok": true, "summary": "manifests + 40 skills + 3 agents" },
+    { "id": "skill-eval", "ok": true, "summary": "40 skills, problems: []" },
+    { "id": "neat",       "ok": true, "summary": "version 0.22.0, broken links: 0" },
+    { "id": "docs",       "ok": true, "summary": "skills: 40, digestBytes: 1073" },
+    { "id": "agents",     "ok": true, "summary": "AGENTS.md 38 lines (max 200)" },
+    { "id": "guards",     "ok": true, "summary": "3 guards verified" }
+  ]
+}
+```
+
+---
+
+<p align="center">
+  <img src="./assets/readme/section-workflow.svg" width="100%" alt="02 · 两句话启动，每关门禁推进">
+</p>
+
+## 日常只记两句话
+
+安装后，Antigravity 与 ZCode 在新会话会自动注入当前工作区状态与入口（Codex 通过 `ensure-workflow.mjs` 写入 `AGENTS.md` 路由块触发）。不用背 40 个命令名：
+
+1. **新仓库接入**：说 **`kelin mode setup`**（在仓库根运行对应 `node skills/kelin-mode/scripts/mode.mjs setup --root .`；装为插件后由 Agent 自动定位 `$SKILL_DIR` 执行）。先只读预览缺什么（`AGENTS.md`、`.gitignore`、`kelin-policy.json`、本地验证手册、`pre-commit`、内存预算与安全钩子），确认后再加 `--apply` 写入。
+2. **直接交办任务**：说 **`用 kelin mode 帮我做 <需求>`**，自动运行 `route` 判定模式并挂载当前阶段配套 skill（模糊需求先触发 `kelin-grill` 问透，前端带上 `kelin-ui`），缺产物就不允许 `advance`。
+3. **连续迭代不打架**：上一轮跑到 `done` 后，下一轮直接 `init` 会把旧记录归档到 `.kelin/history/`；没跑完的任务下个会话接续执行。
+
+<p align="center">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="kelin-mode 状态机：route 自动分流五种模式，展示 feature/fix/legacy 十阶段门禁链路（light 7 阶段，audit 5 阶段）">
+</p>
+
+### 五种模式按任务复杂度分流
+
+| 模式 | 适用场景 | 阶段链路 | 说明 |
+| --- | --- | --- | --- |
+| `light` | 单文件、文案、小修 | `intake → design → build → verify → ship → reflect → done` | 轻量三行计划 + 快速验证 |
+| `feature` | 加功能、改行为 | 完整 10 阶段 | 跨模块强制设计草图与双镜头 `plan-gate` |
+| `fix` | 修 bug、修回归 | 完整 10 阶段 | `build` 阶段联动 `kelin-tdd` + `kelin-guard` 防再犯 |
+| `legacy` | 老仓库改造、迁移 | 完整 10 阶段 | `map` 强制 `feature-map.json`，切片推进 |
+| `audit` | 只审不改 | `intake → map → audit → reflect → done` | 只读体检并强制输出覆盖声明表 |
+
+阶段判定细节与 `plan`/`refine`/`verify` 三档规则见 [kelin-mode](skills/kelin-mode/SKILL.md)。
+
+## 七道硬机制
+
+| 机制 | 负责脚本 / Skill | 实际拦住什么问题 |
 | --- | --- | --- |
-| `run --all`（静态） | 0 | 每次改完 |
-| `run --all --live` | 约 420 万 tokens | 发版前、改了很多 skill 之后 |
-| 一个 live 功能 | 约 42 万 tokens | 只改了一个 skill 时 |
-| 一个子代理 | 新会话，10 万级上下文 | 窄任务，最多 2 个 |
+| **门禁完整性扫描** | `kelin-review/scripts/gate-scan.mjs` | 扫描 diff 中被删的测试、被放宽的阈值、注释掉的检查与跨行 `try/catch {}`；门禁类发现只问人不自动改 |
+| **工作树指纹绑定** | `review-check.mjs` / `run-acceptance.mjs` | 把自审结论与验收输出绑定到工作树指纹；改了文件就标记 `STALE` / `UNVERIFIED`，旧回执作废 |
+| **只减不增质量棘轮** | `kelin-guard/scripts/ratchet-check.mjs` | 禁止新增钩子 `console.log`、硬编码单宿主提交前缀或仓库相对路径调用 |
+| **运行时安全钩子** | `kelin-safety`（`PreToolUse`） | 默认 `off` 不打扰；设 `KELIN_SAFETY=relaxed` 拦灾难级删库/强推，设 `strict` 拦截冻结范围外写入 |
+| **24GB 内存预算** | `kelin-mode/scripts/budget.mjs` | 并发硬顶 2 个子代理（1 写 1 读），禁止并行跑构建与测试，Node 脚本建议配 `--max-old-space-size=2048` |
+| **跨 CLI 双模型委托** | `kelin-delegate` | 把审查/挑刺/会诊/实现委托给 `codex` / `agy` / `zcode` 无头会话，读类角色强制只读沙箱 |
+| **人话简报与质量面板** | `kelin-brief` / `kelin-health` | 先一句“现在等你什么”再列证据和风险；`health.mjs` 一键跑完 7 项离线体检 |
 
-省法：默认静态；`--live` 只抽样；小任务用 `kelin-mode light`；不要每个阶段都起子代理。
+### 三个专用子代理
 
-## 安装
+- `kelin-reviewer`：只报能复现或指出明确代码路径的问题，每条附带 `文件:行号`、触发条件、后果和最小改法。
+- `kelin-verifier`：只认命令退出码、文件与截图证据，拒绝“理论上没问题”。
+- `kelin-worker`：按父代理拆好的窄任务执行，开工先读 `kelin-mode` 与 `kelin-principles`，不自行扩范围、不嵌套子代理。
 
-三个宿主共用同一份 `skills/`、`agents/` 与钩子脚本：
+---
 
-**Antigravity（原生插件，推荐）**：
+<p align="center">
+  <img src="./assets/readme/section-install.svg" width="100%" alt="03 · 三宿主一套源，装好就能用">
+</p>
+
+## 按宿主安装
+
+三宿主共用同一套 `skills/`、`agents/` 与钩子脚本。安装器幂等、写入前打印目标清单、不覆盖非 `kelin-*` 内容，`--uninstall` 只清理清单自有条目。各宿主能力边界与实测版本见 [跨宿主支持矩阵](docs/support-matrix.md)。
+
+### Antigravity（原生插件，推荐）
 
 ```sh
 git clone https://github.com/kelinpan0524-cell/kelin-stack.git && cd kelin-stack
 
-# 用户级（默认装完整原生插件到 ~/.gemini/config/plugins/kelin-stack，自动排除 .git 与 ZCode 专用 hooks/hooks.json）
+# 完整原生插件装到 ~/.gemini/config/plugins/kelin-stack（自动排除 .git 与 ZCode 专用钩子）
 ./install.sh --host antigravity --scope user
 agy plugin validate ~/.gemini/config/plugins/kelin-stack --strict
 
-# 只装 skill 子集到全局 ~/.gemini/config/skills/（省上下文）
+# 只装指定子集到 ~/.gemini/config/skills/（省上下文）
 ./install.sh --host antigravity --scope user --subset "kelin-mode,kelin-plan,kelin-verify,kelin-review"
 
-# 项目级（装进目标项目 .agents/skills/）
+# 装到单个项目 .agents/skills/，或安全卸载
 ./install.sh --host antigravity --scope project --path /path/to/your-project
-
-# 卸载（只删本安装器创建的插件目录或清单条目）
 ./install.sh --host antigravity --scope user --uninstall
 ```
 
-也可用 `agy plugin install ./kelin-stack` 直接安装，注意它会把 `.git` 和 ZCode 的 `hooks/hooks.json` 一并拷入插件目录。
+也可用 `agy plugin install ./kelin-stack` 直接安装（会把 `.git` 与 ZCode `hooks/hooks.json` 一并拷入缓存）。
 
-**ZCode（插件市场，推荐）**：
+### ZCode（插件市场，推荐）
 
 ```sh
 zcode plugins marketplace add kelinpan0524-cell/kelin-stack
 zcode plugins install kelin-stack@kelin-stack-market
 ```
 
-**Codex（用安装脚本）**：
+本地调试可用 `zcode plugins marketplace add ./kelin-stack`（同样会把 `.git` 拷入缓存）。
+
+### Codex（安装脚本）
 
 ```sh
 git clone https://github.com/kelinpan0524-cell/kelin-stack.git && cd kelin-stack
 
-# 项目级（装进 .agents/skills/）
+# 用户级（~/.agents/skills/）或项目级（.agents/skills/）
+./install.sh --host codex --scope user
 ./install.sh --host codex --scope project --path /path/to/your-project
 
-# 用户级（全局 ~/.agents/skills/）
-./install.sh --host codex --scope user
-
-# 只装一部分（省上下文注入）
-./install.sh --host codex --scope user --subset "kelin-mode,kelin-plan,kelin-verify,kelin-review"
-
-# 可选：把 kelin 路由块写进全局 AGENTS.md（进入 kelin-mode 的入口）
+# 可选：把 kelin 路由块幂等写入全局 AGENTS.md（先 --dry-run 预览）
 node skills/kelin-agents/scripts/ensure-workflow.mjs --global codex --dry-run
 
-# 卸载（只删本安装器装的 kelin-* 条目）
+# 卸载（只删安装器记录的 kelin-* 条目）
 ./install.sh --host codex --scope user --uninstall
 ```
 
-安装器幂等、写入前显示目标、不覆盖非 kelin 内容、`--uninstall` 只删清单记录的条目。各宿主的能力边界与实测结论见 [docs/support-matrix.md](docs/support-matrix.md)。
+装完重启 ZCode（Antigravity 下轮热加载生效），输入 `kelin-plan` 或 `/kelin-plan` 即可调用。
 
-ZCode 本地开发时可用目录安装；注意它会把整个目录（含 `.git`）拷进插件缓存：
+<details>
+<summary>给 WorkBuddy 用（手动复制 skill 目录）</summary>
+
+- **纯指令类 skill**（`plan`、`review`、`principles` 等）：将 `skills/<名字>/` 复制到 `~/.workbuddy/skills/` 或项目 `.workbuddy/skills/`。
+- **带脚本的 skill**（`map`、`verify`、`agents`、`guard`、`ci` 等）：脚本使用零依赖 Node，且通过 `$SKILL_DIR` 自定位。
+- **插件清单**：仓内已提供 `.zcode-plugin` / `.claude-plugin` / `.cursor-plugin` / `.antigravity-plugin` 四份清单，如需补充 WorkBuddy 清单可提供对应字段。
+- 注意：`kelin-verify-stack`（含 `verify-stack run --all`）依赖 ZCode CLI；无 ZCode 环境可跑 `offline-check.mjs` 与 `node --test`，Antigravity 环境另跑 `agy plugin validate`。
+
+</details>
+
+---
+
+## 40 个命令全景
+
+命令统一带 `kelin-` 前缀，避免与宿主内置命令重名。完整字段与脚本/live 索引见自动生成文档 [docs/skills.md](docs/skills.md)。
+
+| 阶段 | 命令列表 | 各自负责什么 |
+| --- | --- | --- |
+| **想清楚（10）** | `kelin-mode`、`kelin-goal`、`kelin-product`、`kelin-grill`、`kelin-plan`、`kelin-blast-radius`、`kelin-map`、`kelin-legacy`、`kelin-multirepo`、`kelin-ci` | 自动编排与路由；先写目标契约与 PRD 底线；用设计树逐层拷问需求（`grill`）；跨模块设计草图与门禁；改动影响面；路径到功能映射；老仓切片改造与多仓契约；一键接进 CI 与 pre-commit |
+| **做扎实（8）** | `kelin-tdd`、`kelin-correctness`、`kelin-verify`、`kelin-loop`、`kelin-refine`、`kelin-guard`、`kelin-safety`、`kelin-test-audit` | 先红后绿 TDD；行为与边界矩阵证明；跑命令出带指纹回执；有上限的自动迭代；按必要性删多余代码；bug 变防再犯检查与棘轮；高危操作拦截；清理假通过和快照水测试 |
+| **交出去（10）** | `kelin-review`、`kelin-delegate`、`kelin-audit`、`kelin-ui`、`kelin-unslop`、`kelin-brief`、`kelin-ship`、`kelin-release`、`kelin-watch`、`kelin-decision-log` | 带指纹分级自审；跨 CLI 只读/实现委托；全仓只读体检与覆盖声明；渲染界面检查；文字去 AI 味；人话状态简报；分支交付预检；发版计划与闸门；CI 失败分类盯梢；关键决策日志 |
+| **接得住（6）** | `kelin-recall`、`kelin-branches`、`kelin-agents`、`kelin-neat`、`kelin-reflect`、`kelin-principles` | 从仓库状态重建现场；分支清理看板（只报不删）；`AGENTS.md` 预算体检；全仓文档口径对齐；事后复盘沉淀；十条操作底线与六条工程原则 |
+| **验证自己（6）** | `kelin-evals`、`kelin-docs`、`kelin-verify-stack`、`kelin-verify-app`、`kelin-benchmark`、`kelin-health` | skill 触发与结构 eval；生成索引与漂移检查；开真实无头会话验插件；生成项目本地 `verify-*` 验收手册；5 轮性能取证；一键跑完 7 项离线健康检查 |
+
+---
+
+## 行为验证器与安全边界
+
+`/kelin-verify-stack` 改自 [open-pstack](https://github.com/ericlitman/open-pstack) 的“证据优先”思路，换成 ZCode 原生实现：
+
+1. **体检**：检查 ZCode CLI、清单、凭据键名（不读值）和全新输出目录；
+2. **分类**：按改动路径算出需要跑哪些功能，未知路径直接拒跑；
+3. **真跑**：启动无头 `zcode -p` 会话，从模型调用日志核实 `Skill` 确实被调用；
+4. **断言与回执**：检查文件里的随机标记与正文原句，汇总 transcript 哈希、产物哈希与前后一致的插件树哈希。
 
 ```sh
-zcode plugins marketplace add ./kelin-stack
-zcode plugins install kelin-stack@kelin-stack-market
+# 静态全检（0 token，每次改完跑）
+node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --output /tmp/ks-static
+
+# 真实无头会话检查（显式加 --live 才花 token）
+node skills/kelin-verify-stack/scripts/verify-stack.mjs run --all --live --output /tmp/ks-live
 ```
 
-装完重启 ZCode（Antigravity 热加载，下轮生效），输入 `kelin-plan` 或 `/kelin-plan` 就能看到。
+### Token 预算与运行边界
 
-## 安装后怎么用（小白版）
+| 动作 | 参考消耗 | 适用时机 |
+| --- | --- | --- |
+| `run --all`（静态） / `smoke` | 0 | 每次改动与日常提交 |
+| 单个 live 功能 | 约 42 万 tokens（多命中缓存，10-20 秒） | 只改单个 skill 后定向复核 |
+| `run --all --live`（18 个 live 配方） | 按单个约 42 万 tokens 估算，串行执行（历史 10 个配方实测约 420 万 tokens、3 分钟） | 发版前、大改多个 skill 后 |
+| 单个子代理 | 10 万级上下文（最多 2 个） | 明确窄任务，小改用 `kelin-mode light` |
 
-在 Antigravity 或 ZCode **原生插件**安装后，每个新会话会自动注入 kelin-stack 上下文，并提供可按需开启的 `PreToolUse` 安全钩子（默认 `off` 不拦截，设 `KELIN_SAFETY=strict|relaxed` 或写入 `~/.kelin/safety.mode` 后生效；Antigravity 还自带常驻规则 `rules/AGENTS.md`）；若在 **Codex** 仅走 skills 安装，则无运行时钩子，需配合 `ensure-workflow.mjs` 写入的 `AGENTS.md` 路由块触发（能力边界详见 [docs/support-matrix.md](docs/support-matrix.md)）。不论哪种装法，**不懂流程也只需记住两句话**：
+**安全与刻意不做**：
 
-1. **新仓库一键接入**：直接说 **`kelin mode setup`**（或运行 `node skills/kelin-mode/scripts/mode.mjs setup --root .`）。先只读预览缺什么（`AGENTS.md`、`.gitignore`、`kelin-policy.json`、本地验证手册、`pre-commit`、内存预算与安全钩子），确认后再加 `--apply` 自动配置。
-2. **直接交办任务**：直接说 **`用 kelin mode 帮我做 <需求>`**，agent 会先跑 `route` 判断模式（`light`/`feature`/`fix`/`legacy`/`audit`）、自动挂载当前阶段的配套 skill（如产品先走 `kelin-product`、前端加 `kelin-ui`、模糊需求先 `kelin-grill`），并按 `.kelin/state.json` 门禁推进，不再需要记住 40 个 skill 名字。
-3. **连续多轮不打架**：上一轮跑到 `done` 后，下个需求直接 `init` 会自动把旧记录归档到 `.kelin/history/`；没做完的任务下个会话直接续跑。
-4. **项目与安全兜底**：项目里有 `.zcode/skills/verify-*` 或 `.agents/skills/verify-*` 时验证阶段自动启用；高危操作由 `PreToolUse` 按 `KELIN_SAFETY`（off/relaxed/strict）兜底拦住。
+- 仓库不含凭据、客户业务表与联网上报代码；`preflight.mjs` 在提交前拦 `.xlsx`/`.env`/私钥与常见密钥特征。
+- 唯一会对外写入的 `verify-stack publish`（发 PR 评论与 commit status）必须显式传 `--confirm`，`run` 不会自动触发。
+- `kelin-delegate` 发送给外部 CLI 的提示词和文件会经过对应模型服务商，切勿放密钥或客户数据。
+- **刻意不做自动开 PR、自动合并、自动部署**：这些动作需要人拍板。
 
-## 给 WorkBuddy 用
+---
 
-WorkBuddy 支持标准 `SKILL.md`。分三种情况：
+## 开发与自检
 
-- **纯指令类 skill**（plan、review、principles 等）：把 `skills/<名字>/` 整个目录拷到 `~/.workbuddy/skills/`（全局）或项目的 `.workbuddy/skills/` 即可；
-- **带脚本的 skill**（map、verify、agents、guard、ci 等）：脚本是 Node，无外部依赖；脚本调用使用 `$SKILL_DIR` 占位符自定位；
-- **插件安装**：WorkBuddy 支持插件 ZIP / 自定义 marketplace，但清单格式不同；本仓库目前有 `.zcode-plugin` / `.claude-plugin` / `.cursor-plugin` / `.antigravity-plugin` 四份清单。需要的话可以补一份 WorkBuddy 清单，告诉我它的 manifest 路径和字段即可。
-
-注意：`kelin-verify-stack`（含 `verify-stack run --all`）依赖本机 ZCode CLI；无 ZCode 环境可跑通用的 `offline-check.mjs` 与 `node --test`，Antigravity 环境另跑 `agy plugin validate`；斜杠命令名也可能随运行时不同。
-
-## 开发
+<details>
+<summary>本地全套检查命令（CI 同款 10 项检查 + 双宿主冒烟）</summary>
 
 ```sh
 node skills/kelin-health/scripts/health.mjs --root .
@@ -176,61 +261,53 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs smoke --host codex
 agy plugin validate .
 ```
 
-CI 每次 push 跑十项检查：全量单元测试、离线结构检查、引用漂移检查、AGENTS.md 预算、guards 完整性与棘轮不回退检查、文档一致性、skill 结构与触发检查、生成文档 drift、策略文件校验（不需要宿主登录，不消耗模型）。
-
-改 skill 之后，按改动路径验证：
+按改动路径定向验证 skill：
 
 ```sh
 node skills/kelin-verify-stack/scripts/verify-stack.mjs classify --changed skills/kelin-plan/SKILL.md
 node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kelin-plan/SKILL.md --output /tmp/ks-one
 ```
 
-## 安全边界
+</details>
 
-- 仓库里没有凭据、没有真实业务数据、没有联网上传逻辑。
-- 验证器只检查 ZCode 凭据文件的键名，不读值、不复制。
-- 唯一会对外写入的是 `verify-stack publish`（PR 评论 + commit status），必须显式 `--confirm`，且 `run` 不会自动调用它。
-- 报告里的字段经过净化：只允许可打印 ASCII、≤160 字符、不含反引号和尖括号。
-- `preflight.mjs` 在提交前拦截表格类真实数据、`.env`/私钥文件和常见密钥特征。
-- 通过 `kelin-delegate` 委托的任务描述与相关文件会发送给对应 CLI 的模型服务商，可能产生费用；**不要把密钥、凭据或客户数据写进委托提示词**。
+<details>
+<summary>与上游 pstack 的设计取舍及仓库目录</summary>
 
-## 和 pstack 的差异
+`pstack` 面向 Claude Code / Codex 与 `bun` 环境，直接搬到 ZCode 和 Antigravity 会出现命令重名、钩子协议不兼容与无头接入差异，因此本仓采用原生重写：
 
-| pstack | kelin-stack | 原因 |
+| pstack | kelin-stack | 取舍原因 |
 | --- | --- | --- |
-| 46 个 skill | 40 个 | 每个都对应一个会真实发生的错误，不凑数 |
-| poteto-mode 编排 | `kelin-mode` | 同样的“自动跑完整流程”，但加了 24GB 内存上限和老仓库模式 |
-| T3、宿主外编排平台 | 不做 | 会与 ZCode 自身的模型调度冲突；SessionStart 自动激活与跨 CLI 委托（kelin-delegate）已实现 |
-| 多代理并行编排（swarm/arena） | 最多 2 个，1 写 1 读 | 24GB 内存，3 个以上会话会把机器拖进 swap |
-| 20+ 条 principle-* | 合并成一页 `kelin-principles` | 原则多了没人读，十条能记住 |
+| 46 个 skill | 40 个 skill | 只保留对应真实工程故障的命令，不凑数 |
+| `poteto-mode` | `kelin-mode` | 加入 24GB 内存预算、5 模式路由与老仓库切片 |
+| T3 / 宿主外编排 | 不做 | 避免与宿主自身调度冲突；改为 SessionStart 注入 + `kelin-delegate` |
+| swarm / arena 多代理 | 最多 2 个（1 写 1 读） | 防止 24GB 本机开 3 个以上会话拖进 swap |
+| 20+ 条 `principle-*` | 合并为一页 `kelin-principles` | 十条操作底线 + 六条工程原则能记住也用得上 |
 
-明确没做：自动开 PR、自动合并、自动部署（跨 CLI 委托已由 kelin-delegate 提供）。这些不是“还没写”，是刻意不做——它们需要人拍板。
-
-## 目录
-
-```
+```text
 kelin-stack/
 ├── .antigravity-plugin/ # Antigravity 原生插件清单
 ├── .zcode-plugin/       # ZCode 插件清单
 ├── .claude-plugin/      # Claude Code 插件与市场清单
-├── .cursor-plugin/      # Cursor 市场清单（marketplace.json）
-├── hooks.json           # Antigravity 根目录钩子声明（SessionStart + PreToolUse）
-├── hooks/               # 双宿主钩子脚本 + ZCode hooks/hooks.json
+├── .cursor-plugin/      # Cursor 市场清单
+├── hooks.json           # Antigravity 根钩子声明（SessionStart + PreToolUse）
+├── hooks/               # 跨宿主钩子脚本 + ZCode hooks/hooks.json
 ├── rules/               # Antigravity 常驻规则（AGENTS.md）
-├── assets/              # 插件图标（logo.svg）
+├── assets/              # 插件图标（logo.svg）与 README 视觉资产（assets/readme/）
 ├── skills/              # 40 个 skill，完整索引见 docs/skills.md
-├── agents/              # 3 个子代理：审查、验证、worker
-├── evals/               # 触发 eval + fixture 行为 eval
+├── agents/              # 3 个子代理：kelin-reviewer / kelin-verifier / kelin-worker
+├── evals/               # 触发 eval 与行为 fixture eval
 ├── install.sh           # antigravity 原生插件 / codex 跨宿主安装器
-├── agents-digest/       # 一页速查，给不装插件的 agent
-├── docs/                # 生成的 skill 索引 + 跨宿主支持矩阵
+├── agents-digest/       # 一页速查（给不装插件的 agent）
+├── docs/                # 生成的 skill 索引与跨宿主支持矩阵
 ├── kelin-policy.json    # 自动化边界与预算
-├── guards.json          # bug → 防再犯记录
+├── guards.json          # bug 到防再犯检查记录
 ├── ratchet.json         # 只减不增质量棘轮基线
 ├── neat.json            # 文档一致性配置
 └── .github/             # CI 门禁
 ```
 
+</details>
+
 ## 许可
 
-MIT。设计灵感来自 pstack（Cursor，MIT）与 open-pstack（Eric Litman，MIT），详见 [NOTICE](NOTICE)。本仓库的文本、脚本和验证器实现均为 ZCode 版本，未逐字复制上游源码。
+MIT。设计灵感来自 pstack（Cursor，MIT）与 open-pstack（Eric Litman，MIT），详见 [NOTICE](NOTICE)。仓内文本、脚本与验证器均为独立中文工程实现，未逐字复制上游源码。
