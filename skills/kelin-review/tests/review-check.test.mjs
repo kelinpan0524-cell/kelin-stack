@@ -86,6 +86,34 @@ test('a stamp-only receipt without a report hash never reads as CURRENT', () => 
   }
 });
 
+test('review-check --write refuses a heading-only template report (no verdict record)', () => {
+  const dir = initRepo();
+  try {
+    mkdirSync(path.join(dir, '.kelin'), { recursive: true });
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '## 审查结论\n');
+    const res = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
+    assert.notEqual(res.status, 0);
+    assert.match(res.stderr, /verdict/i);
+    assert.equal(existsSync(path.join(dir, '.kelin', 'review.json')), false, 'heading-only template must not stamp');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('review-check --write refuses reports declaring unresolved review failure (never CURRENT)', () => {
+  const dir = initRepo();
+  try {
+    mkdirSync(path.join(dir, '.kelin'), { recursive: true });
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '审查失败：必需审查者超时\n');
+    const res = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
+    assert.notEqual(res.status, 0);
+    assert.match(res.stderr, /(verdict|失败)/i);
+    assert.equal(existsSync(path.join(dir, '.kelin', 'review.json')), false, 'failure declaration must not stamp');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('review-check --write accepts an explicitly passed report file', () => {
   const dir = initRepo();
   try {

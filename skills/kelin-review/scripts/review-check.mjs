@@ -68,7 +68,11 @@ const stripFenced = (text) => {
 const hasVerdictRecord = (text) => {
   const clean = stripFenced(text).trim();
   if (!clean) return false;
-  return /(结论|审查失败|裁决|CLEAN|FINDINGS|\bP[0-3]\b)/i.test(clean);
+  const body = clean.split(/\r?\n/).filter((line) => !/^#{1,6}\s/.test(line.trim())).join('\n').trim();
+  if (!body) return false;
+  const scrubbed = body.replace(/(无|没有|未发现|零|0)\s*(起|个|条)?\s*审查失败/g, '');
+  if (/(审查失败|review\s+failure)/i.test(scrubbed)) return false;
+  return /(结论|裁决|CLEAN|FINDINGS|\bP[0-3]\b)/i.test(scrubbed);
 };
 
 export function hasUnresolvedHighSeverity(markdown) {
