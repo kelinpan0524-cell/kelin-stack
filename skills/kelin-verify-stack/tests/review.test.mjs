@@ -19,6 +19,8 @@ const repo = async () => {
   await mkdir(path.join(dir, 'tests'), { recursive: true });
   await mkdir(path.join(dir, 'src'), { recursive: true });
   await writeFile(path.join(dir, '.gitignore'), '.kelin/\n');
+  await mkdir(path.join(dir, '.kelin'), { recursive: true });
+  await writeFile(path.join(dir, '.kelin', 'review.md'), '## 审查结论\nP0: 0 / P1: 0\n');
   await writeFile(path.join(dir, 'tests/app.test.mjs'), "test('a', () => { assert.equal(1, 1); });\n");
   await writeFile(path.join(dir, 'src/app.mjs'), 'export const a = 1;\n');
   git(dir, ['add', '-A']);
@@ -378,6 +380,7 @@ test('review & fingerprint hardening: unborn HEAD, JS regex literals, per-hunk e
   await writeFile(customRev, '# Review\nedited\n');
   assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'STALE');
   await writeFile(path.join(cleanDir, 'new-script.sh'), '#!/bin/sh\necho hi\n');
+  await writeFile(customRev, '# Review\nedited\n结论：无问题\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write', '--review', customRev]).status, 0);
   chmodSync(path.join(cleanDir, 'new-script.sh'), 0o755);
   assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'STALE');

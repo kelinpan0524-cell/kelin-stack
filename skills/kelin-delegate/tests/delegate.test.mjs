@@ -270,6 +270,69 @@ require('node:fs').writeFileSync(${JSON.stringify(dryRunGuard)}, 'ran');
   }
 });
 
+test('long responses keep head and tail so the final verdict line survives truncation', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-delegate-truncate-'));
+  const binDir = path.join(dir, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const verboseAgy = `#!/usr/bin/env node
+const filler = 'A'.repeat(15000);
+process.stdout.write(JSON.stringify({ conversation_id: 'c1', response: 'HEAD-SIDE-MARKER' + filler + 'verdict below\\nCLEAN' }));
+`;
+  await writeFile(path.join(binDir, 'agy'), verboseAgy);
+  await chmod(path.join(binDir, 'agy'), 0o755);
+
+  const env = { ...process.env, HOME: dir, PATH: `${binDir}:${process.env.PATH}` };
+  try {
+    const res = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'antigravity', '--role', 'review', '--workspace', dir, '--timeout', '5', '--prompt', 'hi'],
+      { env, encoding: 'utf8', timeout: 15000 },
+    );
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    const payload = JSON.parse(res.stdout);
+    assert.match(payload.response, /\.\.\.\[/, 'truncation marker must be present');
+    assert.ok(payload.response.startsWith('HEAD-SIDE-MARKER'), 'head-side marker must survive truncation');
+    assert.ok(payload.response.includes('verdict below'), 'tail-side verdict intro must survive');
+    assert.ok(payload.response.endsWith('CLEAN'), 'final verdict line must survive truncation');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('clipOutput boundary: 12001 and 14000 pass through, 14001 truncates with omitted=1', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-delegate-clip-'));
+  const binDir = path.join(dir, 'bin');
+  await mkdir(binDir, { recursive: true });
+  const agyStub = `#!/usr/bin/env node
+const len = parseInt(process.env.OUT_LEN, 10);
+process.stdout.write(JSON.stringify({ conversation_id: 'c1', response: 'x'.repeat(len) }));
+`;
+  await writeFile(path.join(binDir, 'agy'), agyStub);
+  await chmod(path.join(binDir, 'agy'), 0o755);
+
+  const env = { ...process.env, HOME: dir, PATH: `${binDir}:${process.env.PATH}` };
+  try {
+    const run = (outLen) => spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'antigravity', '--role', 'review', '--workspace', dir, '--timeout', '5', '--prompt', 'hi'],
+      { env: { ...env, OUT_LEN: String(outLen) }, encoding: 'utf8', timeout: 15000 },
+    );
+    for (const passthrough of [12001, 14000]) {
+      const res = run(passthrough);
+      assert.equal(res.status, 0, res.stdout + res.stderr);
+      assert.equal(JSON.parse(res.stdout).response, 'x'.repeat(passthrough), `length ${passthrough} must pass through unclipped`);
+    }
+    const clipped = run(14001);
+    assert.equal(clipped.status, 0, clipped.stdout + clipped.stderr);
+    const payload = JSON.parse(clipped.stdout);
+    assert.match(payload.response, /\.\.\.\[omitted 1 chars\]\.\.\./);
+    assert.ok(payload.response.startsWith('x'.repeat(12000)));
+    assert.ok(payload.response.endsWith('x'.repeat(2000)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('timeout reports timed_out true and preserves trailing stderr', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'kelin-delegate-timeout-'));
   const binDir = path.join(dir, 'bin');

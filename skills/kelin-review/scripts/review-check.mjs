@@ -65,6 +65,12 @@ const stripFenced = (text) => {
   return out.join('\n');
 };
 
+const hasVerdictRecord = (text) => {
+  const clean = stripFenced(text).trim();
+  if (!clean) return false;
+  return /(结论|审查失败|裁决|CLEAN|FINDINGS|\bP[0-3]\b)/i.test(clean);
+};
+
 export function hasUnresolvedHighSeverity(markdown) {
   const clean = stripFenced(markdown);
   const explicitTableCellRe = /^\|.*\|\s*(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)\s*\|/i;
@@ -176,8 +182,9 @@ const main = () => {
 
   let reportHash = null;
   let reportVerdict = 'stamp-only';
+  let reportBody = '';
   if (activeReviewPath) {
-    const reportBody = readFileSync(activeReviewPath, 'utf8');
+    reportBody = readFileSync(activeReviewPath, 'utf8');
     reportHash = createHash('sha256').update(reportBody).digest('hex');
     reportVerdict = hasUnresolvedHighSeverity(reportBody) ? 'blocked' : 'clean';
   }
@@ -200,6 +207,14 @@ const main = () => {
   }
 
   if (args.includes('--write')) {
+    if (!activeReviewPath) {
+      console.error('--write requires a review report: pass --review FILE or write .kelin/review.md; stamping CURRENT without a report is invalid');
+      process.exit(2);
+    }
+    if (!hasVerdictRecord(reportBody)) {
+      console.error('--write requires a review report with findings and verdicts; empty or verdict-free reports cannot stamp CURRENT');
+      process.exit(2);
+    }
     mkdirSync(path.dirname(stampFile), { recursive: true });
     writeFileSync(stampFile, `${JSON.stringify(record, null, 2)}\n`);
     const blocked = reportVerdict === 'blocked';
@@ -229,7 +244,8 @@ const main = () => {
   if (expected) {
     if (expected !== wt.fingerprint || staleByReport) verdict = 'STALE';
     else if (blocked) verdict = 'BLOCKED';
-    else verdict = 'CURRENT';
+    else if (reviewFile || stampData?.reportHash) verdict = 'CURRENT';
+    else verdict = 'UNVERIFIED';
   } else if (source) {
     verdict = 'UNVERIFIED';
   }
