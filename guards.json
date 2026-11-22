@@ -44,6 +44,21 @@
         "command": "add bare console.log in hooks/ or git commit -m \"[ZCode]\" in a SKILL.md, then run ratchet-check.mjs ratchet.json --check",
         "expected": "fail-on-old"
       }
+    },
+    {
+      "id": "delegate-stdin-and-args",
+      "bug": "delegate.mjs leaked git stderr, broke '-' Codex prompts, swallowed --dry-run/--role=x flags, and hid timedOut/sub-ms errors",
+      "rootCause": "git execFileSync used default stdio, Codex missed -- and '-' guard, flag parser ate --flag=val, and main ignored timedOut/int ms",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-delegate/tests/delegate.test.mjs",
+        "command": "node --test skills/kelin-delegate/tests/delegate.test.mjs"
+      },
+      "enforcedIn": [".github/workflows/ci.yml"],
+      "proof": {
+        "command": "revert parseCliArgs flag check or buildCodexArgs --, then node --test skills/kelin-delegate/tests/delegate.test.mjs",
+        "expected": "fail-on-old"
+      }
     }
   ]
 }
