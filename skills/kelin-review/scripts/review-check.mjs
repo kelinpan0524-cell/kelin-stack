@@ -65,14 +65,13 @@ const stripFenced = (text) => {
   return out.join('\n');
 };
 
+const FAILURE_DECLARATION_RE = /^\s*#{0,6}\s*(审查失败|review\s+failure)\s*[:：]/m;
+const VERDICT_LINE_RE = /^[ \t]*(CLEAN|FINDINGS)[ \t]*$/m;
+
 const hasVerdictRecord = (text) => {
-  const clean = stripFenced(text).trim();
-  if (!clean) return false;
-  const body = clean.split(/\r?\n/).filter((line) => !/^#{1,6}\s/.test(line.trim())).join('\n').trim();
-  if (!body) return false;
-  const scrubbed = body.replace(/(无|没有|未发现|零|0)\s*(起|个|条)?\s*审查失败/g, '');
-  if (/(审查失败|review\s+failure)/i.test(scrubbed)) return false;
-  return /(结论|裁决|CLEAN|FINDINGS|\bP[0-3]\b)/i.test(scrubbed);
+  const raw = String(text || '');
+  if (FAILURE_DECLARATION_RE.test(raw)) return false;
+  return VERDICT_LINE_RE.test(raw);
 };
 
 export function hasUnresolvedHighSeverity(markdown) {
@@ -248,7 +247,7 @@ const main = () => {
   if (expected) {
     if (expected !== wt.fingerprint || staleByReport) verdict = 'STALE';
     else if (blocked) verdict = 'BLOCKED';
-    else if (reviewFile || stampData?.reportHash) verdict = 'CURRENT';
+    else if ((reviewFile || stampData?.reportHash) && hasVerdictRecord(reportBody)) verdict = 'CURRENT';
     else verdict = 'UNVERIFIED';
   } else if (source) {
     verdict = 'UNVERIFIED';

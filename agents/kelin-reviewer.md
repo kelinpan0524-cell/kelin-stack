@@ -29,7 +29,11 @@ P0: 0 / P1: 1 / P2: 2 / P3: 1 —— 建议：修完 P1 再交付
 - 输入边界
 - 权限
 - 错误处理
+
+FINDINGS
 ```
+
+报告最后一行必须是机器裁决行：无 P0/P1 写 `CLEAN`，有发现写 `FINDINGS`（与 `kelin-delegate` 输出契约一致；`review-check --write` 只认这一行签章）。
 
 ## 禁止
 

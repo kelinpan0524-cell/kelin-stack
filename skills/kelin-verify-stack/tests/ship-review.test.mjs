@@ -18,7 +18,7 @@ const repo = async () => {
   git(dir, ['config', 'user.name', 'ship']);
   await writeFile(path.join(dir, 'README.md'), 'baseline\n');
   await mkdir(path.join(dir, '.kelin'), { recursive: true });
-  await writeFile(path.join(dir, '.kelin', 'review.md'), '## 审查结论\nP0: 0 / P1: 0\n');
+  await writeFile(path.join(dir, '.kelin', 'review.md'), '## 审查结论\nP0: 0 / P1: 0\nCLEAN\n');
   git(dir, ['add', '-A']);
   git(dir, ['commit', '-qm', 'baseline']);
   git(dir, ['checkout', '-qb', 'feat/x']);

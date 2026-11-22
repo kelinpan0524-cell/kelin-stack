@@ -466,7 +466,7 @@ test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P
   assert.equal(blockedReview.code, 1);
   assert.match(blockedReview.stdout, /unresolved P0\/P1/);
 
-  await artifact(revRepo, 'review.md', '# 审查\n- [x] P1: a.mjs:1 已修复\n结论：无 P0/P1\n');
+  await artifact(revRepo, 'review.md', '# 审查\n- [x] P1: a.mjs:1 已修复\n结论：无 P0/P1\nCLEAN\n');
   execFileSync(process.execPath, [reviewCheckScript, '--write'], { cwd: revRepo });
   assert.equal(run(['advance'], revRepo).code, 0);
 
@@ -573,7 +573,7 @@ test('mode ship enforces preflight in Git repos across subdirs; route handles En
   await writeValidAcceptance(pkg);
   assert.equal(run(['advance'], pkg).code, 0);
 
-  await artifact(pkg, 'review.md', '# Review\n结论：无 P0/P1\n');
+  await artifact(pkg, 'review.md', '# Review\n结论：无 P0/P1\nCLEAN\n');
   execFileSync(process.execPath, [reviewCheckScript, '--root', pkg, '--write'], { cwd: mono });
   assert.equal(existsSync(path.join(pkg, '.kelin', 'review.json')), true);
   assert.equal(run(['advance'], pkg).code, 0);

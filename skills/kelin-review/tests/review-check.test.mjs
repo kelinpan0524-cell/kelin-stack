@@ -35,7 +35,7 @@ test('review-check --write stamps CURRENT with a report and stays CURRENT on re-
   const dir = initRepo();
   try {
     mkdirSync(path.join(dir, '.kelin'), { recursive: true });
-    writeFileSync(path.join(dir, '.kelin', 'review.md'), '## 审查结论\nP0: 0 / P1: 0\n');
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '## 审查结论\nP0: 0 / P1: 0\nCLEAN\n');
     const writeRes = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
     assert.equal(writeRes.status, 0, writeRes.stdout + writeRes.stderr);
     assert.equal(JSON.parse(writeRes.stdout).status, 'CURRENT');
@@ -114,10 +114,82 @@ test('review-check --write refuses reports declaring unresolved review failure (
   }
 });
 
+test('review-check --write requires an explicit machine verdict line (Chinese conclusions alone are not enough)', () => {
+  const dir = initRepo();
+  try {
+    mkdirSync(path.join(dir, '.kelin'), { recursive: true });
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '## 审查结论\n结论：P0: 0 / P1: 0\n');
+    const res = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
+    assert.notEqual(res.status, 0);
+    assert.equal(existsSync(path.join(dir, '.kelin', 'review.json')), false, 'report without a verdict line must not stamp');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('review-check --write refuses failure declarations in headings and accepts findings prose with a verdict line', () => {
+  const dir = initRepo();
+  try {
+    mkdirSync(path.join(dir, '.kelin'), { recursive: true });
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '## 审查失败：必需审查者超时\n');
+    const heading = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
+    assert.notEqual(heading.status, 0, 'failure declaration in a heading must not stamp');
+
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '## 审查结论\n10 起审查失败均已在上一轮关闭\n无审查失败\nFINDINGS\n');
+    const findings = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
+    assert.equal(findings.status, 0, findings.stdout + findings.stderr);
+    assert.equal(JSON.parse(findings.stdout).status, 'CURRENT');
+
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '## 审查结论\n无审查失败\n结论：通过\nCLEAN\n');
+    const clean = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
+    assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+    assert.equal(JSON.parse(clean.stdout).verdict, 'clean');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('verdict line inside a fenced code block counts as the machine contract', () => {
+  const dir = initRepo();
+  try {
+    mkdirSync(path.join(dir, '.kelin'), { recursive: true });
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '## 审查结论\n```\nCLEAN\n```\n');
+    const res = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    assert.equal(JSON.parse(res.stdout).status, 'CURRENT');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('explicit --review path enforces the verdict line too (stale-check cannot bypass the new gate)', () => {
+  const dir = initRepo();
+  try {
+    mkdirSync(path.join(dir, '.kelin'), { recursive: true });
+    const reportPath = path.join(dir, '.kelin', 'review.md');
+    writeFileSync(reportPath, '# Review\n结论：无问题\n');
+    const printed = spawnSync(process.execPath, [script, '--root', dir, '--print'], { encoding: 'utf8' });
+    assert.equal(printed.status, 0, printed.stdout + printed.stderr);
+    const { fingerprint } = JSON.parse(printed.stdout);
+
+    writeFileSync(reportPath, `# Review\nWorktree-Fingerprint: ${fingerprint}\n结论：无问题\n`);
+    const noVerdict = spawnSync(process.execPath, [script, '--root', dir, '--review', '.kelin/review.md'], { encoding: 'utf8' });
+    assert.notEqual(noVerdict.status, 0, 'verdict-line-less report must not read as CURRENT via --review');
+    assert.equal(JSON.parse(noVerdict.stdout).status, 'UNVERIFIED');
+
+    writeFileSync(reportPath, `# Review\nWorktree-Fingerprint: ${fingerprint}\nCLEAN\n`);
+    const withVerdict = spawnSync(process.execPath, [script, '--root', dir, '--review', '.kelin/review.md'], { encoding: 'utf8' });
+    assert.equal(withVerdict.status, 0, withVerdict.stdout + withVerdict.stderr);
+    assert.equal(JSON.parse(withVerdict.stdout).status, 'CURRENT');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('review-check --write accepts an explicitly passed report file', () => {
   const dir = initRepo();
   try {
-    writeFileSync(path.join(dir, 'review.md'), '## 审查结论\nP0: 0 / P1: 0\n');
+    writeFileSync(path.join(dir, 'review.md'), '## 审查结论\nP0: 0 / P1: 0\nCLEAN\n');
     const res = spawnSync(process.execPath, [script, '--root', dir, '--write', '--review', 'review.md'], { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stdout + res.stderr);
     assert.equal(JSON.parse(res.stdout).status, 'CURRENT');
