@@ -380,6 +380,7 @@ test('review & fingerprint hardening: unborn HEAD, JS regex literals, per-hunk e
   await writeFile(customRev, '# Review\nedited\n');
   assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'STALE');
   await writeFile(path.join(cleanDir, 'new-script.sh'), '#!/bin/sh\necho hi\n');
+  await writeFile(customRev, '# Review\nedited\n结论：无问题\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write', '--review', customRev]).status, 0);
   chmodSync(path.join(cleanDir, 'new-script.sh'), 0o755);
   assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'STALE');

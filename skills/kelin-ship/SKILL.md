@@ -77,7 +77,7 @@ git commit -m "[Antigravity] 一句话说结果" -m "为什么这么改，风险
 5. gate-scan 无未解释的门禁放宽类发现；
 6. 改动不涉及生产配置、密钥、迁移类高危区。
 
-前置：本档全部必需审查者成功返回合法末行裁决（`CLEAN` / `FINDINGS`）且主裁完成裁决；存在未消解的审查失败时禁止合并，即使 P0/P1 计数为 0。证据绑定：证据采集前 `git status` 必须干净（无未提交/未暂存改动）且 HEAD == 远端 PR head SHA，不满足先停；先同步最新目标分支，针对**同一远端 PR head SHA** 核对审查回执、CI 与 gate-scan，合并命令用 `gh pr merge --match-head-commit <SHA>` 锁定，禁止拿本地旧回执拼远端新提交的绿门。
+前置：本档全部必需审查者成功返回合法末行裁决（`CLEAN` / `FINDINGS`）且主裁完成裁决；存在未消解的审查失败时禁止合并，即使 P0/P1 计数为 0。证据绑定：证据采集前 `git status` 必须干净（无未提交/未暂存改动）且 HEAD == 远端 PR head SHA，不满足先停；先同步最新目标分支，针对**同一远端 PR head SHA** 核对审查回执、CI 与 gate-scan，合并命令用 `gh pr merge --squash --match-head-commit <SHA>` 锁定（按仓库合并策略显式传 `--merge`/`--rebase`/`--squash`），禁止拿本地旧回执拼远端新提交的绿门。
 
 任一不满足：停下，列明缺项，交用户拍板。两条红线**优先于本门通用兜底**：Dependabot 大版本依赖 PR 依旧直接关；"合并即部署"仓库的部署确认不在此门覆盖内。
 

@@ -40,10 +40,10 @@ node "$SKILL_DIR"/scripts/gate-scan.mjs --base origin/main
 
 需要更狠地找 bug 时加 `--adversarial`：
 
-- **硬约束：审查者必须跑在对面模型的 CLI 上**——Claude 系代理显式走 `kelin-delegate --runner codex --role review`（codex exec 只读沙箱）；Codex 系代理显式走 `claude -p --permission-mode plan`（只读规划模式；本机 CLI 不支持该 flag 时用 `--disallowed-tools "Edit Write NotebookEdit"`，以实测为准），均不经 delegate 路由；通用 delegate 角色路由不能替代对抗审查的指定入口。指定入口不可用时按"审查失败显性化"处理，禁止用运行在自家模型上的子代理或内部委托机制充当独立审查者，也不把本家模型的输出计为独立审查——那失去交叉意义。
+- **硬约束：审查者必须跑在对面模型的 CLI 上**——Claude 系代理显式走 `kelin-delegate --runner codex --role review`（codex exec 只读沙箱）；Codex 系代理显式走 `claude -p --permission-mode plan`（本机 claude 版本不支持该模式或无法保证只读时，按"审查失败显性化"处理，不得以禁部分工具充当只读），均不经 delegate 路由；通用 delegate 角色路由只能作为对抗审查之外的补充视角，不能充当必需审查者。指定入口不可用时按"审查失败显性化"处理，禁止用运行在自家模型上的子代理或内部委托机制充当独立审查者，也不把本家模型的输出计为独立审查——那失去交叉意义。
 - 只接受跑得出证据的发现：失败测试、复现脚本、命令输出；
 - 风格、命名、未来风险、个人偏好一律丢弃；
-- 每条发现交给 `kelin-verifier` 重跑确认；需要独立模型视角时用 `kelin-delegate --role review`（codex/agy 只读沙箱），返回结果同样走回读剔除；
+- 每条发现交给 `kelin-verifier` 重跑确认；通用 delegate 角色路由（codex/agy 只读沙箱）只能作为对抗审查之外的补充视角，不能充当必需审查者，返回结果同样走回读剔除；
 - 只报告，不修；修不修由人决定。
 
 ## 审查失败显性化
@@ -64,7 +64,7 @@ node "$SKILL_DIR"/scripts/gate-scan.mjs --base origin/main
 
 ## 子代理发现的回读剔除
 
-独立审查（`kelin-reviewer` 子代理或外部模型）返回的每条问题，主代理都要**回读对应代码确认成立**才放进结论或交给执行者：读得出位置、对得上触发条件、讲得出后果的才算数；读不出依据的标"待确认"或直接剔除，不把未经核实的问题转手。防的是审查者的幻觉经你之手变成别人的返工单。
+独立审查（`kelin-reviewer` 子代理或外部模型）返回的每条问题，主代理都要**回读对应代码确认成立**才放进结论或交给执行者：读得出位置、对得上触发条件、讲得出后果的才算数；读不出依据的标"待确认"或记录驳回理由后剔除，不把未经核实的问题转手。防的是审查者的幻觉经你之手变成别人的返工单。
 
 **委托审查的提示词必须写死输出契约**：逐条问题以 `文件路径:行号` 开头，跟触发条件、后果、建议；缺位置的条目一律按"待确认"处理，不计入已确认问题数（2026-11-17 fixture eval 实测：codex 侧委托审查没带 file:line，此条即为此而设）。
 

@@ -47,6 +47,45 @@ test('review-check --write stamps CURRENT with a report and stays CURRENT on re-
   }
 });
 
+test('review-check --write refuses empty or verdict-free reports', () => {
+  const dir = initRepo();
+  try {
+    mkdirSync(path.join(dir, '.kelin'), { recursive: true });
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '   \n');
+    const empty = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
+    assert.notEqual(empty.status, 0);
+    assert.match(empty.stderr, /verdict/i);
+    assert.equal(existsSync(path.join(dir, '.kelin', 'review.json')), false, 'no stamp may be written for an empty report');
+
+    writeFileSync(path.join(dir, '.kelin', 'review.md'), '随手记：今天天气不错\n');
+    const noVerdict = spawnSync(process.execPath, [script, '--root', dir, '--write'], { encoding: 'utf8' });
+    assert.notEqual(noVerdict.status, 0);
+    assert.match(noVerdict.stderr, /verdict/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a stamp-only receipt without a report hash never reads as CURRENT', () => {
+  const dir = initRepo();
+  try {
+    mkdirSync(path.join(dir, '.kelin'), { recursive: true });
+    const printed = spawnSync(process.execPath, [script, '--root', dir, '--print'], { encoding: 'utf8' });
+    assert.equal(printed.status, 0, printed.stdout + printed.stderr);
+    const { fingerprint } = JSON.parse(printed.stdout);
+    writeFileSync(
+      path.join(dir, '.kelin', 'review.json'),
+      `${JSON.stringify({ fingerprint, verdict: 'stamp-only', createdAt: new Date().toISOString() }, null, 2)}\n`,
+    );
+    const check = spawnSync(process.execPath, [script, '--root', dir], { encoding: 'utf8' });
+    assert.notEqual(check.status, 0, 'stamp-only receipt must not pass as CURRENT');
+    const payload = JSON.parse(check.stdout);
+    assert.equal(payload.status, 'UNVERIFIED');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('review-check --write accepts an explicitly passed report file', () => {
   const dir = initRepo();
   try {
