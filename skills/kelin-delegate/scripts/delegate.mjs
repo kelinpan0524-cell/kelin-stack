@@ -15,6 +15,10 @@ export const RUNNERS = {
 };
 export const ROLES = { review: 'read', critique: 'read', diagnose: 'read', implement: 'write' };
 
+const VALUE_FLAGS = new Set(['--set-role', '--runner', '--role', '--workspace', '--prompt', '--session', '--timeout']);
+const MAX_OUTPUT_CHARS = 12000;
+const MAX_STDERR_CHARS = 2000;
+
 export function resolveRole(role, config, explicitRunner) {
   if (explicitRunner) return { runner: explicitRunner, source: 'explicit' };
   const saved = config?.roles?.[role];
@@ -30,53 +34,115 @@ export function sandboxFor(role, runner) {
   return [];
 }
 
+export function parseCliArgs(argv) {
+  const values = {};
+  const flags = new Set();
+  const positional = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (token === '--') {
+      positional.push(...argv.slice(i + 1));
+      break;
+    }
+    const eq = token.indexOf('=');
+    if (token.startsWith('--') && eq > 2) {
+      values[token.slice(0, eq)] = token.slice(eq + 1);
+      continue;
+    }
+    if (VALUE_FLAGS.has(token)) {
+      if (i + 1 >= argv.length) return { error: `missing value for ${token}` };
+      values[token] = argv[i + 1];
+      i += 1;
+      continue;
+    }
+    if (token.startsWith('--')) {
+      flags.add(token);
+      continue;
+    }
+    positional.push(token);
+  }
+  return { cmd: positional[0] ?? null, values, flags };
+}
+
+export function buildCodexArgs({ workspace, prompt, session, role, outFile }) {
+  const args = ['exec', '--skip-git-repo-check', ...sandboxFor(role, 'codex'), '-C', workspace];
+  if (session) args.push('resume', session);
+  args.push('-o', outFile, '--json');
+  if (prompt !== null && prompt !== undefined && prompt !== '') args.push('--', prompt);
+  return args;
+}
+
+function clipStderr(raw) {
+  const text = raw ?? '';
+  if (text.length <= MAX_STDERR_CHARS) return text;
+  return `${text.slice(0, 400)}\n...\n${text.slice(-(MAX_STDERR_CHARS - 405))}`;
+}
+
+function spawnRunner(bin, args, { workspace, timeoutMs }) {
+  const proc = spawnSync(bin, args, {
+    cwd: workspace,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return {
+    proc,
+    stdout: proc.stdout ?? '',
+    stderr: clipStderr(proc.stderr),
+    timedOut: proc.error?.code === 'ETIMEDOUT',
+    signal: proc.signal ?? null,
+    error: proc.error ? proc.error.message : undefined,
+  };
+}
+
 function which(bin) {
   try { execFileSync('which', [bin], { stdio: ['ignore', 'pipe', 'ignore'] }); return true; } catch { return false; }
 }
 
 function runCodex({ workspace, prompt, session, role, timeoutSec, bin }) {
-  const args = ['exec', '--skip-git-repo-check', ...sandboxFor(role, 'codex'), '-C', workspace];
   const outFile = path.join(tmpdir(), `kelin-delegate-${process.pid}-${Date.now()}.md`);
-  if (session) args.push('resume', session);
-  args.push('-o', outFile, '--json', prompt ?? '');
-  const proc = spawnSync(bin, args, { cwd: workspace, encoding: 'utf8', timeout: timeoutSec * 1000, maxBuffer: 64 * 1024 * 1024 });
-  const sessionMatch = proc.stdout.match(/"(?:session_id|thread_id|conversation_id)"\s*:\s*"([^"]+)"/);
+  const args = buildCodexArgs({ workspace, prompt, session, role, outFile });
+  const res = spawnRunner(bin, args, { workspace, timeoutMs: timeoutSec * 1000 });
+  const sessionMatch = res.stdout.match(/"(?:session_id|thread_id|conversation_id)"\s*:\s*"([^"]+)"/);
   const text = existsSync(outFile) ? readFileSync(outFile, 'utf8').trim() : '';
   try { rmSync(outFile, { force: true }); } catch {}
-  return { code: proc.status, session: sessionMatch?.[1] ?? null, text, stderr: (proc.stderr ?? '').slice(0, 2000) };
+  return { code: res.proc.status, session: sessionMatch?.[1] ?? null, text, stderr: res.stderr, timedOut: res.timedOut, signal: res.signal, error: res.error };
 }
 
 function runAntigravity({ workspace, prompt, session, role, timeoutSec, bin }) {
   const args = [];
   if (session) args.push('--conversation', session);
   args.push(...sandboxFor(role, 'antigravity'), `-p=${prompt ?? ''}`, '--output-format', 'json', '--print-timeout', `${timeoutSec}s`);
-  const proc = spawnSync(bin, args, { cwd: workspace, encoding: 'utf8', timeout: timeoutSec * 1000 + 30000, maxBuffer: 64 * 1024 * 1024 });
+  const res = spawnRunner(bin, args, { workspace, timeoutMs: timeoutSec * 1000 + 30000 });
   let text = '';
   let session2 = null;
   try {
-    const parsed = JSON.parse(proc.stdout);
+    const parsed = JSON.parse(res.stdout);
     text = parsed.response ?? '';
     session2 = parsed.conversation_id ?? null;
-  } catch { text = (proc.stdout ?? '').slice(0, 8000); }
-  return { code: proc.status, session: session2, text, stderr: (proc.stderr ?? '').slice(0, 2000) };
+  } catch { text = res.stdout.slice(0, 8000); }
+  return { code: res.proc.status, session: session2, text, stderr: res.stderr, timedOut: res.timedOut, signal: res.signal, error: res.error };
 }
 
 function runZcode({ workspace, prompt, bin, timeoutSec }) {
-  const proc = spawnSync(bin, ['-p', prompt ?? ''], { cwd: workspace, encoding: 'utf8', timeout: timeoutSec * 1000, maxBuffer: 64 * 1024 * 1024 });
-  return { code: proc.status, session: null, text: (proc.stdout ?? '').slice(0, 16000), stderr: (proc.stderr ?? '').slice(0, 2000) };
+  const res = spawnRunner(bin, ['-p', prompt ?? ''], { workspace, timeoutMs: timeoutSec * 1000 });
+  return { code: res.proc.status, session: null, text: res.stdout.slice(0, 16000), stderr: res.stderr, timedOut: res.timedOut, signal: res.signal, error: res.error };
 }
 
 function main() {
-  const args = process.argv.slice(2);
-  const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : null; };
-  const cmd = args[0];
-  const configPath = path.join(homedir(), '.kelin', 'delegate.json');
-  const loadConfig = () => { try { return JSON.parse(readFileSync(configPath, 'utf8')); } catch { return { roles: {} }; } };
-  const saveConfig = (cfg) => { mkdirSync(path.dirname(configPath), { recursive: true }); writeFileSync(configPath, JSON.stringify(cfg, null, 2) + '\n'); };
+  const parsed = parseCliArgs(process.argv.slice(2));
   const print = (payload) => {
     console.log(JSON.stringify(payload, null, 2));
     process.exit(payload.ok ? 0 : payload.status === 'NEEDS_ROLE_CHOICE' ? 12 : payload.status === 'USE_HOST' ? 13 : 1);
   };
+  if (parsed.error) print({ ok: false, error: parsed.error });
+
+  const { cmd, values, flags } = parsed;
+  const flag = (name) => values[name] ?? null;
+  const configPath = path.join(homedir(), '.kelin', 'delegate.json');
+  const loadConfig = () => { try { return JSON.parse(readFileSync(configPath, 'utf8')); } catch { return { roles: {} }; } };
+  const saveConfig = (cfg) => { mkdirSync(path.dirname(configPath), { recursive: true }); writeFileSync(configPath, JSON.stringify(cfg, null, 2) + '\n'); };
 
   if (cmd === 'config') {
     const cfg = loadConfig();
@@ -84,6 +150,7 @@ function main() {
     if (setRole) {
       const [role, value] = setRole.split('=');
       if (!ROLES[role]) print({ ok: false, error: `unknown role: ${role}` });
+      if (!value) print({ ok: false, error: 'missing runner in --set-role role=<runner|host|a,b>' });
       cfg.roles[role] = value.includes(',') ? value.split(',') : value;
       saveConfig(cfg);
       print({ ok: true, action: 'set-role', role, value: cfg.roles[role], config: configPath });
@@ -91,7 +158,7 @@ function main() {
     print({ ok: true, action: 'show', config: configPath, roles: cfg.roles });
   }
 
-  if (cmd === 'onboard' && args.includes('--scan')) {
+  if (cmd === 'onboard' && flags.has('--scan')) {
     const detected = Object.entries(RUNNERS).filter(([, r]) => which(r.bin)).map(([name, r]) => ({ runner: name, bin: r.bin }));
     print({ ok: true, action: 'scan', detected, note: '已安装不等于已认证；未配置角色前 run --role 返回 NEEDS_ROLE_CHOICE' });
   }
@@ -104,9 +171,11 @@ function main() {
   const workspace = path.resolve(flag('--workspace') ?? process.cwd());
   const prompt = flag('--prompt');
   const session = flag('--session');
-  const timeoutSec = Number(flag('--timeout') ?? 600);
-  const dryRun = args.includes('--dry-run');
+  const rawTimeout = flag('--timeout');
+  const timeoutSec = rawTimeout === null ? 600 : Number(rawTimeout);
+  const dryRun = flags.has('--dry-run');
 
+  if (!Number.isFinite(timeoutSec) || timeoutSec <= 0) print({ ok: false, error: '--timeout must be a positive number' });
   if (!ROLES[role]) print({ ok: false, error: `unknown role: ${role} (review|critique|diagnose|implement)` });
   if (!existsSync(workspace)) print({ ok: false, error: `workspace not found: ${workspace}` });
   if (!prompt && !session) print({ ok: false, error: 'need --prompt or --session' });
@@ -136,7 +205,7 @@ function main() {
       : runZcode({ workspace, prompt, bin, timeoutSec });
 
   let gitStatus = '';
-  try { gitStatus = execFileSync('git', ['status', '--porcelain'], { cwd: workspace, encoding: 'utf8', timeout: 10000 }).trim(); } catch { gitStatus = '(not a git repo)'; }
+  try { gitStatus = execFileSync('git', ['status', '--porcelain'], { cwd: workspace, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 10000 }).trim(); } catch { gitStatus = '(not a git repo)'; }
 
   print({
     ok: result.code === 0 && Boolean(result.text),
@@ -146,9 +215,12 @@ function main() {
     session_id: result.session,
     resumable: RUNNERS[pick].session && Boolean(result.session),
     exit_code: result.code,
+    timed_out: result.timedOut || undefined,
+    signal: result.signal || undefined,
+    error: result.error,
     elapsed_ms: Date.now() - started,
     workspace_dirty_after: gitStatus.slice(0, 800),
-    response: result.text.slice(0, 12000),
+    response: result.text.slice(0, MAX_OUTPUT_CHARS),
     stderr: result.stderr || undefined,
     notes,
   });

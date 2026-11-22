@@ -44,6 +44,21 @@
         "command": "add bare console.log in hooks/ or git commit -m \"[ZCode]\" in a SKILL.md, then run ratchet-check.mjs ratchet.json --check",
         "expected": "fail-on-old"
       }
+    },
+    {
+      "id": "delegate-stdin-and-args",
+      "bug": "delegate.mjs inherited parent stdin/stderr, broke codex prompts starting with '-', missed --flag=value and timeout validation, and hid ETIMEDOUT/trailing stderr",
+      "rootCause": "spawnSync omitted stdio ignore, passed prompt without --, used naive indexOf+1 flag lookup, and discarded proc.error/tail stderr",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-delegate/tests/delegate.test.mjs",
+        "command": "node --test skills/kelin-delegate/tests/delegate.test.mjs"
+      },
+      "enforcedIn": [".github/workflows/ci.yml"],
+      "proof": {
+        "command": "revert stdio ignore and -- separator in delegate.mjs, then run node --test skills/kelin-delegate/tests/delegate.test.mjs",
+        "expected": "fail-on-old"
+      }
     }
   ]
 }
