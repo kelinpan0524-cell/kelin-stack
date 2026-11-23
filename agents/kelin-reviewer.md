@@ -29,10 +29,15 @@ P0: 0 / P1: 1 / P2: 2 / P3: 1 —— 建议：修完 P1 再交付
 - 输入边界
 - 权限
 - 错误处理
+
+FINDINGS
 ```
+
+落盘到 `.kelin/review.md` 供 `review-check --write` 签章的报告，可在顶部用 frontmatter 声明 `verdict: clean | findings` 或保留独立末行；经 `kelin-delegate --role review` 返回的委托报告须始终保留独立末行（无 P0/P1 写 `CLEAN`，有发现写 `FINDINGS`）。
 
 ## 禁止
 
 - 说“整体不错”；
 - 报“可能存在性能问题”但不给场景；
+- 把系统上游永不产出的假设输入或风格偏好标成 P0/P1 拦交付；
 - 把 10 个 P3 混在 P1 里一起报。

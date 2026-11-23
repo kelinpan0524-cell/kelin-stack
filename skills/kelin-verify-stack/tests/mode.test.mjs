@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -112,7 +113,9 @@ test('mode walks every phase and enforces real artifact gates', async () => {
 
   await artifact(root, 'review.md', 'bad placeholder\n');
   assert.equal(run(['advance'], root).code, 1, 'unsubstantiated review.md must be blocked');
-  await artifact(root, 'review.md', '审查结论：P0:0 / P1:0 无问题\n');
+  await artifact(root, 'review.md', '## 审查结论\n');
+  assert.equal(run(['advance'], root).code, 1, 'heading-only review.md must be blocked in non-git repos');
+  await artifact(root, 'review.md', '---\nverdict: clean\n---\n审查结论：P0:0 / P1:0 无问题\n');
   assert.equal(run(['advance'], root).code, 0);
   assert.match(run(['status'], root).stdout, /"phase": "refine"/);
 
@@ -466,9 +469,22 @@ test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P
   assert.equal(blockedReview.code, 1);
   assert.match(blockedReview.stdout, /unresolved P0\/P1/);
 
-  await artifact(revRepo, 'review.md', '# 审查\n- [x] P1: a.mjs:1 已修复\n结论：无 P0/P1\n');
+  // Legacy stamp over heading-only review.md must still be blocked by unified evaluateReviewReport gate
+  const legacyRaw = '## 审查结论\n';
+  await artifact(revRepo, 'review.md', legacyRaw);
+  const { fingerprint } = JSON.parse(execFileSync(process.execPath, [reviewCheckScript, '--print'], { cwd: revRepo, encoding: 'utf8' }));
+  await artifact(revRepo, 'review.json', JSON.stringify({
+    fingerprint,
+    verdict: 'clean',
+    reportHash: createHash('sha256').update(legacyRaw).digest('hex'),
+  }));
+  const legacyBlocked = run(['advance'], revRepo);
+  assert.equal(legacyBlocked.code, 1, 'heading-only report with matching legacy stamp must be blocked');
+  assert.match(legacyBlocked.stdout, /missing-verdict/);
+
+  await artifact(revRepo, 'review.md', '## Review\n- [x] P1: a.mjs:1 fixed\nChecked diff & auth.\nCLEAN\n');
   execFileSync(process.execPath, [reviewCheckScript, '--write'], { cwd: revRepo });
-  assert.equal(run(['advance'], revRepo).code, 0);
+  assert.equal(run(['advance'], revRepo).code, 0, 'English CLEAN report accepted by review-check must also pass mode advance');
 
   // P2-4: status/route never mutate legacy audit state.json on disk; advance persists migration
   const roDir = await mkdtemp(path.join(tmpdir(), 'kelin-ro-audit-'));
@@ -573,7 +589,7 @@ test('mode ship enforces preflight in Git repos across subdirs; route handles En
   await writeValidAcceptance(pkg);
   assert.equal(run(['advance'], pkg).code, 0);
 
-  await artifact(pkg, 'review.md', '# Review\n结论：无 P0/P1\n');
+  await artifact(pkg, 'review.md', '# Review\n结论：无 P0/P1\nCLEAN\n');
   execFileSync(process.execPath, [reviewCheckScript, '--root', pkg, '--write'], { cwd: mono });
   assert.equal(existsSync(path.join(pkg, '.kelin', 'review.json')), true);
   assert.equal(run(['advance'], pkg).code, 0);

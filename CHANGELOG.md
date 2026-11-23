@@ -1,5 +1,13 @@
 # Changelog
 
+# 0.23.1（2026-11-23）
+
+`review-check` 签章与 `kelin-mode` 流程门禁统一升级为「结构化裁决 + 正文松绑」并补齐防钻牛角尖规则：
+- **结构化封面优先，正文彻底松绑**：`review-check.mjs` 新增并导出 `evaluateReviewReport`，优先读取报告顶部 YAML frontmatter 的 `verdict: clean | findings | failed`（及可选 `reviewers` / `failed_reviewers` 状态）；正文只需非空且无未闭环 P0/P1，正文中英文或代码块引用失败示例均不再误伤。
+- **末尾裁决兼容与边界封堵**：无封面报告改为仅认剥除 HTML 注释后的末尾有效行 `CLEAN` / `FINDINGS`（堵死隐藏注释藏词与正文中间示例代码混充）；失败声明检测改跑在剥除代码块和注释后的正文上并忽略英文大小写（修 `Review Failure:` 漏拦与代码块引用误伤）。
+- **单真源统一门禁与委托结构化提取**：`kelin-mode/scripts/mode.mjs` 删除独立旧正则，在 `review` / `ship` 阶段统一复用 `evaluateReviewReport`，消除签章与推进打架及旧回执绕过；`kelin-delegate/scripts/delegate.mjs` 在长输出截断前从完整原文提取 `verdict`（`CLEAN` / `FINDINGS` / `MISSING`）随 JSON 返回。
+- **防审查钻牛角尖底线**：`kelin-review/SKILL.md` 与 `agents/kelin-reviewer.md` 吸收 `pstack` / `open-pstack` 经验，明确「可达 ≠ 有后果（实际使用面原则）」「怀疑式分诊（修复/驳回/交人拍板，禁止逢评必改）」与「拆前提止损（同一前提连修两轮不过即换结构方案）」。
+
 # 0.23.0（2026-11-23）
 
 对照 poteto/noodle 对抗审查模式补齐委托审查硬约束与自动合并门（SKILL.md 文本 + delegate.mjs 截断保留头尾 + 版本号）：

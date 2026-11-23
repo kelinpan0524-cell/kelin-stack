@@ -20,7 +20,7 @@ const repo = async () => {
   await mkdir(path.join(dir, 'src'), { recursive: true });
   await writeFile(path.join(dir, '.gitignore'), '.kelin/\n');
   await mkdir(path.join(dir, '.kelin'), { recursive: true });
-  await writeFile(path.join(dir, '.kelin', 'review.md'), '## 审查结论\nP0: 0 / P1: 0\n');
+  await writeFile(path.join(dir, '.kelin', 'review.md'), '## 审查结论\nP0: 0 / P1: 0\nCLEAN\n');
   await writeFile(path.join(dir, 'tests/app.test.mjs'), "test('a', () => { assert.equal(1, 1); });\n");
   await writeFile(path.join(dir, 'src/app.mjs'), 'export const a = 1;\n');
   git(dir, ['add', '-A']);
@@ -103,7 +103,7 @@ test('review-check writes CURRENT, detects STALE, and honors explicit review fil
   assert.equal(JSON.parse(stale.stdout).status, 'STALE');
 
   const review = path.join(dir, 'review.md');
-  await writeFile(review, `# Review\n\nWorktree-Fingerprint: ${'0'.repeat(64)}\n`);
+  await writeFile(review, `# Review\n\nWorktree-Fingerprint: ${'0'.repeat(64)}\nFINDINGS\n`);
   const unverified = run(dir, reviewCheck, ['--review', review]);
   assert.equal(unverified.status, 1);
   assert.equal(JSON.parse(unverified.stdout).status, 'STALE');
@@ -345,12 +345,12 @@ test('review & fingerprint hardening: unborn HEAD, JS regex literals, per-hunk e
   // review-check rejects unresolved P0/P1 in .kelin/review.md and detects review.md edits
   const cleanDir = await repo();
   await mkdir(path.join(cleanDir, '.kelin'), { recursive: true });
-  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# 审查结论\n- P1: src/app.mjs:1 缺少校验\n');
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# 审查结论\n- P1: src/app.mjs:1 缺少校验\nFINDINGS\n');
   const blockedWrite = run(cleanDir, reviewCheck, ['--write']);
   assert.equal(blockedWrite.status, 1);
   assert.equal(JSON.parse(blockedWrite.stdout).status, 'BLOCKED');
 
-  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# 审查结论\n无 P0/P1 问题（P0:0 / P1:0）\n');
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# 审查结论\n无 P0/P1 问题（P0:0 / P1:0）\nCLEAN\n');
   const cleanWrite = run(cleanDir, reviewCheck, ['--write']);
   assert.equal(cleanWrite.status, 0, cleanWrite.stdout + cleanWrite.stderr);
   assert.equal(JSON.parse(cleanWrite.stdout).verdict, 'clean');
@@ -361,26 +361,26 @@ test('review & fingerprint hardening: unborn HEAD, JS regex literals, per-hunk e
   assert.equal(JSON.parse(staleByMd.stdout).status, 'STALE');
 
   // P1-6: ordinary prose like "account is closed" and positive counts like "P1: 1 fixed" must stay BLOCKED
-  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: Requests fail when an account is closed\n');
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: Requests fail when an account is closed\nFINDINGS\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 1);
-  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: Login fails when a ticket is marked (closed)\n');
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: Login fails when a ticket is marked (closed)\nFINDINGS\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 1);
-  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\nP1: 1 fixed in progress\n');
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\nP1: 1 fixed in progress\nFINDINGS\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 1);
-  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: missing validation (status: fixed)\n结论：无问题\n');
+  await writeFile(path.join(cleanDir, '.kelin', 'review.md'), '# Review\n- P1: missing validation (status: fixed)\n结论：无问题\nCLEAN\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write']).status, 0);
 
   // P2-11 & P2-12: --write --review custom.md honored by default check; chmod +x invalidates untracked receipt
   const { chmodSync, unlinkSync } = await import('node:fs');
   unlinkSync(path.join(cleanDir, '.kelin', 'review.md'));
   const customRev = path.join(cleanDir, 'custom-review.md');
-  await writeFile(customRev, `# Review\nWorktree-Fingerprint: ${JSON.parse(run(cleanDir, reviewCheck, ['--print']).stdout).fingerprint}\n结论：通过\n`);
+  await writeFile(customRev, `# Review\nWorktree-Fingerprint: ${JSON.parse(run(cleanDir, reviewCheck, ['--print']).stdout).fingerprint}\n结论：通过\nCLEAN\n`);
   assert.equal(run(cleanDir, reviewCheck, ['--write', '--review', customRev]).status, 0);
   assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'CURRENT');
   await writeFile(customRev, '# Review\nedited\n');
   assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'STALE');
   await writeFile(path.join(cleanDir, 'new-script.sh'), '#!/bin/sh\necho hi\n');
-  await writeFile(customRev, '# Review\nedited\n结论：无问题\n');
+  await writeFile(customRev, '# Review\nedited\n结论：无问题\nCLEAN\n');
   assert.equal(run(cleanDir, reviewCheck, ['--write', '--review', customRev]).status, 0);
   chmodSync(path.join(cleanDir, 'new-script.sh'), 0o755);
   assert.equal(JSON.parse(run(cleanDir, reviewCheck).stdout).status, 'STALE');
@@ -442,7 +442,7 @@ test('review-check & gate-scan close P1-6/7/10/13/14, P2-6/9, and P3-1 edge case
   await mkdir(path.join(mono, 'docs'), { recursive: true });
   await writeFile(path.join(mono, '.gitignore'), '.kelin/\n**/.kelin/\n');
   await writeFile(path.join(mono, 'packages', 'app', 'index.mjs'), 'export const a = 1;\n');
-  await writeFile(path.join(mono, 'docs', 'r1.md'), '# Review 1\n结论：无问题\n');
+  await writeFile(path.join(mono, 'docs', 'r1.md'), '# Review 1\n结论：无问题\nCLEAN\n');
   git(mono, ['add', '-A']);
   git(mono, ['commit', '-qm', 'init']);
 
@@ -455,15 +455,16 @@ test('review-check & gate-scan close P1-6/7/10/13/14, P2-6/9, and P3-1 edge case
     'still inside 4-backtick fence',
     '````',
     '- P1: real bug after fence',
+    'FINDINGS',
   ].join('\n'));
   assert.equal(run(pkgRoot, reviewCheck, ['--root', pkgRoot, '--write']).status, 1);
 
   // P1-6: leading bracket tag & table cell close items; mid-sentence (closed) stays BLOCKED
-  await writeFile(path.join(pkgRoot, '.kelin', 'review.md'), '- P1: Login fails when a ticket is marked (closed)\n');
+  await writeFile(path.join(pkgRoot, '.kelin', 'review.md'), '- P1: Login fails when a ticket is marked (closed)\nFINDINGS\n');
   assert.equal(run(pkgRoot, reviewCheck, ['--root', pkgRoot, '--write']).status, 1);
 
   // P1-10: --root pkg writes pkg/.kelin/review.json
-  await writeFile(path.join(pkgRoot, '.kelin', 'review.md'), '# Review\n- [fixed] P1: done\n| P1 | index.mjs:1 | fixed |\n结论：无 P0/P1\n');
+  await writeFile(path.join(pkgRoot, '.kelin', 'review.md'), '# Review\n- [fixed] P1: done\n| P1 | index.mjs:1 | fixed |\n结论：无 P0/P1\nCLEAN\n');
   const pkgWrite = run(mono, reviewCheck, ['--root', pkgRoot, '--write']);
   assert.equal(pkgWrite.status, 0, pkgWrite.stdout + pkgWrite.stderr);
   assert.equal(JSON.parse(run(mono, reviewCheck, ['--root', pkgRoot]).stdout).status, 'CURRENT');

@@ -32,6 +32,7 @@ const validatePlanMarkdown = await loadOptional('kelin-plan/scripts/check-plan.m
 const validatePlanGate = await loadOptional('kelin-plan/scripts/plan-gate.mjs', 'validatePlanGate');
 const computeWorktreeFingerprint = await loadOptional('kelin-review/scripts/fingerprint.mjs', 'computeWorktreeFingerprint');
 const hasUnresolvedHighSeverity = await loadOptional('kelin-review/scripts/review-check.mjs', 'hasUnresolvedHighSeverity');
+const evaluateReviewReport = await loadOptional('kelin-review/scripts/review-check.mjs', 'evaluateReviewReport');
 
 const isGitRepo = (projectRoot) => spawnSync('git', ['-C', projectRoot, 'rev-parse', '--git-dir'], { encoding: 'utf8' }).status === 0;
 
@@ -732,39 +733,57 @@ const inspect = (root, dir, state) => {
   if (state.phase === 'verify' && !missing.length) {
     checkAcceptance(acceptanceFile, verifyFile, missing, root);
   }
-  if (state.phase === 'review' && !missing.length) {
+  const validateReviewGate = (beforeShip) => {
     const reviewPath = path.join(dir, 'review.md');
-    const reviewRaw = readFileSync(reviewPath, 'utf8');
-    const reviewBody = reviewRaw.trim();
-    if (!reviewBody || !/(P0|P1|P2|P3|结论|无问题|通过|none)/i.test(reviewBody)) {
-      missing.push('review.md (must summarize findings or explicit clean verdict)');
-    } else if (!hasUnresolvedHighSeverity) {
-      missing.push('review.md (kelin-review validator unavailable)');
-    } else if (hasUnresolvedHighSeverity(reviewRaw)) {
-      missing.push('review.md (unresolved P0/P1 findings must be resolved before leaving review)');
-    } else if (isGitRepo(root)) {
-      if (!computeWorktreeFingerprint) {
-        missing.push('review.json (fingerprint helper unavailable in Git repo)');
-      } else {
-        const wt = computeWorktreeFingerprint(root);
-        if (wt.isGit) {
-          const stampFile = path.join(dir, 'review.json');
-          if (!existsSync(stampFile)) {
-            missing.push('review.json (missing: run review-check.mjs --write)');
-          } else {
-            const parsedStamp = parseJsonSafe(readFileSync(stampFile, 'utf8'));
-            const expectedHash = createHash('sha256').update(reviewRaw).digest('hex');
-            if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
-              missing.push('review.json (stale: rerun review-check.mjs --write)');
-            } else if (parsedStamp.value?.verdict === 'blocked') {
-              missing.push('review.json (verdict is blocked: resolve P0/P1 and rerun review-check.mjs --write)');
-            } else if (parsedStamp.value?.reportHash !== expectedHash) {
-              missing.push('review.json (stale: review.md changed since review-check.mjs --write)');
-            }
-          }
-        }
-      }
+    if (!existsSync(reviewPath)) {
+      if (beforeShip) missing.push('review.md (missing before ship)');
+      return;
     }
+    const reviewRaw = readFileSync(reviewPath, 'utf8');
+    if (!hasUnresolvedHighSeverity || !evaluateReviewReport) {
+      missing.push('review.md (kelin-review validator unavailable)');
+      return;
+    }
+    if (hasUnresolvedHighSeverity(reviewRaw)) {
+      missing.push(beforeShip
+        ? 'review.md (unresolved P0/P1 findings before ship)'
+        : 'review.md (unresolved P0/P1 findings must be resolved before leaving review)');
+      return;
+    }
+    const reportEval = evaluateReviewReport(reviewRaw);
+    if (!reportEval.ok) {
+      missing.push(`review.md (${reportEval.reason}: add frontmatter verdict: clean|findings with notes or trailing CLEAN/FINDINGS)`);
+      return;
+    }
+    if (!isGitRepo(root)) return;
+    if (!computeWorktreeFingerprint) {
+      missing.push('review.json (fingerprint helper unavailable in Git repo)');
+      return;
+    }
+    const wt = computeWorktreeFingerprint(root);
+    if (!wt.isGit) return;
+    const stampFile = path.join(dir, 'review.json');
+    if (!existsSync(stampFile)) {
+      missing.push(beforeShip ? 'review.json (stale before ship)' : 'review.json (missing: run review-check.mjs --write)');
+      return;
+    }
+    const parsedStamp = parseJsonSafe(readFileSync(stampFile, 'utf8'));
+    const expectedHash = createHash('sha256').update(reviewRaw).digest('hex');
+    if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
+      missing.push(beforeShip ? 'review.json (stale before ship)' : 'review.json (stale: rerun review-check.mjs --write)');
+    } else if (parsedStamp.value?.verdict === 'blocked') {
+      missing.push(beforeShip
+        ? 'review.json (verdict is blocked before ship)'
+        : 'review.json (verdict is blocked: resolve P0/P1 and rerun review-check.mjs --write)');
+    } else if (parsedStamp.value?.reportHash !== expectedHash) {
+      missing.push(beforeShip
+        ? 'review.json (stale: review.md changed before ship)'
+        : 'review.json (stale: review.md changed since review-check.mjs --write)');
+    }
+  };
+
+  if (state.phase === 'review' && !missing.length) {
+    validateReviewGate(false);
   }
   if (state.phase === 'refine') {
     const refineFile = path.join(dir, 'refine.md');
@@ -786,38 +805,7 @@ const inspect = (root, dir, state) => {
       checkAcceptance(acceptanceFile, verifyFile, missing, root);
     }
     if (state.mode !== 'light') {
-      const reviewPath = path.join(dir, 'review.md');
-      if (!existsSync(reviewPath)) {
-        missing.push('review.md (missing before ship)');
-      } else {
-        const reviewRaw = readFileSync(reviewPath, 'utf8');
-        const reviewBody = reviewRaw.trim();
-        if (!reviewBody || !/(P0|P1|P2|P3|结论|无问题|通过|none)/i.test(reviewBody)) {
-          missing.push('review.md (must summarize findings or explicit clean verdict)');
-        } else if (!hasUnresolvedHighSeverity) {
-          missing.push('review.md (kelin-review validator unavailable)');
-        } else if (hasUnresolvedHighSeverity(reviewRaw)) {
-          missing.push('review.md (unresolved P0/P1 findings before ship)');
-        } else if (isGitRepo(root)) {
-          if (!computeWorktreeFingerprint) {
-            missing.push('review.json (fingerprint helper unavailable in Git repo)');
-          } else {
-            const wt = computeWorktreeFingerprint(root);
-            if (wt.isGit) {
-              const stampFile = path.join(dir, 'review.json');
-              const parsedStamp = existsSync(stampFile) ? parseJsonSafe(readFileSync(stampFile, 'utf8')) : { ok: false };
-              const expectedHash = createHash('sha256').update(reviewRaw).digest('hex');
-              if (!parsedStamp.ok || parsedStamp.value?.fingerprint !== wt.fingerprint) {
-                missing.push('review.json (stale before ship)');
-              } else if (parsedStamp.value?.verdict === 'blocked') {
-                missing.push('review.json (verdict is blocked before ship)');
-              } else if (parsedStamp.value?.reportHash !== expectedHash) {
-                missing.push('review.json (stale: review.md changed before ship)');
-              }
-            }
-          }
-        }
-      }
+      validateReviewGate(true);
     }
     if (isGitRepo(root)) {
       const preflightScript = path.resolve(SKILLS_DIR, 'kelin-ship', 'scripts', 'preflight.mjs');

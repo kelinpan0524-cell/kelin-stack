@@ -93,6 +93,92 @@ function clipOutput(text) {
   return `${text.slice(0, MAX_OUTPUT_CHARS)}\n...[omitted ${omitted} chars]...\n${text.slice(-MAX_OUTPUT_TAIL_CHARS)}`;
 }
 
+function stripLineHtmlComments(line, inComment) {
+  let out = '';
+  let i = 0;
+  let state = inComment;
+  while (i < line.length) {
+    if (state) {
+      const end = line.indexOf('-->', i);
+      if (end < 0) return { text: out, inComment: true };
+      state = false;
+      i = end + 3;
+      continue;
+    }
+    if (line[i] === '`') {
+      let ticks = 1;
+      while (i + ticks < line.length && line[i + ticks] === '`') ticks += 1;
+      const delim = '`'.repeat(ticks);
+      let close = line.indexOf(delim, i + ticks);
+      while (close >= 0 && (line[close - 1] === '`' || line[close + ticks] === '`')) {
+        close = line.indexOf(delim, close + 1);
+      }
+      if (close >= 0) {
+        out += line.slice(i, close + ticks);
+        i = close + ticks;
+        continue;
+      }
+      out += delim;
+      i += ticks;
+      continue;
+    }
+    if (line.startsWith('<!--', i)) {
+      const end = line.indexOf('-->', i + 4);
+      if (end < 0) return { text: out, inComment: true };
+      i = end + 3;
+      continue;
+    }
+    out += line[i];
+    i += 1;
+  }
+  return { text: out, inComment: false };
+}
+
+function stripHtmlCommentsOutsideCode(text) {
+  const out = [];
+  let fenceChar = '';
+  let fenceLen = 0;
+  let inComment = false;
+  for (const rawLine of String(text || '').split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!inComment) {
+      const fenceMatch = /^(`{3,}|~{3,})/.exec(trimmed);
+      if (!fenceChar && fenceMatch) {
+        fenceChar = fenceMatch[1][0];
+        fenceLen = fenceMatch[1].length;
+        out.push(rawLine);
+        continue;
+      }
+      if (fenceChar) {
+        const closeMatch = new RegExp(`^${fenceChar === '~' ? '~' : '`'}{${fenceLen},}\\s*$`);
+        if (closeMatch.test(trimmed)) {
+          fenceChar = '';
+          fenceLen = 0;
+        }
+        out.push(rawLine);
+        continue;
+      }
+    }
+    const stripped = stripLineHtmlComments(rawLine, inComment);
+    inComment = stripped.inComment;
+    if (!inComment || stripped.text.trim()) out.push(stripped.text);
+  }
+  return out.join('\n');
+}
+
+export function extractVerdict(text) {
+  const lines = stripHtmlCommentsOutsideCode(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return 'MISSING';
+  let last = lines[lines.length - 1];
+  if (/^(`{3,}|~{3,})$/.test(last) && lines.length >= 2) {
+    last = lines[lines.length - 2];
+  }
+  return last === 'CLEAN' || last === 'FINDINGS' ? last : 'MISSING';
+}
+
 function spawnRunner(bin, args, { workspace, timeoutMs }) {
   const proc = spawnSync(bin, args, {
     cwd: workspace,
@@ -229,11 +315,13 @@ function main() {
   try { gitStatus = execFileSync('git', ['status', '--porcelain'], { cwd: workspace, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 10000 }).trim(); } catch { gitStatus = '(not a git repo)'; }
 
   const succeeded = result.code === 0 && !result.timedOut && !result.error;
+  const reviewVerdict = role === 'review' ? (succeeded ? extractVerdict(result.text) : 'MISSING') : undefined;
   print({
     ok: succeeded && Boolean(result.text),
     status: succeeded ? 'SUCCESS' : 'ERROR',
     runner: pick,
     role,
+    ...(reviewVerdict !== undefined ? { verdict: reviewVerdict } : {}),
     session_id: result.session,
     resumable: RUNNERS[pick].session && Boolean(result.session),
     exit_code: result.code,
