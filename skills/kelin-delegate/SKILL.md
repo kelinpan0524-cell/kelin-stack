@@ -34,6 +34,7 @@ node "$SKILL_DIR"/scripts/delegate.mjs onboard --scan   # 看本机装了哪些 
 ```
 
 - 输出固定 JSON：`status / runner / session_id / resumable / workspace_dirty_after / response`（`role=review` 额外返回从完整未截断输出提取的 `verdict: CLEAN | FINDINGS | MISSING`）；
+- `role=review` 首轮调用时，若存在仓库审查契约 `REVIEW.md`，`delegate.mjs` 自动将其附在提示词末尾以减少假想边界争论：Git 仓库默认只读取基线分支（`origin/main`/`main` 或 `--review-policy-ref`）中的权威版本，防止待审分支篡改自己的审查口径；需显式使用工作区未合入版本时加 `--allow-worktree-review-policy`；续接会话（`--session`）不重复注入，传 `--no-review-policy` 可关闭；
 - `NEEDS_ROLE_CHOICE`（退出码 12）：这个角色还没选过，把 candidates 给用户看、问一次再存；
 - `USE_HOST`（退出码 13）：偏好是当前宿主自己做——改用本宿主的全新只读子代理，不调外部 CLI；
 - 读类角色回来后核对 `workspace_dirty_after` 为空（自己落的 `.kelin-delegate-last.md` 除外）；有越界改动按红线处理；

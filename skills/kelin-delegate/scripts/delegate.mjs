@@ -3,7 +3,7 @@
 // 契约对标 oil-delegate：status SUCCESS|ERROR|NEEDS_ROLE_CHOICE(12)|USE_HOST(13)|DRY_RUN；
 // 角色记忆存 ~/.kelin/delegate.json；读类角色强制只读沙箱；调用方负责验收。
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -15,13 +15,93 @@ export const RUNNERS = {
 };
 export const ROLES = { review: 'read', critique: 'read', diagnose: 'read', implement: 'write' };
 
-const VALUE_FLAGS = new Set(['--set-role', '--runner', '--role', '--workspace', '--prompt', '--session', '--timeout']);
-const BOOL_FLAGS = new Set(['--dry-run', '--scan', '--help', '-h']);
+const VALUE_FLAGS = new Set(['--set-role', '--runner', '--role', '--workspace', '--prompt', '--session', '--timeout', '--review-policy-ref']);
+const BOOL_FLAGS = new Set(['--dry-run', '--scan', '--no-review-policy', '--allow-worktree-review-policy', '--help', '-h']);
 const KNOWN_FLAGS = new Set([...VALUE_FLAGS, ...BOOL_FLAGS]);
 const MAX_OUTPUT_CHARS = 12000;
 const MAX_OUTPUT_TAIL_CHARS = 2000;
 const MAX_STDERR_CHARS = 2000;
+const MAX_REVIEW_POLICY_CHARS = 8000;
 const MAX_TIMEOUT_SEC = 2147453;
+
+function clipPolicyText(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return { text: null, truncated: false };
+  if (trimmed.length > MAX_REVIEW_POLICY_CHARS) {
+    return { text: `${trimmed.slice(0, MAX_REVIEW_POLICY_CHARS)}\n...[REVIEW.md truncated]`, truncated: true };
+  }
+  return { text: trimmed, truncated: false };
+}
+
+function resolveGitBaseRef(gitRoot, explicitRef) {
+  const candidates = explicitRef ? [explicitRef] : ['origin/main', 'origin/master', 'main', 'master'];
+  for (const ref of candidates) {
+    const check = spawnSync('git', ['-C', gitRoot, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { encoding: 'utf8' });
+    if (check.status === 0) return ref;
+  }
+  return null;
+}
+
+export function loadReviewPolicy(workspace, { ref = null, allowWorkingTree = false } = {}) {
+  const gitTop = spawnSync('git', ['-C', workspace, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  const inGit = gitTop.status === 0 && Boolean(gitTop.stdout.trim());
+
+  if (inGit && !allowWorkingTree) {
+    const gitRoot = realpathSync(gitTop.stdout.trim());
+    const wsReal = realpathSync(workspace);
+    const relDir = path.relative(gitRoot, wsReal);
+    const gitPolicyRel = (relDir ? path.join(relDir, 'REVIEW.md') : 'REVIEW.md').split(path.sep).join('/');
+    const baseRef = resolveGitBaseRef(gitRoot, ref);
+    const hasWorktreePolicy = existsSync(path.join(workspace, 'REVIEW.md'));
+    if (!baseRef) {
+      return {
+        text: null,
+        truncated: false,
+        source: null,
+        skipped: hasWorktreePolicy ? 'untrusted-worktree-policy' : null,
+      };
+    }
+    const blob = spawnSync('git', ['-C', gitRoot, 'show', `${baseRef}:${gitPolicyRel}`], { encoding: 'utf8' });
+    if (blob.status !== 0) {
+      return {
+        text: null,
+        truncated: false,
+        source: null,
+        skipped: hasWorktreePolicy ? 'untrusted-worktree-policy' : null,
+      };
+    }
+    const clipped = clipPolicyText(blob.stdout);
+    if (!clipped.text) return { text: null, truncated: false, source: null, skipped: 'empty' };
+    return { text: clipped.text, truncated: clipped.truncated, source: `git:${baseRef}`, skipped: null };
+  }
+
+  const policyPath = path.join(workspace, 'REVIEW.md');
+  try {
+    lstatSync(policyPath);
+  } catch {
+    return { text: null, truncated: false, source: null, skipped: null };
+  }
+  try {
+    const wsReal = realpathSync(workspace);
+    const targetReal = realpathSync(policyPath);
+    if (targetReal !== wsReal && !targetReal.startsWith(`${wsReal}${path.sep}`)) {
+      return { text: null, truncated: false, source: null, skipped: 'outside-workspace' };
+    }
+    if (!statSync(targetReal).isFile()) {
+      return { text: null, truncated: false, source: null, skipped: 'not-a-file' };
+    }
+    const clipped = clipPolicyText(readFileSync(targetReal, 'utf8'));
+    if (!clipped.text) return { text: null, truncated: false, source: null, skipped: 'empty' };
+    return { text: clipped.text, truncated: clipped.truncated, source: 'worktree', skipped: null };
+  } catch {
+    return { text: null, truncated: false, source: null, skipped: 'unreadable' };
+  }
+}
+
+export function attachReviewPolicy(prompt, policyText) {
+  if (!prompt || !policyText) return prompt;
+  return `${prompt}\n\n---\n# 仓库审查契约（REVIEW.md，按此口径判定阻断与免拦范围）\n${policyText}`;
+}
 
 export function resolveRole(role, config, explicitRunner) {
   if (explicitRunner) return { runner: explicitRunner, source: 'explicit' };
@@ -264,7 +344,7 @@ function main() {
     print({ ok: true, action: 'scan', detected, note: '已安装不等于已认证；未配置角色前 run --role 返回 NEEDS_ROLE_CHOICE' });
   }
 
-  const usage = 'usage: delegate.mjs run --runner <zcode|codex|antigravity> [--role <review|critique|diagnose|implement>] [--workspace DIR] --prompt "..." [--session ID] [--timeout S] [--dry-run] | config --set-role role=<runner|host|a,b> | onboard --scan';
+  const usage = 'usage: delegate.mjs run --runner <zcode|codex|antigravity> [--role <review|critique|diagnose|implement>] [--workspace DIR] --prompt "..." [--session ID] [--timeout S] [--review-policy-ref REF] [--allow-worktree-review-policy] [--no-review-policy] [--dry-run] | config --set-role role=<runner|host|a,b> | onboard --scan';
   if (cmd !== 'run') print({ ok: false, error: usage });
 
   const runner = flag('--runner');
@@ -276,6 +356,9 @@ function main() {
   const timeoutSec = rawTimeout === null ? 600 : Number(rawTimeout);
   const timeoutMs = Math.trunc(timeoutSec * 1000);
   const dryRun = flags.has('--dry-run');
+  const noReviewPolicy = flags.has('--no-review-policy');
+  const allowWorktreePolicy = flags.has('--allow-worktree-review-policy');
+  const reviewPolicyRef = flag('--review-policy-ref');
 
   if (!Number.isFinite(timeoutSec) || timeoutSec > MAX_TIMEOUT_SEC || timeoutMs < 1) {
     print({ ok: false, error: `--timeout must be a positive number (>= 0.001 and <= ${MAX_TIMEOUT_SEC})` });
@@ -302,14 +385,47 @@ function main() {
   if (pick === 'antigravity' && ROLES[role] === 'write') notes.push('agy 写模式用 --mode accept-edits：自动接受文件编辑，命令执行仍可能被无头权限拒绝');
   if (rest.length) notes.push(`本角色还配置了其他 runner：${rest.join(',')}；本次用第一个，会诊请分别 --runner 调用`);
 
-  if (dryRun) print({ ok: true, status: 'DRY_RUN', runner: pick, role, workspace, sandbox: sandboxFor(role, pick), session: session ?? null, notes });
+  let effectivePrompt = prompt;
+  let reviewPolicyInjected = false;
+  let reviewPolicySource = null;
+  if (role === 'review' && !session && prompt && !noReviewPolicy) {
+    const policy = loadReviewPolicy(workspace, { ref: reviewPolicyRef, allowWorkingTree: allowWorktreePolicy });
+    if (policy.text) {
+      effectivePrompt = attachReviewPolicy(prompt, policy.text);
+      reviewPolicyInjected = true;
+      reviewPolicySource = policy.source;
+      notes.push(
+        policy.truncated
+          ? `已自动注入仓库 REVIEW.md（来源 ${policy.source}，超长已截断至 8000 字符）`
+          : `已自动注入仓库 REVIEW.md 审查契约（来源 ${policy.source}）`,
+      );
+    } else if (policy.skipped === 'untrusted-worktree-policy') {
+      notes.push('跳过待审工作区未合入基线的 REVIEW.md（防待审改动自改审查口径；确认可信时传 --allow-worktree-review-policy）');
+    } else if (policy.skipped === 'outside-workspace') {
+      notes.push('跳过 REVIEW.md：符号链接指向工作区外部，拒绝发送给外部模型');
+    }
+  }
+
+  if (dryRun) {
+    print({
+      ok: true,
+      status: 'DRY_RUN',
+      runner: pick,
+      role,
+      workspace,
+      sandbox: sandboxFor(role, pick),
+      session: session ?? null,
+      ...(role === 'review' ? { review_policy_injected: reviewPolicyInjected, review_policy_source: reviewPolicySource } : {}),
+      notes,
+    });
+  }
 
   const started = Date.now();
   const result = pick === 'codex'
-    ? runCodex({ workspace, prompt, session, role, timeoutMs, bin })
+    ? runCodex({ workspace, prompt: effectivePrompt, session, role, timeoutMs, bin })
     : pick === 'antigravity'
-      ? runAntigravity({ workspace, prompt, session, role, timeoutSec, timeoutMs, bin })
-      : runZcode({ workspace, prompt, bin, timeoutMs });
+      ? runAntigravity({ workspace, prompt: effectivePrompt, session, role, timeoutSec, timeoutMs, bin })
+      : runZcode({ workspace, prompt: effectivePrompt, bin, timeoutMs });
 
   let gitStatus = '';
   try { gitStatus = execFileSync('git', ['status', '--porcelain'], { cwd: workspace, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 10000 }).trim(); } catch { gitStatus = '(not a git repo)'; }
