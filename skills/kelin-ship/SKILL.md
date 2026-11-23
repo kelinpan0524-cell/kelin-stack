@@ -21,13 +21,13 @@ description: 按纪律交付：一任务一分支、带前缀的提交、PR 说�
 
 ### 1. 交付前自审
 
-用 `kelin-review` skill 过一遍，P0/P1 清零。审完写评审回执：
+严车道改动（见下方「自动合并门」分流）须走完整 `kelin-review` 自审且 P0/P1 清零，并写评审回执：
 
 ```sh
 node "$SKILL_DIR"/../kelin-review/scripts/review-check.mjs --write
 ```
 
-提交前再跑一次不带 `--write` 的检查。只认 `CURRENT`；`STALE`、`UNVERIFIED`、`MISSING` 都不能当“审过了”。
+提交前再跑一次不带 `--write` 的检查。只认 `CURRENT`；`STALE`、`UNVERIFIED`、`MISSING` 都不能当“审过了”。快车道低风险小改可免等跨模型阻断回执（仍须过本地自验与 `gate-scan`），若工作区已存在 `.kelin/review.json`，`preflight` 仍要求其保持 `CURRENT`。
 
 ### 2. 验证
 
@@ -64,22 +64,33 @@ git commit -m "[Antigravity] 一句话说结果" -m "为什么这么改，风险
 
 - 确认远端 main 已有提交 → 删本地分支 → 交 `kelin-reflect`。
 
-## 自动合并门
+## 自动合并门（快车道 / 严车道）
 
 部署检查（最前）：先判断合并是否触发部署（workflow deploy job 或服务器 cron 轮询都算）；触发部署的仓库必须有明确部署授权才能走自动合并，否则只做到 push + PR。
 
-以下六条**全部满足**时，代理可不经用户逐个确认直接合并：
+先跑只读分流脚本确定本次 PR 走哪条车道，避免小修被过度阻塞、同时守住高危防线：
+
+```sh
+node "$SKILL_DIR"/scripts/merge-lane.mjs --root . --base origin/main
+```
+
+| 车道 | 机器判定条件（`merge-lane.mjs`） | 放行门槛 |
+| --- | --- | --- |
+| **快车道（`fast`）** | 仅 1–2 个文件、总改动 < 50 行、无二进制 diff、未碰高危路径且 `gate-scan` 0 未解释放宽 | 满足基础五条（CI 全绿且用例只增不减、本地自验通过、PR 写明回滚、非 Dependabot、`gate-scan` 干净）即可合入；深度跨模型审查可合后并行跑，发现真实缺陷发轻量 fix-forward 小 PR |
+| **严车道（`strict`）** | 任一命中：≥ 3 文件、≥ 50 行、含二进制 diff、`gate-scan` 有发现，或触碰高危路径（`.github/**` / CI / 门禁脚本 / `REVIEW.md` / `install.sh` / 鉴权与权限 / 支付 / SQL 与迁移 / 生产部署与锁文件 / 密钥与数据表） | 全部六条硬门全过：基础五条 + 必须完成跨模型独立审查（`CLEAN` 且主裁裁决）且 `kelin-review` 回执为 `CURRENT`、P0/P1 = 0 |
+
+以下六条（快车道可跳过第 2 条的跨模型阻塞等待，严车道必须全满足）：
 
 1. CI 全绿，且用例总数相对基线只增不减；
-2. `kelin-review` 回执为 `CURRENT` 且 P0/P1 = 0；
+2. （严车道强制）`kelin-review` 回执为 `CURRENT` 且 P0/P1 = 0，本档全部必需审查者返回合法裁决且主裁完成裁决（存在未消解审查失败时禁止合并，即使 P0/P1 计数为 0）；
 3. PR 正文写明回滚方式；
 4. 非 Dependabot 或其他依赖机器人 PR；
-5. gate-scan 无未解释的门禁放宽类发现；
-6. 改动不涉及生产配置、密钥、迁移类高危区。
+5. `gate-scan` 无未解释的门禁放宽类发现；
+6. 改动不涉及未授权的自动部署、密钥或真实数据。
 
-前置：本档全部必需审查者成功返回合法末行裁决（`CLEAN` / `FINDINGS`）且主裁完成裁决；存在未消解的审查失败时禁止合并，即使 P0/P1 计数为 0。证据绑定：证据采集前 `git status` 必须干净（无未提交/未暂存改动）且 HEAD == 远端 PR head SHA，不满足先停；先同步最新目标分支，针对**同一远端 PR head SHA** 核对审查回执、CI 与 gate-scan，合并命令用 `gh pr merge --squash --match-head-commit <SHA>` 锁定（按仓库合并策略显式传 `--merge`/`--rebase`/`--squash`），禁止拿本地旧回执拼远端新提交的绿门。
+证据绑定：证据采集前 `git status` 必须干净（无未提交/未暂存改动）且 HEAD == 远端 PR head SHA，不满足先停；先同步最新目标分支，针对**同一远端 PR head SHA** 核对分流结果、CI、gate-scan（以及严车道的审查回执），合并命令用 `gh pr merge --squash --match-head-commit <SHA>` 锁定（按仓库合并策略显式传 `--merge`/`--rebase`/`--squash`），禁止拿本地旧回执拼远端新提交的绿门。
 
-任一不满足：停下，列明缺项，交用户拍板。两条红线**优先于本门通用兜底**：Dependabot 大版本依赖 PR 依旧直接关；"合并即部署"仓库的部署确认不在此门覆盖内。
+任一不满足：停下，列明缺项，交用户拍板。两条红线**优先于本门通用兜底**：Dependabot 大版本依赖 PR 依旧交人拍板或关闭；"合并即部署"仓库的部署确认不在此门覆盖内。
 
 ## 部署（只有明确授权才执行）
 
