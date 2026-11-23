@@ -1,5 +1,12 @@
 # Changelog
 
+# 0.24.0（2026-11-23）
+
+系统吸收上游 `pstack` / `open-pstack` / `noodle` 防审查钻牛角尖机制，补齐审查契约、噪音分诊与合并门分层（PR #29 / #30 / #31）：
+- **仓库级 `REVIEW.md` 审查契约与基线安全注入（PR #29）**：新增通用模板 `skills/kelin-mode/templates/REVIEW.md` 与本仓 `REVIEW.md`（纳入 `verify-stack` `registry.json`）；`mode.mjs setup` 支持 `--with-review-policy` 预览与幂等生成并将路径安全校验前置到首次写入前；`delegate.mjs` 在 `role=review` 首轮自动读取并追加基线分支权威 `REVIEW.md`（防止待审分支篡改审查口径，提供 `--allow-worktree-review-policy` / `--no-review-policy` 及仓外符号链接拦截）。
+- **按体量建议限额与怀疑式噪音分诊表（PR #30）**：新增 `skills/kelin-review/references/noise-triage.md`（修复 / 证据驳回 / 交人拍板三分法与 6 条内置低风险噪音模式，保留 `gate-scan` 门禁放宽交人拍板优先）；`kelin-review/SKILL.md` 与 `agents/kelin-reviewer.md` 补齐小改每维 ≤1 条（总计 ≤3 条）、大改每维 ≤4 条的非阻断上限与“无实质问题直接输出 `CLEAN`”规则。
+- **自动合并门快/严车道与机器分流脚本（PR #31）**：新增只读分流脚本 `skills/kelin-ship/scripts/merge-lane.mjs` 及测试 `skills/kelin-ship/tests/merge-lane.test.mjs`，统一从仓根按文件数（≤2）、改动行数（<50）、高危路径表、二进制 diff、未追踪文件与 `gate-scan` 联动结果输出 `fast | strict | none`；`kelin-ship/SKILL.md` 同步拆分为快车道（低风险小改 CI 绿 + 本地自验即可合并、深度审查事后 fix-forward）与严车道（强阻塞跨模型审查与 `CURRENT` 回执），守住部署与依赖机器人两条红线。
+
 # 0.23.1（2026-11-23）
 
 `review-check` 签章与 `kelin-mode` 流程门禁统一升级为「结构化裁决 + 正文松绑」并补齐防钻牛角尖规则：
