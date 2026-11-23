@@ -361,7 +361,7 @@ export function routeTask(task, projectRoot = process.cwd()) {
   };
 }
 
-export function runSetup({ root = process.cwd(), host = '', apply = false, withVerifyApp = false, withPrecommit = false } = {}) {
+export function runSetup({ root = process.cwd(), host = '', apply = false, withVerifyApp = false, withPrecommit = false, withReviewPolicy = false } = {}) {
   const dirRoot = path.resolve(root);
   const targetHost = detectHost(host);
   if (!VALID_HOSTS.has(targetHost)) {
@@ -374,8 +374,16 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   const pushCheck = (id, status, detail, extra = {}) => checks.push({ id, status, detail, ...extra });
 
   const agentsFile = path.join(dirRoot, 'AGENTS.md');
+  const gitignoreFile = path.join(dirRoot, '.gitignore');
+  const policyFile = path.join(dirRoot, 'kelin-policy.json');
+  const reviewPolicyFile = path.join(dirRoot, 'REVIEW.md');
   try {
     assertSafeWriteTarget(dirRoot, agentsFile);
+    assertSafeWriteTarget(dirRoot, gitignoreFile);
+    assertSafeWriteTarget(dirRoot, policyFile);
+    if (withReviewPolicy && !existsSync(reviewPolicyFile)) {
+      assertSafeWriteTarget(dirRoot, reviewPolicyFile);
+    }
   } catch (error) {
     return { ok: false, error: error.message, applied: false, root: dirRoot, host: targetHost, checks, actions, nextSteps };
   }
@@ -399,12 +407,6 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   }
 
   const isGit = isGitRepo(dirRoot);
-  const gitignoreFile = path.join(dirRoot, '.gitignore');
-  try {
-    assertSafeWriteTarget(dirRoot, gitignoreFile);
-  } catch (error) {
-    return { ok: false, error: error.message, applied: false, root: dirRoot, host: targetHost, checks, actions, nextSteps };
-  }
   const giText = existsSync(gitignoreFile) ? readFileSync(gitignoreFile, 'utf8') : '';
   const runtimeIgnored = isGit
     ? spawnSync('git', ['-C', dirRoot, 'check-ignore', '-q', '.kelin/state.json'], { encoding: 'utf8' }).status === 0
@@ -434,12 +436,6 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
     actions.push({ step: 'gitignore', file: '.gitignore', action: 'would-add-kelin' });
   }
 
-  const policyFile = path.join(dirRoot, 'kelin-policy.json');
-  try {
-    assertSafeWriteTarget(dirRoot, policyFile);
-  } catch (error) {
-    return { ok: false, error: error.message, applied: false, root: dirRoot, host: targetHost, checks, actions, nextSteps };
-  }
   const policyCheckScript = path.join(SKILLS_DIR, 'kelin-mode', 'scripts', 'policy-check.mjs');
   if (existsSync(policyFile)) {
     const pCheck = spawnSync(process.execPath, [policyCheckScript, policyFile], { encoding: 'utf8' });
@@ -453,6 +449,24 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   } else {
     pushCheck('policy', 'missing', '尚未创建 kelin-policy.json（将复制安全默认模板）');
     actions.push({ step: 'policy', file: 'kelin-policy.json', action: 'would-create' });
+  }
+
+  const reviewPolicyTpl = path.join(SKILLS_DIR, 'kelin-mode', 'templates', 'REVIEW.md');
+  if (existsSync(reviewPolicyFile)) {
+    pushCheck('review-policy', 'ready', '已配置仓库审查契约 REVIEW.md');
+  } else if (withReviewPolicy && apply) {
+    if (!existsSync(reviewPolicyTpl)) {
+      pushCheck('review-policy', 'error', '缺少模板 skills/kelin-mode/templates/REVIEW.md');
+    } else {
+      copyFileSync(reviewPolicyTpl, reviewPolicyFile);
+      pushCheck('review-policy', 'applied', '已生成仓库审查契约 REVIEW.md（防审查钻牛角尖）');
+      actions.push({ step: 'review-policy', file: 'REVIEW.md', action: 'created' });
+    }
+  } else if (withReviewPolicy) {
+    pushCheck('review-policy', 'missing', '尚未创建 REVIEW.md（将复制防钻牛角尖审查契约模板）');
+    actions.push({ step: 'review-policy', file: 'REVIEW.md', action: 'would-create' });
+  } else {
+    pushCheck('review-policy', 'optional', '尚未创建 REVIEW.md（可加 --with-review-policy 生成审查契约）');
   }
 
   const existingVerify = findVerifySkillsInRoot(dirRoot);
@@ -516,6 +530,7 @@ export function runSetup({ root = process.cwd(), host = '', apply = false, withV
   const applyFlags = ['setup', '--root', dirRoot, '--host', targetHost, '--apply'];
   if (withVerifyApp) applyFlags.push('--with-verify-app');
   if (withPrecommit) applyFlags.push('--with-precommit');
+  if (withReviewPolicy) applyFlags.push('--with-review-policy');
   const applyArgs = !apply && actions.length ? applyFlags : null;
   const applyCommand = applyArgs ? modeCmd(applyArgs) : null;
   if (applyCommand) nextSteps.push(`确认无误后执行：${applyCommand}`);
@@ -868,6 +883,7 @@ function main(argv = process.argv.slice(2)) {
       apply: argv.includes('--apply'),
       withVerifyApp: argv.includes('--with-verify-app'),
       withPrecommit: argv.includes('--with-precommit'),
+      withReviewPolicy: argv.includes('--with-review-policy'),
     });
     console.log(JSON.stringify(report, null, 2));
     process.exit(report.ok ? 0 : 2);
@@ -1039,7 +1055,7 @@ function main(argv = process.argv.slice(2)) {
     process.exit(0);
   }
 
-  console.error('Usage: node mode.mjs setup [--root DIR] [--host antigravity|codex|zcode] [--apply] [--with-verify-app] [--with-precommit] | route --task "<text>" [--root DIR] | init [--mode feature|fix|legacy|audit|light] [--task "<text>"] [--cross-module] [--root DIR] | status [--root DIR] | advance [--root DIR] | rewind --reason "<why>" [--root DIR]');
+  console.error('Usage: node mode.mjs setup [--root DIR] [--host antigravity|codex|zcode] [--apply] [--with-verify-app] [--with-precommit] [--with-review-policy] | route --task "<text>" [--root DIR] | init [--mode feature|fix|legacy|audit|light] [--task "<text>"] [--cross-module] [--root DIR] | status [--root DIR] | advance [--root DIR] | rewind --reason "<why>" [--root DIR]');
   process.exit(2);
 }
 

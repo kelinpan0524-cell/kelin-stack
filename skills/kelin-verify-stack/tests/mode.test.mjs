@@ -371,6 +371,35 @@ test('mode setup previews read-only, applies idempotently and supports --with-ve
 
   const second = JSON.parse(run(['setup', '--host', 'antigravity', '--apply'], root).stdout);
   assert.equal(second.actions.length, 0);
+  assert.equal(second.checks.find((c) => c.id === 'review-policy')?.status, 'optional');
+
+  const rpPreview = JSON.parse(run(['setup', '--host', 'antigravity', '--with-review-policy'], root).stdout);
+  assert.equal(rpPreview.checks.find((c) => c.id === 'review-policy')?.status, 'missing');
+  assert.match(rpPreview.applyCommand || '', /--with-review-policy/);
+  assert.equal(existsSync(path.join(root, 'REVIEW.md')), false);
+
+  const rpApplied = JSON.parse(run(['setup', '--host', 'antigravity', '--apply', '--with-review-policy'], root).stdout);
+  assert.equal(rpApplied.checks.find((c) => c.id === 'review-policy')?.status, 'applied');
+  assert.match(await readFile(path.join(root, 'REVIEW.md'), 'utf8'), /可达 ≠ 有后果/);
+
+  const rpReady = JSON.parse(run(['setup', '--host', 'antigravity', '--with-review-policy'], root).stdout);
+  assert.equal(rpReady.checks.find((c) => c.id === 'review-policy')?.status, 'ready');
+  assert.equal(rpReady.actions.length, 0);
+
+  // In-repo REVIEW.md symlink must not break default setup; dangling outside symlink fails before any writes
+  const linkRepo = await mkdtemp(path.join(tmpdir(), 'kelin-mode-rplink-'));
+  await mkdir(path.join(linkRepo, 'docs'), { recursive: true });
+  await writeFile(path.join(linkRepo, 'docs', 'review-contract.md'), '# REVIEW\n');
+  await symlink(path.join(linkRepo, 'docs', 'review-contract.md'), path.join(linkRepo, 'REVIEW.md'));
+  const linkSetup = run(['setup', '--host', 'antigravity', '--apply'], linkRepo);
+  assert.equal(linkSetup.code, 0, linkSetup.stdout);
+  assert.equal(JSON.parse(linkSetup.stdout).checks.find((c) => c.id === 'review-policy')?.status, 'ready');
+
+  const danglingRepo = await mkdtemp(path.join(tmpdir(), 'kelin-mode-rpdangle-'));
+  await symlink('/tmp/nonexistent-kelin-outside-review.md', path.join(danglingRepo, 'REVIEW.md'));
+  const danglingSetup = run(['setup', '--host', 'antigravity', '--apply', '--with-review-policy'], danglingRepo);
+  assert.equal(danglingSetup.code, 2);
+  assert.equal(existsSync(path.join(danglingRepo, 'AGENTS.md')), false, 'pre-write check must fail before creating AGENTS.md');
 
   // Invalid policy JSON must fail setup instead of reporting ready
   await writeFile(path.join(root, 'kelin-policy.json'), '{broken');

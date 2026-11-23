@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildCodexArgs, extractVerdict, parseCliArgs, resolveRole, sandboxFor, ROLES } from '../scripts/delegate.mjs';
+import { attachReviewPolicy, buildCodexArgs, extractVerdict, loadReviewPolicy, parseCliArgs, resolveRole, sandboxFor, ROLES } from '../scripts/delegate.mjs';
 
 const delegateScript = path.resolve(import.meta.dirname, '..', 'scripts', 'delegate.mjs');
 
@@ -308,6 +308,138 @@ test('extractVerdict handles CLEAN, FINDINGS, fenced trailing verdict, and rejec
   assert.equal(extractVerdict('Checked inline `<!--` token\nCLEAN\n'), 'CLEAN');
   assert.equal(extractVerdict('```js\nconst s = "<!--";\n```\nCLEAN\n'), 'CLEAN');
   assert.equal(extractVerdict(''), 'MISSING');
+});
+
+test('role=review auto-injects workspace REVIEW.md on fresh run, skips on resume or --no-review-policy, and blocks outside symlinks', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-delegate-policy-'));
+  const binDir = path.join(dir, 'bin');
+  const workDir = path.join(dir, 'repo');
+  const outsideDir = await mkdtemp(path.join(tmpdir(), 'kelin-delegate-outside-'));
+  await mkdir(binDir, { recursive: true });
+  await mkdir(workDir, { recursive: true });
+
+  const codexCapture = `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+const outFile = args[args.indexOf('-o') + 1];
+const prompt = args[args.indexOf('--') + 1];
+fs.writeFileSync(outFile, 'PROMPT=' + prompt + '\\nCLEAN');
+console.log(JSON.stringify({ thread_id: 'sess-pol-1' }));
+`;
+  await writeFile(path.join(binDir, 'codex'), codexCapture);
+  await chmod(path.join(binDir, 'codex'), 0o755);
+  await writeFile(path.join(workDir, 'REVIEW.md'), '# REVIEW.md\n免拦：本地演示脚本\n');
+  const env = { ...process.env, HOME: dir, PATH: `${binDir}:${process.env.PATH}` };
+
+  try {
+    const dry = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--role', 'review', '--workspace', workDir, '--prompt', '- review', '--dry-run'],
+      { env, encoding: 'utf8' },
+    );
+    assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+    const dryJson = JSON.parse(dry.stdout);
+    assert.equal(dryJson.review_policy_injected, true);
+    assert.ok(dryJson.notes.some((n) => n.includes('REVIEW.md')));
+
+    const fresh = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--role', 'review', '--workspace', workDir, '--timeout', '5', '--prompt', '- review'],
+      { env, encoding: 'utf8' },
+    );
+    assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
+    const freshJson = JSON.parse(fresh.stdout);
+    assert.equal(freshJson.verdict, 'CLEAN');
+    assert.match(freshJson.response, /PROMPT=- review/);
+    assert.match(freshJson.response, /免拦：本地演示脚本/);
+
+    const resumed = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--role', 'review', '--workspace', workDir, '--session', 'sess-pol-1', '--timeout', '5', '--prompt', 'round 2'],
+      { env, encoding: 'utf8' },
+    );
+    assert.equal(resumed.status, 0, resumed.stdout + resumed.stderr);
+    assert.doesNotMatch(JSON.parse(resumed.stdout).response, /免拦：本地演示脚本/);
+
+    const optedOut = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--role', 'review', '--workspace', workDir, '--no-review-policy', '--timeout', '5', '--prompt', 'plain'],
+      { env, encoding: 'utf8' },
+    );
+    assert.equal(optedOut.status, 0, optedOut.stdout + optedOut.stderr);
+    assert.doesNotMatch(JSON.parse(optedOut.stdout).response, /免拦：本地演示脚本/);
+
+    // Truncation boundary
+    await writeFile(path.join(workDir, 'REVIEW.md'), 'R'.repeat(9000));
+    const loadedLong = loadReviewPolicy(workDir);
+    assert.equal(loadedLong.truncated, true);
+    assert.match(loadedLong.text || '', /truncated/);
+    assert.match(attachReviewPolicy('check', loadedLong.text), /REVIEW\.md/);
+
+    // Symlink pointing outside workspace must never be read
+    const secretFile = path.join(outsideDir, 'secret.md');
+    await writeFile(secretFile, 'TOP-SECRET\n');
+    const symWork = path.join(dir, 'sym-repo');
+    await mkdir(symWork, { recursive: true });
+    await symlink(secretFile, path.join(symWork, 'REVIEW.md'));
+    const blocked = loadReviewPolicy(symWork);
+    assert.equal(blocked.text, null);
+    assert.equal(blocked.skipped, 'outside-workspace');
+    const symDry = spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--role', 'review', '--workspace', symWork, '--prompt', 'hi', '--dry-run'],
+      { env, encoding: 'utf8' },
+    );
+    const symJson = JSON.parse(symDry.stdout);
+    assert.equal(symJson.review_policy_injected, false);
+    assert.ok(symJson.notes.some((n) => n.includes('符号链接')));
+
+    // Git repo: default reads baseline REVIEW.md so an unmerged PR branch cannot tamper with its own review policy
+    const gitRepo = path.join(dir, 'git-repo');
+    await mkdir(gitRepo, { recursive: true });
+    const gitIn = (...args) => spawnSync('git', ['-C', gitRepo, ...args], { encoding: 'utf8' });
+    gitIn('init', '-q', '-b', 'main');
+    gitIn('config', 'user.email', 't@example.invalid');
+    gitIn('config', 'user.name', 't');
+    await writeFile(path.join(gitRepo, 'a.txt'), 'v1\n');
+    gitIn('add', '-A');
+    gitIn('commit', '-qm', 'init');
+    gitIn('checkout', '-qb', 'feat/try-waive');
+    await writeFile(path.join(gitRepo, 'REVIEW.md'), '# REVIEW.md\n免拦：待审分支自加白名单\n');
+
+    const untrustedDry = JSON.parse(spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--role', 'review', '--workspace', gitRepo, '--prompt', 'check', '--dry-run'],
+      { env, encoding: 'utf8' },
+    ).stdout);
+    assert.equal(untrustedDry.review_policy_injected, false);
+    assert.ok(untrustedDry.notes.some((n) => n.includes('--allow-worktree-review-policy')));
+
+    const explicitAllow = JSON.parse(spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--role', 'review', '--workspace', gitRepo, '--allow-worktree-review-policy', '--timeout', '5', '--prompt', 'check'],
+      { env, encoding: 'utf8' },
+    ).stdout);
+    assert.match(explicitAllow.response, /待审分支自加白名单/);
+
+    gitIn('checkout', '-q', 'main');
+    await writeFile(path.join(gitRepo, 'REVIEW.md'), '# REVIEW.md\n基线权威口径\n');
+    gitIn('add', 'REVIEW.md');
+    gitIn('commit', '-qm', 'add baseline policy');
+    gitIn('checkout', '-q', 'feat/try-waive');
+    await writeFile(path.join(gitRepo, 'REVIEW.md'), '# REVIEW.md\n篡改后的口径\n');
+
+    const baselineRes = JSON.parse(spawnSync(
+      process.execPath,
+      [delegateScript, 'run', '--runner', 'codex', '--role', 'review', '--workspace', gitRepo, '--timeout', '5', '--prompt', 'check'],
+      { env, encoding: 'utf8' },
+    ).stdout);
+    assert.match(baselineRes.response, /基线权威口径/);
+    assert.doesNotMatch(baselineRes.response, /篡改后的口径/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  }
 });
 
 test('clipOutput boundary: 12001 and 14000 pass through, 14001 truncates with omitted=1', async () => {

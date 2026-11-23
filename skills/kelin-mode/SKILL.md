@@ -15,7 +15,7 @@ description: 自动编排整套 kelin-stack：安装后 SessionStart 自动启�
 
 | 你说什么 | 自动做什么 | 命令 |
 | --- | --- | --- |
-| “kelin mode setup”（首次接入/体检） | 先只读预览环境检查项（`AGENTS.md`、`.gitignore`、`kelin-policy.json`、`verify-*`、`pre-commit`、内存/安全/委托），确认后加 `--apply` 写入 | `node "$SKILL_DIR"/scripts/mode.mjs setup --root . [--host antigravity\|codex\|zcode] [--apply] [--with-verify-app] [--with-precommit]` |
+| “kelin mode setup”（首次接入/体检） | 先只读预览环境检查项（`AGENTS.md`、`.gitignore`、`kelin-policy.json`、`REVIEW.md`、`verify-*`、`pre-commit`、内存/安全/委托），确认后加 `--apply` 写入 | `node "$SKILL_DIR"/scripts/mode.mjs setup --root . [--host antigravity\|codex\|zcode] [--apply] [--with-verify-app] [--with-precommit] [--with-review-policy]` |
 | “用 kelin mode 做 `<任务>`”（不懂选模式） | 自动检查是否需要 setup / 续跑、判定模式（`setup`/`audit`/`legacy`/`fix`/`light`/`feature`）、是否要先 `kelin-grill` 问清、并返回首阶段配套 `companionSkills` | `node "$SKILL_DIR"/scripts/mode.mjs route --task "<需求>" --root .` |
 | 直接按任务开跑 | 若上一轮已到 `done`，再次 `init` 自动归档到 `.kelin/history/`；`init`/`status`/`advance` 会直接带出当前阶段 `activeSkills` 与人话摘要 | `node "$SKILL_DIR"/scripts/mode.mjs init --task "<需求>" --root .` |
 

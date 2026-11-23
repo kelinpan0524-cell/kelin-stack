@@ -10,7 +10,7 @@
   "assets": ["assets/**"],
   "hooks": ["hooks/**", "hooks.json"],
   "setup": ["skills/setup-pstack/**"],
-  "tools": ["skills/*/scripts/**", "rules/**", "install.sh", "guards.json", "ratchet.json", "kelin-policy.json"],
+  "tools": ["skills/*/scripts/**", "rules/**", "install.sh", "guards.json", "ratchet.json", "kelin-policy.json", "REVIEW.md"],
   "nonRuntime": [
     "docs/**",
     "automations/**",
