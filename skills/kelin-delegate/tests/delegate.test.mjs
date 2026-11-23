@@ -4,7 +4,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { buildCodexArgs, parseCliArgs, resolveRole, sandboxFor, ROLES } from '../scripts/delegate.mjs';
+import { buildCodexArgs, extractVerdict, parseCliArgs, resolveRole, sandboxFor, ROLES } from '../scripts/delegate.mjs';
 
 const delegateScript = path.resolve(import.meta.dirname, '..', 'scripts', 'delegate.mjs');
 
@@ -294,9 +294,20 @@ process.stdout.write(JSON.stringify({ conversation_id: 'c1', response: 'HEAD-SID
     assert.ok(payload.response.startsWith('HEAD-SIDE-MARKER'), 'head-side marker must survive truncation');
     assert.ok(payload.response.includes('verdict below'), 'tail-side verdict intro must survive');
     assert.ok(payload.response.endsWith('CLEAN'), 'final verdict line must survive truncation');
+    assert.equal(payload.verdict, 'CLEAN', 'review role must expose structured verdict extracted before clipping');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('extractVerdict handles CLEAN, FINDINGS, fenced trailing verdict, and rejects HTML-comment or missing verdicts', () => {
+  assert.equal(extractVerdict('Summary\nCLEAN\n'), 'CLEAN');
+  assert.equal(extractVerdict('Summary\n```\nFINDINGS\n```\n'), 'FINDINGS');
+  assert.equal(extractVerdict('Summary\n<!--\nCLEAN\n-->\n'), 'MISSING');
+  assert.equal(extractVerdict('Summary\nCLEAN\nmore prose\n'), 'MISSING');
+  assert.equal(extractVerdict('Checked inline `<!--` token\nCLEAN\n'), 'CLEAN');
+  assert.equal(extractVerdict('```js\nconst s = "<!--";\n```\nCLEAN\n'), 'CLEAN');
+  assert.equal(extractVerdict(''), 'MISSING');
 });
 
 test('clipOutput boundary: 12001 and 14000 pass through, 14001 truncates with omitted=1', async () => {

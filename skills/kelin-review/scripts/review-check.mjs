@@ -5,7 +5,48 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeWorktreeFingerprint } from './fingerprint.mjs';
 
-const stripFenced = (text) => {
+const stripLineHtmlComments = (line, inComment) => {
+  let out = '';
+  let i = 0;
+  let state = inComment;
+  while (i < line.length) {
+    if (state) {
+      const end = line.indexOf('-->', i);
+      if (end < 0) return { text: out, inComment: true };
+      state = false;
+      i = end + 3;
+      continue;
+    }
+    if (line[i] === '`') {
+      let ticks = 1;
+      while (i + ticks < line.length && line[i + ticks] === '`') ticks += 1;
+      const delim = '`'.repeat(ticks);
+      let close = line.indexOf(delim, i + ticks);
+      while (close >= 0 && (line[close - 1] === '`' || line[close + ticks] === '`')) {
+        close = line.indexOf(delim, close + 1);
+      }
+      if (close >= 0) {
+        out += line.slice(i, close + ticks);
+        i = close + ticks;
+        continue;
+      }
+      out += delim;
+      i += ticks;
+      continue;
+    }
+    if (line.startsWith('<!--', i)) {
+      const end = line.indexOf('-->', i + 4);
+      if (end < 0) return { text: out, inComment: true };
+      i = end + 3;
+      continue;
+    }
+    out += line[i];
+    i += 1;
+  }
+  return { text: out, inComment: false };
+};
+
+const stripMarkdownComments = (text, { dropFenced = false } = {}) => {
   const lines = String(text || '').split(/\r?\n/);
   const out = [];
   let fenceChar = '';
@@ -18,7 +59,7 @@ const stripFenced = (text) => {
       if (!fenceChar && fenceMatch) {
         fenceChar = fenceMatch[1][0];
         fenceLen = fenceMatch[1].length;
-        out.push('');
+        out.push(dropFenced ? '' : rawLine);
         continue;
       }
       if (fenceChar) {
@@ -27,55 +68,142 @@ const stripFenced = (text) => {
           fenceChar = '';
           fenceLen = 0;
         }
-        out.push('');
+        out.push(dropFenced ? '' : rawLine);
         continue;
       }
     }
-    let line = rawLine;
-    let rebuilt = '';
-    while (line.length) {
-      if (inComment) {
-        const end = line.indexOf('-->');
-        if (end < 0) {
-          line = '';
-          break;
-        }
-        inComment = false;
-        line = line.slice(end + 3);
-      } else {
-        const start = line.indexOf('<!--');
-        if (start < 0) {
-          rebuilt += line;
-          line = '';
-          break;
-        }
-        rebuilt += line.slice(0, start);
-        const end = line.indexOf('-->', start + 4);
-        if (end < 0) {
-          inComment = true;
-          line = '';
-          break;
-        }
-        line = line.slice(end + 3);
-      }
-    }
-    if (!inComment || rebuilt.trim()) out.push(rebuilt);
+    const stripped = stripLineHtmlComments(rawLine, inComment);
+    inComment = stripped.inComment;
+    if (!inComment || stripped.text.trim()) out.push(stripped.text);
     else out.push('');
   }
   return out.join('\n');
 };
 
-const FAILURE_DECLARATION_RE = /^\s*#{0,6}\s*(审查失败|review\s+failure)\s*[:：]/m;
-const VERDICT_LINE_RE = /^[ \t]*(CLEAN|FINDINGS)[ \t]*$/m;
+const stripFenced = (text) => stripMarkdownComments(text, { dropFenced: true });
+const stripHtmlComments = (text) => stripMarkdownComments(text, { dropFenced: false });
 
-const hasVerdictRecord = (text) => {
-  const raw = String(text || '');
-  if (FAILURE_DECLARATION_RE.test(raw)) return false;
-  return VERDICT_LINE_RE.test(raw);
+const OK_REVIEWER_STATES = new Set(['ok', 'pass', 'passed', 'clean', 'findings']);
+const VALID_FM_VERDICTS = new Set(['clean', 'findings']);
+const FAILED_FM_VERDICTS = new Set(['failed', 'fail', 'error', 'timeout']);
+const FAILURE_DECLARATION_RE = /^\s*#{0,6}\s*(审查失败|review\s+failure)\s*[:：]/im;
+
+const parseFrontmatter = (text) => {
+  const raw = String(text || '').replace(/^\uFEFF/, '');
+  const lines = raw.split(/\r?\n/);
+  if (!/^---[ \t]*$/.test(lines[0] || '')) {
+    return { present: false, verdict: null, failedReviewers: [], body: raw };
+  }
+  let closeIdx = -1;
+  for (let i = 1; i < lines.length; i += 1) {
+    if (/^(---|\.\.\.)[ \t]*$/.test(lines[i])) {
+      closeIdx = i;
+      break;
+    }
+  }
+  if (closeIdx < 0) return { present: false, verdict: null, failedReviewers: [], body: raw };
+
+  let verdict = null;
+  const failedReviewers = [];
+  let blockKey = '';
+  const checkReviewerPair = (name, rawStatus) => {
+    const status = rawStatus.replace(/^['"]|['"]$/g, '').trim().toLowerCase();
+    if (!OK_REVIEWER_STATES.has(status)) failedReviewers.push(`${name.trim()}:${status || 'empty'}`);
+  };
+
+  for (const line of lines.slice(1, closeIdx)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    if (/^[ \t]+/.test(line) && blockKey) {
+      if (blockKey === 'reviewers') {
+        const pair = /^(?:-\s*)?([^:#\s][^:#]*?)\s*:\s*(.*)$/.exec(trimmed);
+        if (pair) checkReviewerPair(pair[1], pair[2].replace(/\s+#.*$/, ''));
+      } else if (blockKey === 'failed_reviewers') {
+        const item = /^-\s*(.+?)\s*$/.exec(trimmed);
+        if (item) {
+          const val = item[1].replace(/\s+#.*$/, '').replace(/^['"]|['"]$/g, '').trim();
+          if (val && !/^(none|null|false)$/i.test(val)) failedReviewers.push(val);
+        }
+      }
+      continue;
+    }
+    blockKey = '';
+    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(trimmed);
+    if (!kv) continue;
+    const key = kv[1].toLowerCase();
+    const val = kv[2].replace(/\s+#.*$/, '').replace(/^['"]|['"]$/g, '').trim();
+    if (key === 'verdict') {
+      verdict = val.toLowerCase();
+    } else if (key === 'reviewers') {
+      if (!val) blockKey = 'reviewers';
+      else if (val.startsWith('{') && val.endsWith('}')) {
+        for (const entry of val.slice(1, -1).split(',')) {
+          const pair = /^\s*([^:#\s][^:#]*?)\s*:\s*(.+?)\s*$/.exec(entry);
+          if (pair) checkReviewerPair(pair[1], pair[2]);
+        }
+      }
+    } else if (key === 'failed_reviewers') {
+      if (!val) blockKey = 'failed_reviewers';
+      else if (!/^(\[\s*\]|none|null|0|false)$/i.test(val)) failedReviewers.push(val);
+    }
+  }
+  return { present: true, verdict, failedReviewers, body: lines.slice(closeIdx + 1).join('\n') };
 };
 
+const hasBodySubstance = (body) => stripHtmlComments(body).split(/\r?\n/).some((rawLine) => {
+  const line = rawLine.trim();
+  if (!line) return false;
+  if (/^#{1,6}(?:\s|$)/.test(line)) return false;
+  if (/^[-*_]{3,}$/.test(line)) return false;
+  if (/^(`{3,}|~{3,})/.test(line)) return false;
+  if (/^Worktree-Fingerprint\s*:/i.test(line)) return false;
+  return true;
+});
+
+export const extractTrailingVerdict = (text) => {
+  const lines = stripHtmlComments(text)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return null;
+  let last = lines[lines.length - 1];
+  if (/^(`{3,}|~{3,})$/.test(last) && lines.length >= 2) {
+    last = lines[lines.length - 2];
+  }
+  return last === 'CLEAN' || last === 'FINDINGS' ? last.toLowerCase() : null;
+};
+
+export function evaluateReviewReport(markdown) {
+  const raw = String(markdown || '');
+  if (!raw.trim()) return { ok: false, verdict: null, source: 'none', reason: 'empty' };
+  const fm = parseFrontmatter(raw);
+  if (fm.failedReviewers.length > 0) {
+    return { ok: false, verdict: 'failed', source: 'frontmatter', reason: 'frontmatter-reviewer-failed' };
+  }
+  if (fm.present && fm.verdict !== null) {
+    if (FAILED_FM_VERDICTS.has(fm.verdict)) {
+      return { ok: false, verdict: 'failed', source: 'frontmatter', reason: 'frontmatter-failed' };
+    }
+    if (!VALID_FM_VERDICTS.has(fm.verdict)) {
+      return { ok: false, verdict: null, source: 'frontmatter', reason: 'frontmatter-invalid-verdict' };
+    }
+    if (!hasBodySubstance(fm.body)) {
+      return { ok: false, verdict: null, source: 'frontmatter', reason: 'frontmatter-empty-body' };
+    }
+    return { ok: true, verdict: fm.verdict, source: 'frontmatter', reason: null };
+  }
+  if (FAILURE_DECLARATION_RE.test(stripFenced(fm.body))) {
+    return { ok: false, verdict: 'failed', source: 'none', reason: 'failure-declaration' };
+  }
+  const trailing = extractTrailingVerdict(fm.body);
+  if (!trailing) return { ok: false, verdict: null, source: 'none', reason: 'missing-verdict' };
+  return { ok: true, verdict: trailing, source: 'trailing-line', reason: null };
+}
+
+export const hasVerdictRecord = (text) => evaluateReviewReport(text).ok;
+
 export function hasUnresolvedHighSeverity(markdown) {
-  const clean = stripFenced(markdown);
+  const clean = stripFenced(parseFrontmatter(markdown).body);
   const explicitTableCellRe = /^\|.*\|\s*(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)\s*\|/i;
   const explicitStatusFieldRe = /(?:^|[\s|;；,，(（\[【])(?:状态|status)\s*[:：]\s*(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)(?=$|[\s|;；,，)）\]】.。])/i;
   const leadingTagRe = /^(?:[-*+]|\d+\.)\s*(?:\[|【)\s*(?:已修复|已解决|已关闭|fixed|resolved|closed|wontfix|dismissed)\s*(?:\]|】)(?:\s|$|:|：)/i;
@@ -186,9 +314,11 @@ const main = () => {
   let reportHash = null;
   let reportVerdict = 'stamp-only';
   let reportBody = '';
+  let reportEval = { ok: false, verdict: null, source: 'none', reason: 'missing-report' };
   if (activeReviewPath) {
     reportBody = readFileSync(activeReviewPath, 'utf8');
     reportHash = createHash('sha256').update(reportBody).digest('hex');
+    reportEval = evaluateReviewReport(reportBody);
     reportVerdict = hasUnresolvedHighSeverity(reportBody) ? 'blocked' : 'clean';
   }
 
@@ -214,8 +344,11 @@ const main = () => {
       console.error('--write requires a review report: pass --review FILE or write .kelin/review.md; stamping CURRENT without a report is invalid');
       process.exit(2);
     }
-    if (!hasVerdictRecord(reportBody)) {
-      console.error('--write requires a review report with findings and verdicts; empty or verdict-free reports cannot stamp CURRENT');
+    if (!reportEval.ok) {
+      const hint = reportEval.verdict === 'failed'
+        ? `--write refused (${reportEval.reason}): report records an unresolved review failure; resolve it before stamping a valid verdict`
+        : `--write requires a valid review verdict (${reportEval.reason}): add frontmatter verdict: clean|findings with notes, or end with CLEAN/FINDINGS`;
+      console.error(hint);
       process.exit(2);
     }
     mkdirSync(path.dirname(stampFile), { recursive: true });
@@ -231,7 +364,7 @@ const main = () => {
   let blocked = reportVerdict === 'blocked';
 
   if (reviewFile) {
-    const match = /Worktree-Fingerprint:\s*([a-f0-9]{64})/i.exec(readFileSync(activeReviewPath, 'utf8'));
+    const match = /Worktree-Fingerprint:\s*([a-f0-9]{64})/i.exec(reportBody);
     expected = match ? match[1].toLowerCase() : '';
     source = reviewFile;
   } else if (existsSync(stampFile)) {
@@ -247,7 +380,7 @@ const main = () => {
   if (expected) {
     if (expected !== wt.fingerprint || staleByReport) verdict = 'STALE';
     else if (blocked) verdict = 'BLOCKED';
-    else if ((reviewFile || stampData?.reportHash) && hasVerdictRecord(reportBody)) verdict = 'CURRENT';
+    else if ((reviewFile || stampData?.reportHash) && reportEval.ok) verdict = 'CURRENT';
     else verdict = 'UNVERIFIED';
   } else if (source) {
     verdict = 'UNVERIFIED';
