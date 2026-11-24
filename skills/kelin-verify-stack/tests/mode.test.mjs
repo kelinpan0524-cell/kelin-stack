@@ -583,6 +583,87 @@ test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P
   assert.match(mapEscAdv.stdout, /unsafe base/);
 });
 
+test('map-check --changed-from maps changed paths to features with verbatim verify text, flags unmapped, and keeps exit codes 0/1/2', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const mapCheckScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-map', 'scripts', 'map-check.mjs');
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-map-changed-'));
+  const gitIn = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+  gitIn(['init', '-q', '-b', 'main']);
+  gitIn(['config', 'user.email', 'c@example.invalid']);
+  gitIn(['config', 'user.name', 'c']);
+  await mkdir(path.join(dir, 'src'), { recursive: true });
+  await mkdir(path.join(dir, 'docs'), { recursive: true });
+  await writeFile(path.join(dir, 'src', 'core.mjs'), 'export const core = 1;\n');
+  await writeFile(path.join(dir, 'docs', 'a.md'), 'doc\n');
+  const mapFile = path.join(dir, 'feature-map.json');
+  const naturalVerify = 'walk the core upload flow and confirm the exported row (human judgment, not a command)';
+  await writeFile(mapFile, JSON.stringify({
+    roots: ['src'],
+    owners: [{ pattern: 'src/**', feature: 'core-upload', verify: naturalVerify }],
+    nonRuntime: ['docs/**'],
+  }));
+  gitIn(['add', '-A']);
+  gitIn(['commit', '-qm', 'init']);
+
+  await writeFile(path.join(dir, 'src', 'core.mjs'), 'export const core = 2;\n');
+  await writeFile(path.join(dir, 'misc.txt'), 'unowned\n');
+  await writeFile(path.join(dir, 'docs', 'b.md'), 'new doc\n');
+  gitIn(['add', '-A']);
+  const mixed = spawnSync(process.execPath, [mapCheckScript, mapFile, '--changed-from', 'HEAD'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(mixed.status, 1, `unmapped change must exit 1: ${mixed.stdout} ${mixed.stderr}`);
+  const mixedPayload = JSON.parse(mixed.stdout);
+  assert.deepEqual(
+    mixedPayload.matched.map((entry) => ({ path: entry.path, feature: entry.feature, pattern: entry.pattern })),
+    [{ path: 'src/core.mjs', feature: 'core-upload', pattern: 'src/**' }],
+  );
+  assert.equal(mixedPayload.matched[0].verify, naturalVerify, 'verify text must round-trip verbatim');
+  assert.deepEqual(mixedPayload.unmapped, ['misc.txt']);
+  assert.deepEqual(mixedPayload.nonRuntime, ['docs/b.md']);
+
+  const { rmSync } = await import('node:fs');
+  rmSync(path.join(dir, 'misc.txt'));
+  rmSync(path.join(dir, 'src', 'core.mjs'));
+  await writeFile(path.join(dir, 'docs', 'c.md'), 'docs only\n');
+  gitIn(['add', '-A']);
+  const docsOnly = spawnSync(process.execPath, [mapCheckScript, mapFile, '--changed-from', 'HEAD'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(docsOnly.status, 0, 'deleted runtime paths and nonRuntime-only changes must not block');
+  const docsPayload = JSON.parse(docsOnly.stdout);
+  assert.deepEqual(docsPayload.matched.map((entry) => entry.path), ['src/core.mjs'], 'deleted runtime path still maps to its feature');
+  assert.equal(docsPayload.unmapped.length, 0);
+  assert.ok(docsPayload.nonRuntime.includes('docs/c.md'));
+
+  await writeFile(path.join(dir, 'src', 'core.mjs'), 'export const core = 3;\n');
+  const defaultMode = spawnSync(process.execPath, [mapCheckScript, mapFile], { cwd: dir, encoding: 'utf8' });
+  assert.equal(defaultMode.status, 0, defaultMode.stdout + defaultMode.stderr);
+  const defaultPayload = JSON.parse(defaultMode.stdout);
+  assert.equal(defaultPayload.ok, true);
+  assert.equal(defaultPayload.matched, undefined, 'default coverage output must stay unchanged');
+
+  const badRef = spawnSync(process.execPath, [mapCheckScript, mapFile, '--changed-from', 'no-such-ref'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(badRef.status, 2);
+  assert.match(badRef.stderr, /no-such-ref|git/);
+
+  const missingValue = spawnSync(process.execPath, [mapCheckScript, mapFile, '--changed-from'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(missingValue.status, 2);
+  assert.match(missingValue.stderr, /--changed-from/);
+
+  const plain = await mkdtemp(path.join(tmpdir(), 'kelin-map-nogit-'));
+  await writeFile(path.join(plain, 'feature-map.json'), JSON.stringify({ roots: ['src'], owners: [{ pattern: 'src/**', feature: 'a', verify: 'true' }] }));
+  const noGit = spawnSync(process.execPath, [mapCheckScript, 'feature-map.json', '--changed-from', 'HEAD'], { cwd: plain, encoding: 'utf8' });
+  assert.equal(noGit.status, 2);
+  assert.match(noGit.stderr, /git|repository/i);
+});
+
+test('map docs separate project map from verify-stack registry and document --changed-from consumption', async () => {
+  const { readFile: read } = await import('node:fs/promises');
+  const mapDoc = await read(path.resolve(import.meta.dirname, '..', '..', 'kelin-map', 'SKILL.md'), 'utf8');
+  assert.ok(!mapDoc.includes('同一套结构'), 'the false "same registry" claim must be corrected');
+  assert.match(mapDoc, /--changed-from/, 'SKILL.md must document the --changed-from usage');
+  const routing = await read(path.resolve(import.meta.dirname, '..', '..', 'kelin-mode', 'references', 'routing.md'), 'utf8');
+  assert.match(routing, /--changed-from/, 'routing verify stage must reference --changed-from coverage');
+  assert.match(routing, /skipReason/, 'routing verify stage must point uncovered items to skipReason');
+});
+
 test('mode ship enforces preflight in Git repos across subdirs; route handles English read-only review; map-check enforces boundaries cleanly', async () => {
   const { spawnSync } = await import('node:child_process');
   const reviewCheckScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-review', 'scripts', 'review-check.mjs');

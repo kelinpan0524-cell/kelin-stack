@@ -49,7 +49,7 @@ description: 给代码库建立“功能地图”：哪些路径归哪个功能�
 1. 列出目录和入口，先按功能分组，不要按文件罗列；
 2. 每组写一条 `verify`，写不出就说明这组还没法验证；
 3. 跑校验，把未覆盖和归属不清的清零；
-4. 把 `feature-map.json` 交给 `kelin-verify-stack`：它的 `features/registry.json` 就是同一套结构，可以直接按改动路径算出该跑哪些检查。
+4. 项目地图与 `kelin-verify-stack` 自检用的 `features/registry.json` 是两套入口：前者验你的项目，后者验插件自己，结构相似但不通用；改动路径的消费用下面的 `--changed-from`。
 
 ## 校验
 
@@ -58,6 +58,22 @@ node "$SKILL_DIR"/scripts/map-check.mjs feature-map.json
 ```
 
 退出 0 表示全覆盖；退出 1 会列出未覆盖（unmapped）和归属不清（ambiguous）的文件。
+
+## 改动路径消费（可选，不影响默认校验）
+
+改动落地前想知道"这次该驱动哪条用户路径"时：
+
+```sh
+node "$SKILL_DIR"/scripts/map-check.mjs feature-map.json --changed-from HEAD~1
+```
+
+取 `git diff --name-only <ref>` 的改动路径（未跟踪文件先 `git add` 才会计入），输出三类：
+
+- `matched`：命中的 feature、命中的 pattern、该 owner 的 `verify` 原文——自然语言也原样输出，**不会被当命令执行**；
+- `unmapped`：没有归属的改动路径；
+- `nonRuntime`：命中 nonRuntime 的路径。
+
+有 unmapped 退出 1（先补地图，或写明核验依据再继续）；参数或 git 错误退出 2；只改 nonRuntime 或无改动退出 0。一个路径命中多个 owner 不在这里拦，默认校验模式会报 ambiguous。`kelin-mode` 的 verify 阶段消费这里的输出，verify 对 matched 的覆盖要求以 kelin-mode 路由（`references/routing.md`）为准。
 
 ## 维护
 

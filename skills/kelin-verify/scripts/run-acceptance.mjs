@@ -132,8 +132,17 @@ function validateSpec(spec) {
     if (check.skipped !== undefined && typeof check.skipped !== 'boolean') {
       throw new Error(`check "${check.id}" skipped must be a boolean`);
     }
+    let skipReason;
+    if (check.skipped === true) {
+      skipReason = check.skipReason;
+      const valid = typeof skipReason === 'string' && skipReason.trim() && skipReason.length <= 160
+        && /^[\x20-\x7E]+$/.test(skipReason) && !/[`<>]/.test(skipReason);
+      if (!valid) {
+        throw new Error(`check "${check.id}" skipped requires skipReason: non-empty printable ASCII, max 160 chars, no backticks or angle brackets`);
+      }
+    }
 
-    return { id: check.id, cmd: check.cmd, cwd: check.cwd, timeoutMs, skipped: check.skipped === true };
+    return { id: check.id, cmd: check.cmd, cwd: check.cwd, timeoutMs, skipped: check.skipped === true, skipReason };
   });
 
   return {
@@ -251,6 +260,7 @@ function runCheck(check, checkCwd, state) {
       exit: null,
       timedOut: false,
       skipped: true,
+      skipReason: check.skipReason,
       signal: null,
       error: 'check marked skipped',
       durationMs: 0,
@@ -520,8 +530,9 @@ async function main() {
       const suffix = row.skipped ? ' [SKIPPED]' : row.timedOut ? ' [TIMEOUT]' : '';
       const label = row.skipped ? 'SKIP' : passed ? 'PASS' : 'FAIL';
       console.log(`${label} ${row.id} (${row.durationMs}ms)${suffix} ${row.cmd}`);
+      if (row.skipped && row.skipReason) console.log(`  reason: ${row.skipReason}`);
       const detail = row.output || row.error;
-      if (!passed && detail) {
+      if (!passed && detail && !(row.skipped && row.skipReason)) {
         console.log(detail.split('\n').map((line) => `  ${line}`).join('\n'));
       }
     }

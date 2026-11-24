@@ -230,6 +230,36 @@ test('generate handles ambiguous legacy API headings, table-footer splicing, and
   assert.ok(newRows.every((r) => r.split('|').length - 2 === 5), `compact 5-col table must emit 5-col rows: ${mixReadme}`);
 });
 
+test('generated manual has executable freshness check, staleness and path-variant rules, broad-regression walkthrough, and skill boundary note', async () => {
+  const dir = await project();
+  const written = run(generate, ['--root', dir, '--write']);
+  assert.equal(written.status, 0, written.stderr);
+  const body = await readFile(path.join(dir, '.zcode', 'skills', 'verify-demo-app', 'SKILL.md'), 'utf8');
+  const health = body.slice(body.indexOf('## 体检'), body.indexOf('## 驱动'));
+  assert.match(health, /git rev-parse --short HEAD/, 'health section must give the exact freshness command');
+  assert.match(health, /curl/, 'health section must cover version endpoints');
+  assert.match(health, /无法确认实例新鲜度/, 'health section must say what to do when identity is unavailable');
+  assert.match(health, /不可作为通过依据/, 'unfresh evidence must be marked invalid');
+  const rules = body.slice(body.indexOf('## 规则'));
+  assert.match(rules, /重启或重建再驱动/);
+  assert.match(rules, /过期实例产生的证据无效/);
+  assert.match(rules, /门控变体/);
+  assert.match(rules, /取消/);
+  assert.match(rules, /空态/);
+  assert.match(rules, /持久化/);
+  assert.match(rules, /广泛回归/);
+  assert.match(rules, /features\/README\.md/);
+  assert.match(rules, /首次冒烟/);
+
+  const skillDoc = await readFile(path.resolve(import.meta.dirname, '..', '..', 'kelin-verify-app', 'SKILL.md'), 'utf8');
+  const boundary = skillDoc.slice(skillDoc.indexOf('## 边界'));
+  assert.match(boundary, /桌面端/, 'boundary must mention desktop');
+  assert.match(boundary, /移动端/, 'boundary must mention mobile');
+  assert.match(boundary, /小程序/, 'boundary must mention miniprogram');
+  assert.match(boundary, /skipReason/, 'boundary must point to skipReason reporting');
+  assert.match(boundary, /浏览器工具/, 'boundary must forbid driving miniprogram with browser tools');
+});
+
 test('verify-app disambiguates long route collisions and stops feature table scan before subsequent headings', async () => {
   const { readdir } = await import('node:fs/promises');
   const generateScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-verify-app', 'scripts', 'generate.mjs');

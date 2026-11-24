@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -6,9 +7,17 @@ import path from 'node:path';
 const rawArgs = process.argv.slice(2);
 let file = 'feature-map.json';
 let explicitRoot = '';
+let changedFrom = '';
 for (let i = 0; i < rawArgs.length; i += 1) {
   if (rawArgs[i] === '--root' && rawArgs[i + 1]) {
     explicitRoot = rawArgs[i + 1];
+    i += 1;
+  } else if (rawArgs[i] === '--changed-from') {
+    if (!rawArgs[i + 1]) {
+      console.error('--changed-from requires a git ref');
+      process.exit(2);
+    }
+    changedFrom = rawArgs[i + 1];
     i += 1;
   } else if (!rawArgs[i].startsWith('-')) {
     file = rawArgs[i];
@@ -72,6 +81,55 @@ if (typeof spec?.base === 'string' && spec.base) {
     }
   }
 }
+
+if (changedFrom) {
+  const changedOwners = owners.filter((owner) => typeof owner?.pattern === 'string' && owner.pattern && !owner.pattern.startsWith('/') && !owner.pattern.includes('..'));
+  const changedFree = nonRuntime.filter((pattern) => typeof pattern === 'string' && pattern && !pattern.startsWith('/') && !pattern.includes('..'));
+  const ownerMatchers = changedOwners.map((owner) => ({ ...owner, match: glob(owner.pattern) }));
+  const freeMatchers = changedFree.map((pattern) => glob(pattern));
+  const git = (args) => spawnSync('git', ['-C', anchorReal, ...args], { encoding: 'utf8' });
+  const topRes = git(['rev-parse', '--show-toplevel']);
+  if (topRes.status !== 0 || !topRes.stdout.trim()) {
+    console.error(`--changed-from requires a git repository: ${(topRes.stderr || '').trim() || anchorReal}`);
+    process.exit(2);
+  }
+  const repoTop = realpathSync(topRes.stdout.trim());
+  const diffRes = git(['diff', '--name-only', changedFrom]);
+  if (diffRes.status !== 0) {
+    console.error(`git diff --name-only ${changedFrom} failed: ${(diffRes.stderr || '').trim()}`);
+    process.exit(2);
+  }
+  const changed = [...new Set(diffRes.stdout.split('\n').map((line) => line.trim()).filter(Boolean))].sort();
+  const matched = [];
+  const unmapped = [];
+  const nonRuntimeHits = [];
+  for (const rel of changed) {
+    const abs = path.resolve(repoTop, rel);
+    const baseRel = path.relative(base, abs).split(path.sep).join('/');
+    const target = baseRel.startsWith('..') || path.isAbsolute(baseRel) ? rel : baseRel;
+    const hits = ownerMatchers.filter((owner) => owner.match(target));
+    if (hits.length) {
+      for (const hit of hits) matched.push({ path: target, feature: hit.feature, pattern: hit.pattern, verify: hit.verify || '' });
+    } else if (freeMatchers.some((match) => match(target))) {
+      nonRuntimeHits.push(target);
+    } else {
+      unmapped.push(target);
+    }
+  }
+  const ok = unmapped.length === 0;
+  console.log(JSON.stringify({
+    file,
+    ok,
+    ref: changedFrom,
+    changed: changed.length,
+    matched,
+    unmapped,
+    nonRuntime: nonRuntimeHits,
+    ...(ok ? {} : { hint: 'map the unmapped paths in feature-map.json or state the verification basis' }),
+  }, null, 2));
+  process.exit(ok ? 0 : 1);
+}
+
 if (!roots.length) problems.push('roots is empty');
 if (!owners.length) problems.push('owners is empty');
 
