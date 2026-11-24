@@ -31,6 +31,63 @@ export const isHighRiskPath = (filePath) => {
   return HIGH_RISK_PATTERNS.some((re) => re.test(normalized));
 };
 
+export const asciiField = (value) => {
+  const cleaned = String(value ?? '')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/[<>`]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > 160 ? cleaned.slice(0, 160) : cleaned;
+};
+
+const FAIL_CONCLUSIONS = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED']);
+const PASS_CONCLUSIONS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
+const PENDING_STATES = new Set(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PENDING', 'EXPECTED']);
+
+export const rollupVerdict = (entry) => {
+  const conclusion = String(entry?.conclusion || '').toUpperCase();
+  const status = String(entry?.status || '').toUpperCase();
+  const state = String(entry?.state || '').toUpperCase();
+  if (FAIL_CONCLUSIONS.has(conclusion) || state === 'ERROR' || state === 'FAILURE') return 'fail';
+  if (PASS_CONCLUSIONS.has(conclusion) || state === 'SUCCESS') return 'pass';
+  if (!conclusion && (PENDING_STATES.has(status) || PENDING_STATES.has(state))) return 'pending';
+  if (!conclusion) return 'pending';
+  return 'fail';
+};
+
+export function evaluatePrCi({ dirty = false, localHead = '', headRefOid = '', isDraft = false, rollup = [], ghError = '' } = {}) {
+  if (dirty) {
+    return { ok: false, status: 'dirty', reasons: [asciiField('working tree not clean; commit or stash before collecting merge evidence')] };
+  }
+  if (ghError) {
+    return { ok: false, status: 'error', reasons: [asciiField(`gh call failed, not treated as pass: ${ghError}`)] };
+  }
+  if (isDraft) {
+    return { ok: false, status: 'draft', reasons: [asciiField('pr is in draft; mark ready for review first')] };
+  }
+  const local = String(localHead || '').toLowerCase();
+  const remote = String(headRefOid || '').toLowerCase();
+  if (!local || !remote) {
+    return { ok: false, status: 'error', reasons: [asciiField('missing local or pr head sha; head identity unverified, not treated as pass')] };
+  }
+  if (local !== remote) {
+    return { ok: false, status: 'mismatch', reasons: [asciiField(`local head ${local}`), asciiField(`pr head ${remote}`)] };
+  }
+  const entries = Array.isArray(rollup) ? rollup : [];
+  if (entries.length === 0) {
+    return { ok: false, status: 'none', reasons: [asciiField('no checks on pr head; no passing record to trust')] };
+  }
+  const failedNames = entries.filter((entry) => rollupVerdict(entry) === 'fail').map((entry) => String(entry?.name || 'unnamed check'));
+  if (failedNames.length > 0) {
+    return { ok: false, status: 'fail', reasons: [asciiField(`failed checks: ${failedNames.join(', ')}`)] };
+  }
+  const hasPending = entries.some((entry) => rollupVerdict(entry) === 'pending');
+  if (hasPending) {
+    return { ok: false, status: 'pending', reasons: [asciiField('ci still queued or running; do not merge yet')] };
+  }
+  return { ok: true, status: 'pass', reasons: [] };
+}
+
 export function classifyMergeLane({
   files = [],
   changedLines = 0,
@@ -177,13 +234,18 @@ const main = () => {
   };
 
   if (args.includes('--help') || args.includes('-h')) {
-    console.error('Usage: node merge-lane.mjs [--root DIR] [--base REF] [--staged]');
+    console.error('Usage: node merge-lane.mjs [--root DIR] [--base REF] [--staged] [--pr N]');
     process.exit(2);
   }
 
   const root = path.resolve(option('--root', process.cwd()));
   const explicitBase = option('--base', '');
   const staged = args.includes('--staged');
+  const prNumber = option('--pr', '');
+  if (prNumber && !/^\d+$/.test(prNumber)) {
+    console.error(`--pr expects a numeric PR number, got: ${prNumber}`);
+    process.exit(2);
+  }
   const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: root, encoding: 'utf8' });
   if (top.status !== 0 || !top.stdout.trim()) {
     console.error(`not a git repository: ${root}`);
@@ -284,6 +346,43 @@ const main = () => {
     base,
     staged,
   };
+
+  if (prNumber) {
+    const statusRes = git(['status', '--porcelain']);
+    const dirty = statusRes.status === 0 && statusRes.stdout.trim().length > 0;
+    const headRes = git(['rev-parse', 'HEAD']);
+    const localHead = headRes.status === 0 ? headRes.stdout.trim() : '';
+    let ghError = '';
+    let prData = null;
+    const ghRes = spawnSync('gh', ['pr', 'view', prNumber, '--json', 'headRefOid,isDraft,statusCheckRollup'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      timeout: 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    if (ghRes.error || ghRes.status !== 0) {
+      ghError = asciiField((ghRes.stderr || ghRes.error?.message || `gh exited with ${ghRes.status}`).trim());
+    } else {
+      try {
+        prData = JSON.parse(ghRes.stdout);
+      } catch {
+        ghError = asciiField('gh pr view returned invalid JSON');
+      }
+    }
+    const ci = evaluatePrCi({
+      dirty,
+      localHead,
+      headRefOid: typeof prData?.headRefOid === 'string' ? prData.headRefOid : '',
+      isDraft: prData?.isDraft === true,
+      rollup: Array.isArray(prData?.statusCheckRollup) ? prData.statusCheckRollup : [],
+      ghError,
+    });
+    result.ci = ci;
+    result.ok = ci.ok;
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(ci.ok ? 0 : 1);
+  }
+
   console.log(JSON.stringify(result, null, 2));
 };
 

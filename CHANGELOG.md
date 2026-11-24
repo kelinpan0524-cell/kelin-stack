@@ -1,5 +1,13 @@
 # Changelog
 
+# 0.25.0（2026-11-25）
+
+验证闭环补缺（第二批，分支 `feat/verify-loop-hardening`）：
+
+- **验证闭环四缺口（第一批，提交 914eb98）**：补齐 verify 实例新鲜度校验（过期实例不再当有效证据）、改动路径消费（verify 结果按本次改动路径分类执行）、skipReason 显性化（跳过的检查必须带原因，不静默当作通过）与失败回退路径（验证失败时回退到可复核的基线动作），让验证闭环的四类绕过口全部变成机器可拦。
+- **合并门前机器核对远端 CI 与 HEAD（本批，kelin-ship）**：`merge-lane.mjs` 新增 `--pr <N>`（不传时行为与之前完全一致）：依次核对工作区干净（`dirty`）、PR 非 draft（`draft`）、PR head SHA 与本地 HEAD 一致（`mismatch`，输出两个 SHA）、该 head 的检查全绿（`fail` / `pending` / `none`，`gh` 调用失败为 `error` 且不当成通过），核心逻辑抽成可导入纯函数 `evaluatePrCi`，理由字段全部按仓规限为可打印 ASCII 且 ≤160 字符；`kelin-ship/SKILL.md` 把自动合并门第 1 条与证据绑定段的执行方式绑定到 `merge-lane.mjs --pr <N>` 命令输出，`ci.status` 非 `pass` 一律不许合并，`--match-head-commit <SHA>` 锁定要求保留。
+- **值守分类看日志证据、等待有上限（本批，kelin-watch）**：`watch.mjs` 失败分类改为证据优先级「日志 > 名字 > unknown」——对能定位到 Actions run/job 的失败 check 拉取失败日志尾部（≤8000 字符）判类（代码/环境/网络/权限），名字正则降级为无日志时的兜底且每个失败项带 `source`（`log`/`name`/`none`）与 `note`；无日志且名字无信号时给 `unknown` 并提示人看一眼，不许无证据当 code 开修；`total === 0` 结论改 `no-checks`（退出 2）不再报 pass；补齐文档已承诺的 `--interval <秒>` / `--max <次数>` 有限轮询（只在 pending 时继续、到上限带 pending 返回、只打印状态变化），分类与轮询抽成可导入纯函数并新增 `skills/kelin-watch/tests/watch.test.mjs`。
+
 # 0.24.0（2026-11-23）
 
 系统吸收上游 `pstack` / `open-pstack` / `noodle` 防审查钻牛角尖机制，补齐审查契约、噪音分诊与合并门分层（PR #29 / #30 / #31）：
