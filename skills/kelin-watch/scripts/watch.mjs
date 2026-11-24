@@ -6,7 +6,6 @@ import { fileURLToPath } from 'node:url';
 
 export const LOG_MAX_CHARS = 8000;
 const PENDING_STATES = ['QUEUED', 'IN_PROGRESS', 'WAITING', 'PENDING'];
-const FAILING_STATES = ['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED'];
 
 const asciiField = (value) => {
   const cleaned = String(value ?? '')
@@ -68,6 +67,25 @@ export const parseJobRef = (link) => {
   return match ? { runId: match[1], jobId: match[2] } : null;
 };
 
+// gh pr checks 的 bucket 是权威判定；state 与 bucket 矛盾、bucket 缺失或无法识别都归 unknown 交人看
+const BUCKET_VERDICTS = { fail: 'fail', cancel: 'fail', pending: 'pending', pass: 'pass', skipping: 'neutral' };
+const STATE_FAMILIES = {
+  pass: ['SUCCESS'],
+  fail: ['FAILURE', 'ERROR', 'TIMED_OUT', 'ACTION_REQUIRED'],
+  cancel: ['CANCELLED'],
+  pending: ['PENDING', 'QUEUED', 'IN_PROGRESS', 'WAITING', 'EXPECTED'],
+  skipping: ['SKIPPED', 'NEUTRAL'],
+};
+
+export const rowVerdict = (check) => {
+  const bucket = String(check?.bucket || '').toLowerCase();
+  const state = String(check?.state || '').toUpperCase();
+  const verdict = BUCKET_VERDICTS[bucket];
+  if (!verdict) return 'unknown';
+  if (state && !STATE_FAMILIES[bucket].includes(state)) return 'unknown';
+  return verdict;
+};
+
 export const tailLog = (text, max = LOG_MAX_CHARS) => {
   const full = String(text || '');
   return full.length > max ? full.slice(-max) : full;
@@ -75,15 +93,17 @@ export const tailLog = (text, max = LOG_MAX_CHARS) => {
 
 export const buildResult = ({ pr, rows = [] }) => {
   const failing = rows.filter((row) => row.class);
-  const pending = rows.filter((row) => PENDING_STATES.includes(row.state));
+  const pending = rows.filter((row) => (row.verdict ? row.verdict === 'pending' : PENDING_STATES.includes(row.state)));
+  const unknown = rows.filter((row) => row.verdict === 'unknown');
   const total = rows.length;
-  const conclusion = !total ? 'no-checks' : failing.length ? 'fail' : pending.length ? 'pending' : 'pass';
+  const conclusion = !total ? 'no-checks' : unknown.length ? 'unknown' : failing.length ? 'fail' : pending.length ? 'pending' : 'pass';
   return {
     pr,
     total,
-    passing: total - failing.length - pending.length,
+    passing: total - failing.length - pending.length - unknown.length,
     pending: pending.length,
     failing: failing.length,
+    unknown: unknown.length,
     failures: failing,
     conclusion,
   };
@@ -117,11 +137,24 @@ const main = async () => {
     process.exit(2);
   }
 
-  const gh = (ghArgs) => {
+  const ghOut = (ghArgs) => {
     try {
-      return JSON.parse(execFileSync('gh', ghArgs, { encoding: 'utf8' }));
+      return { ok: true, stdout: execFileSync('gh', ghArgs, { encoding: 'utf8' }) };
     } catch (error) {
-      console.error(`gh ${ghArgs.join(' ')} failed: ${(error.stderr || error.message || '').toString().trim()}`);
+      return { ok: false, stderr: (error.stderr || error.message || '').toString() };
+    }
+  };
+
+  const gh = (ghArgs) => {
+    const res = ghOut(ghArgs);
+    if (!res.ok) {
+      console.error(`gh ${ghArgs.join(' ')} failed: ${res.stderr.trim()}`);
+      process.exit(2);
+    }
+    try {
+      return JSON.parse(res.stdout);
+    } catch {
+      console.error(`gh ${ghArgs.join(' ')} returned invalid JSON`);
       process.exit(2);
     }
   };
@@ -144,11 +177,43 @@ const main = async () => {
   const maxAttempts = Number(option('--max', '1'));
 
   const fetchOnce = () => {
-    const checks = gh(['pr', 'checks', String(pr), '--json', 'name,state,link,bucket']);
+    const checksRes = ghOut(['pr', 'checks', String(pr), '--json', 'name,state,link,bucket']);
+    if (!checksRes.ok) {
+      const stderr = checksRes.stderr.trim();
+      if (/no checks reported on the '.+' branch/.test(stderr)) {
+        return buildResult({ pr, rows: [] });
+      }
+      console.error(`gh pr checks ${pr} failed: ${stderr || 'unknown error'}`);
+      process.exit(2);
+    }
+    let checks;
+    try {
+      checks = JSON.parse(checksRes.stdout);
+    } catch {
+      console.error('gh pr checks returned invalid JSON');
+      process.exit(2);
+    }
+    if (!Array.isArray(checks)) {
+      console.error('gh pr checks returned a non-array payload');
+      process.exit(2);
+    }
     let logTaken = false;
     const rows = checks.map((check) => {
-      if (!FAILING_STATES.includes(check.state)) {
-        return { name: check.name, state: check.state, bucket: check.bucket || '', link: check.link || '', class: '', source: '', note: '' };
+      const verdict = rowVerdict(check);
+      if (verdict === 'pass' || verdict === 'neutral' || verdict === 'pending') {
+        return { name: check.name, state: check.state, bucket: check.bucket || '', link: check.link || '', class: '', source: '', note: '', verdict };
+      }
+      if (verdict === 'unknown') {
+        return {
+          name: check.name,
+          state: check.state,
+          bucket: check.bucket || '',
+          link: check.link || '',
+          class: '',
+          source: 'none',
+          note: asciiField('bucket missing, unrecognized, or contradicts state; needs human review'),
+          verdict,
+        };
       }
       // 只对第一个失败项取日志：值守按第一个失败找根因，其余项不做日志调用
       let log = '';
@@ -159,8 +224,8 @@ const main = async () => {
           logTaken = true;
         }
       }
-      const verdict = classifyFailure({ name: check.name, state: check.state, log });
-      return { name: check.name, state: check.state, bucket: check.bucket || '', link: check.link || '', ...verdict, class: verdict.category };
+      const classified = classifyFailure({ name: check.name, state: check.state, log });
+      return { name: check.name, state: check.state, bucket: check.bucket || '', link: check.link || '', ...classified, class: classified.category, verdict };
     });
     return buildResult({ pr, rows });
   };

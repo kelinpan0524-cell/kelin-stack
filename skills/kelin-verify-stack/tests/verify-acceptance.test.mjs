@@ -81,6 +81,31 @@ test('--json emits pure parseable JSON regardless of flag order', async () => {
   }
 });
 
+test('check.feature passes through to rows when valid and fails validation before running when malformed (R6)', async () => {
+  const { dir, file } = await makeSpec({
+    checks: [{ id: 'unit', cmd: 'node -e "process.exit(0)"', feature: 'product' }],
+  });
+  const good = run([file, '--json'], dir);
+  assert.equal(good.status, 0, good.stderr);
+  const payload = JSON.parse(good.stdout);
+  assert.equal(payload.rows[0].feature, 'product', 'valid feature must round-trip into the result row');
+
+  const badFeatures = ['', '   ', 123, null, 'x'.repeat(65), 'has`tick', 'has<angle>', 'has\x07bell'];
+  for (const [index, feature] of badFeatures.entries()) {
+    const bad = await makeSpec({
+      checks: [{ id: 'touch', cmd: 'node -e "process.exit(0)"', feature }],
+    });
+    const result = run([bad.file, '--json'], bad.dir);
+    assert.equal(result.status, 2, `bad feature case ${index} (${JSON.stringify(feature)}) should exit 2, got ${result.status}`);
+    assert.match(result.stderr, /feature/);
+  }
+
+  const absent = await makeSpec({ checks: [{ id: 'plain', cmd: 'node -e "process.exit(0)"' }] });
+  const okRun = run([absent.file, '--json'], absent.dir);
+  assert.equal(okRun.status, 0, 'omitting feature must stay accepted');
+  assert.equal(JSON.parse(okRun.stdout).rows[0].feature, undefined);
+});
+
 test('spec validation runs before any check executes (no partial side effects)', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-preflight-'));
   const sentinel = path.join(dir, 'should-not-exist');

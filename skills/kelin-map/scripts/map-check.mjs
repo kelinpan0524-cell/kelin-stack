@@ -8,6 +8,7 @@ const rawArgs = process.argv.slice(2);
 let file = 'feature-map.json';
 let explicitRoot = '';
 let changedFrom = '';
+let verifySpec = '.kelin/verify.json';
 for (let i = 0; i < rawArgs.length; i += 1) {
   if (rawArgs[i] === '--root' && rawArgs[i + 1]) {
     explicitRoot = rawArgs[i + 1];
@@ -18,6 +19,13 @@ for (let i = 0; i < rawArgs.length; i += 1) {
       process.exit(2);
     }
     changedFrom = rawArgs[i + 1];
+    i += 1;
+  } else if (rawArgs[i] === '--verify') {
+    if (!rawArgs[i + 1] || rawArgs[i + 1].startsWith('-')) {
+      console.error('--verify requires a verify.json path');
+      process.exit(2);
+    }
+    verifySpec = rawArgs[i + 1];
     i += 1;
   } else if (!rawArgs[i].startsWith('-')) {
     file = rawArgs[i];
@@ -94,12 +102,18 @@ if (changedFrom) {
     process.exit(2);
   }
   const repoTop = realpathSync(topRes.stdout.trim());
-  const diffRes = git(['diff', '--name-only', changedFrom]);
+  const revRes = git(['rev-parse', '--verify', `${changedFrom}^{commit}`]);
+  if (revRes.status !== 0) {
+    console.error(`invalid git ref: ${changedFrom} (did you pass a file path where a git ref was expected?): ${(revRes.stderr || '').trim()}`);
+    process.exit(2);
+  }
+  const baseSha = revRes.stdout.trim();
+  const diffRes = git(['diff', '--name-only', '--no-renames', '-z', baseSha, '--']);
   if (diffRes.status !== 0) {
     console.error(`git diff --name-only ${changedFrom} failed: ${(diffRes.stderr || '').trim()}`);
     process.exit(2);
   }
-  const changed = [...new Set(diffRes.stdout.split('\n').map((line) => line.trim()).filter(Boolean))].sort();
+  const changed = [...new Set(diffRes.stdout.split('\0').filter(Boolean))].sort();
   const matched = [];
   const unmapped = [];
   const nonRuntimeHits = [];
@@ -117,17 +131,42 @@ if (changedFrom) {
     }
   }
   const ok = unmapped.length === 0;
+  const verifyPath = path.resolve(anchor, verifySpec);
+  let verifyChecked = false;
+  const missing = [];
+  if (existsSync(verifyPath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(verifyPath, 'utf8'));
+    } catch (error) {
+      console.error(`${verifyPath}: ${error.message}`);
+      process.exit(2);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.checks)) {
+      console.error(`${verifyPath}: checks must be an array`);
+      process.exit(2);
+    }
+    const declared = new Set(parsed.checks.map((check) => (typeof check?.feature === 'string' && check.feature.trim()) || '').filter(Boolean));
+    for (const feature of [...new Set(matched.map((entry) => entry.feature).filter(Boolean))].sort()) {
+      if (!declared.has(feature)) missing.push(feature);
+    }
+    verifyChecked = true;
+  }
+  const pass = ok && missing.length === 0;
   console.log(JSON.stringify({
     file,
-    ok,
+    ok: pass,
     ref: changedFrom,
     changed: changed.length,
     matched,
     unmapped,
     nonRuntime: nonRuntimeHits,
-    ...(ok ? {} : { hint: 'map the unmapped paths in feature-map.json or state the verification basis' }),
+    missing,
+    verifyChecked,
+    verifyFile: verifyPath,
+    ...(pass ? {} : { hint: unmapped.length ? 'map the unmapped paths in feature-map.json or state the verification basis' : 'add the missing feature to verify.json checks or declare skipReason per routing rules' }),
   }, null, 2));
-  process.exit(ok ? 0 : 1);
+  process.exit(pass ? 0 : 1);
 }
 
 if (!roots.length) problems.push('roots is empty');

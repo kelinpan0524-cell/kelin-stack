@@ -142,7 +142,18 @@ function validateSpec(spec) {
       }
     }
 
-    return { id: check.id, cmd: check.cmd, cwd: check.cwd, timeoutMs, skipped: check.skipped === true, skipReason };
+    let feature;
+    if (check.feature !== undefined) {
+      const value = check.feature;
+      const valid = typeof value === 'string' && value.trim() && value.trim().length <= 64
+        && /^[\x20-\x7E]+$/.test(value) && !/[`<>]/.test(value);
+      if (!valid) {
+        throw new Error(`check "${check.id}" feature must be a printable ASCII string, 1-64 chars, no backticks or angle brackets`);
+      }
+      feature = value.trim();
+    }
+
+    return { id: check.id, cmd: check.cmd, cwd: check.cwd, timeoutMs, skipped: check.skipped === true, skipReason, feature };
   });
 
   return {
@@ -257,6 +268,7 @@ function runCheck(check, checkCwd, state) {
       id: check.id,
       cmd: check.cmd,
       cwd: checkCwd,
+      feature: check.feature,
       exit: null,
       timedOut: false,
       skipped: true,
@@ -293,6 +305,7 @@ function runCheck(check, checkCwd, state) {
         id: check.id,
         cmd: check.cmd,
         cwd,
+        feature: check.feature,
         exit: -1,
         timedOut: false,
         skipped: false,
@@ -317,6 +330,7 @@ function runCheck(check, checkCwd, state) {
         id: check.id,
         cmd: check.cmd,
         cwd,
+        feature: check.feature,
         exit: exitCode ?? -1,
         timedOut,
         skipped: false,

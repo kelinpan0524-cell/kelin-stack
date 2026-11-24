@@ -77,7 +77,7 @@ test('classifyMergeLane separates fast and strict lanes by risk path, volume, bi
 });
 
 test('evaluatePrCi rejects dirty tree, draft pr, and head sha mismatch before reading the rollup', () => {
-  const dirty = evaluatePrCi({ dirty: true, localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40) });
+  const dirty = evaluatePrCi({ dirty: true, localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40), isDraft: false });
   assert.equal(dirty.ok, false);
   assert.equal(dirty.status, 'dirty');
 
@@ -85,7 +85,7 @@ test('evaluatePrCi rejects dirty tree, draft pr, and head sha mismatch before re
   assert.equal(draft.ok, false);
   assert.equal(draft.status, 'draft');
 
-  const mismatch = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'b'.repeat(40), rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+  const mismatch = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'b'.repeat(40), isDraft: false, rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
   assert.equal(mismatch.ok, false);
   assert.equal(mismatch.status, 'mismatch');
   assert.ok(mismatch.reasons.join(' ').includes('a'.repeat(40)));
@@ -96,16 +96,79 @@ test('evaluatePrCi rejects dirty tree, draft pr, and head sha mismatch before re
   assert.equal(ghError.status, 'error');
   assert.ok(ghError.reasons[0].length > 0);
 
-  const missingRemoteSha = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: '', rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+  const missingRemoteSha = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: '', isDraft: false, rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
   assert.equal(missingRemoteSha.ok, false);
   assert.equal(missingRemoteSha.status, 'error');
-  const missingLocalSha = evaluatePrCi({ localHead: '', headRefOid: 'b'.repeat(40), rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+  const missingLocalSha = evaluatePrCi({ localHead: '', headRefOid: 'b'.repeat(40), isDraft: false, rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
   assert.equal(missingLocalSha.ok, false);
   assert.equal(missingLocalSha.status, 'error');
 });
 
+test('evaluatePrCi fails closed when the gh payload omits isDraft (incomplete evidence)', () => {
+  const missing = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40), isDraft: undefined, rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+  assert.equal(missing.ok, false);
+  assert.equal(missing.status, 'error');
+  assert.ok(missing.reasons.join(' ').includes('isDraft'));
+
+  const cliShaped = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40), isDraft: null, rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+  assert.equal(cliShaped.ok, false);
+  assert.equal(cliShaped.status, 'error');
+
+  const stringDraft = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40), isDraft: 'false', rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] });
+  assert.equal(stringDraft.ok, false);
+  assert.equal(stringDraft.status, 'error');
+});
+
+test('evaluatePrCi judges rollup entries by their GitHub type and requires at least one explicit success', () => {
+  const sha = 'a'.repeat(40);
+  const base = { localHead: sha, headRefOid: sha, isDraft: false };
+
+  // Only skipped/neutral entries: no explicitly successful check, not a pass.
+  const onlySkipped = evaluatePrCi({ ...base, rollup: [
+    { status: 'COMPLETED', conclusion: 'SKIPPED', name: 'optional-a' },
+    { status: 'COMPLETED', conclusion: 'NEUTRAL', name: 'optional-b' },
+  ] });
+  assert.equal(onlySkipped.ok, false);
+  assert.equal(onlySkipped.status, 'none');
+  assert.ok(onlySkipped.reasons.join(' ').toLowerCase().includes('success'));
+
+  // CheckRun missing status: conclusion alone is not recognizable evidence.
+  const noStatus = evaluatePrCi({ ...base, rollup: [{ conclusion: 'SUCCESS', name: 'ci' }] });
+  assert.equal(noStatus.ok, false);
+  assert.equal(noStatus.status, 'unknown');
+
+  // Unrecognized shape (no status, no state): unknown, never a pass.
+  const alien = evaluatePrCi({ ...base, rollup: [{ name: 'mystery' }] });
+  assert.equal(alien.ok, false);
+  assert.equal(alien.status, 'unknown');
+
+  // StatusContext success alone is a valid explicit success.
+  const contextOnly = evaluatePrCi({ ...base, rollup: [{ state: 'SUCCESS', context: 'ci/travis' }] });
+  assert.equal(contextOnly.ok, true);
+  assert.equal(contextOnly.status, 'pass');
+
+  // Mixed: one explicit success tolerates the rest being skipped.
+  const mixed = evaluatePrCi({ ...base, rollup: [
+    { status: 'COMPLETED', conclusion: 'SUCCESS', name: 'unit' },
+    { status: 'COMPLETED', conclusion: 'SKIPPED', name: 'optional' },
+  ] });
+  assert.equal(mixed.ok, true);
+  assert.equal(mixed.status, 'pass');
+
+  // CheckRun failure stays a failure; context failure too.
+  const contextFail = evaluatePrCi({ ...base, rollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }, { state: 'ERROR' }] });
+  assert.equal(contextFail.ok, false);
+  assert.equal(contextFail.status, 'fail');
+
+  // CheckRun without a completed status is still pending, not a pass.
+  const notCompleted = evaluatePrCi({ ...base, rollup: [{ status: 'IN_PROGRESS', conclusion: 'SUCCESS' }] });
+  assert.equal(notCompleted.ok, false);
+  assert.equal(notCompleted.status, 'pending');
+});
+
 test('evaluatePrCi maps the statusCheckRollup to fail, pending, none, and pass', () => {
-  const pass = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40), rollup: [
+  const sha = 'a'.repeat(40);
+  const pass = evaluatePrCi({ localHead: sha, headRefOid: sha, isDraft: false, rollup: [
     { status: 'COMPLETED', conclusion: 'SUCCESS' },
     { status: 'COMPLETED', conclusion: 'SKIPPED' },
     { state: 'SUCCESS' },
@@ -114,7 +177,7 @@ test('evaluatePrCi maps the statusCheckRollup to fail, pending, none, and pass',
   assert.equal(pass.status, 'pass');
 
   for (const conclusion of ['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED']) {
-    const failed = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40), rollup: [
+    const failed = evaluatePrCi({ localHead: sha, headRefOid: sha, isDraft: false, rollup: [
       { status: 'COMPLETED', conclusion: 'SUCCESS', name: 'unit' },
       { status: 'COMPLETED', conclusion, name: 'broken' },
     ] });
@@ -123,7 +186,7 @@ test('evaluatePrCi maps the statusCheckRollup to fail, pending, none, and pass',
     assert.ok(failed.reasons.join(' ').includes('broken'), conclusion);
   }
 
-  const running = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40), rollup: [
+  const running = evaluatePrCi({ localHead: sha, headRefOid: sha, isDraft: false, rollup: [
     { status: 'COMPLETED', conclusion: 'SUCCESS' },
     { status: 'IN_PROGRESS', conclusion: '' },
     { status: 'QUEUED', conclusion: '' },
@@ -132,11 +195,11 @@ test('evaluatePrCi maps the statusCheckRollup to fail, pending, none, and pass',
   assert.equal(running.ok, false);
   assert.equal(running.status, 'pending');
 
-  const emptyConclusion = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40), rollup: [{ status: 'WAITING' }] });
+  const emptyConclusion = evaluatePrCi({ localHead: sha, headRefOid: sha, isDraft: false, rollup: [{ status: 'WAITING' }] });
   assert.equal(emptyConclusion.ok, false);
   assert.equal(emptyConclusion.status, 'pending');
 
-  const none = evaluatePrCi({ localHead: 'a'.repeat(40), headRefOid: 'a'.repeat(40), rollup: [] });
+  const none = evaluatePrCi({ localHead: sha, headRefOid: sha, isDraft: false, rollup: [] });
   assert.equal(none.ok, false);
   assert.equal(none.status, 'none');
   assert.ok(none.reasons.join(' ').toLowerCase().includes('no'));
@@ -195,6 +258,67 @@ test('merge-lane CLI --pr adds a ci section and fails closed when the remote hea
     assert.equal(dirtyRes.status, 1);
     assert.equal(dirtyJson.ok, false);
     assert.equal(dirtyJson.ci.status, 'dirty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+test('merge-lane CLI --pr treats workspace query failures as errors and overrides poisoned status.showUntrackedFiles config', () => {
+  const dir = initRepo();
+  const bin = mkdtempSync(path.join(tmpdir(), 'kelin-fake-gh-r1-'));
+  try {
+    const fake = path.join(bin, 'gh');
+    writeFileSync(path.join(dir, 'src', 'app.mjs'), 'export const v = 3;\n');
+    execFileSync('git', ['-C', dir, 'add', '-A']);
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'local edit']);
+    const head = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    writeFileSync(fake, '#!/bin/sh\nif [ "$1" = "pr" ] && [ "$2" = "view" ]; then\ncat <<\'JSON\'\n{"headRefOid":"' + head + '","isDraft":false,"statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"}]}\nJSON\nexit 0\nfi\nexit 1\n');
+    execFileSync('chmod', ['755', fake]);
+    const envWith = (value) => ({
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'status.showUntrackedFiles',
+      GIT_CONFIG_VALUE_0: value,
+    });
+
+    // Poisoned invalid config makes git status exit 128; the gate must fail closed, not read the tree as clean.
+    const badRes = spawnSync(process.execPath, [script, '--root', dir, '--base', 'main', '--pr', '7'], { encoding: 'utf8', env: envWith('invalid') });
+    const badJson = JSON.parse(badRes.stdout);
+    assert.equal(badRes.status, 1, `expected non-zero exit, got ${badRes.status}: ${badRes.stdout} ${badRes.stderr}`);
+    assert.equal(badJson.ok, false);
+    assert.equal(badJson.ci.status, 'error');
+    assert.ok(badJson.ci.reasons.join(' ').includes('git status'), badJson.ci.reasons.join(' '));
+
+    // Config value "no" would hide untracked files from a config-respecting query; the explicit flag must reveal them.
+    writeFileSync(path.join(dir, 'stray.txt'), 'untracked\n');
+    const noRes = spawnSync(process.execPath, [script, '--root', dir, '--base', 'main', '--pr', '7'], { encoding: 'utf8', env: envWith('no') });
+    const noJson = JSON.parse(noRes.stdout);
+    assert.equal(noRes.status, 1);
+    assert.equal(noJson.ok, false);
+    assert.equal(noJson.ci.status, 'dirty');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+test('merge-lane CLI --pr fails closed when gh payload omits isDraft', () => {
+  const dir = initRepo();
+  const bin = mkdtempSync(path.join(tmpdir(), 'kelin-fake-gh-draft-'));
+  try {
+    const fake = path.join(bin, 'gh');
+    const head = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    writeFileSync(fake, '#!/bin/sh\nif [ "$1" = "pr" ] && [ "$2" = "view" ]; then\ncat <<\'JSON\'\n{"headRefOid":"' + head + '","statusCheckRollup":[{"conclusion":"SUCCESS"}]}\nJSON\nexit 0\nfi\nexit 1\n');
+    execFileSync('chmod', ['755', fake]);
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+    const res = spawnSync(process.execPath, [script, '--root', dir, '--base', 'main', '--pr', '7'], { encoding: 'utf8', env });
+    const json = JSON.parse(res.stdout);
+    assert.equal(res.status, 1);
+    assert.equal(json.ok, false);
+    assert.equal(json.ci.status, 'error');
+    assert.ok(json.ci.reasons.join(' ').includes('isDraft'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(bin, { recursive: true, force: true });

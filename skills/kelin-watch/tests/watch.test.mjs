@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   LOG_MAX_CHARS,
@@ -7,8 +11,28 @@ import {
   classifyFromLog,
   parseJobRef,
   pollChecks,
+  rowVerdict,
   tailLog,
 } from '../scripts/watch.mjs';
+
+const script = path.resolve(import.meta.dirname, '..', 'scripts', 'watch.mjs');
+
+const runWatchCli = (payloadJson, extraArgs = []) => runWatchScript(`if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then\ncat <<'JSON'\n${payloadJson}\nJSON\nexit 0\nfi\nexit 1\n`, extraArgs);
+
+const runWatchScript = (body, extraArgs = []) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kelin-watch-cli-'));
+  const bin = path.join(dir, 'bin');
+  try {
+    execFileSync('mkdir', ['-p', bin]);
+    const fake = path.join(bin, 'gh');
+    writeFileSync(fake, `#!/bin/sh\n${body}\n`);
+    execFileSync('chmod', ['755', fake]);
+    const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+    return spawnSync(process.execPath, [script, '--pr', '7', ...extraArgs], { encoding: 'utf8', env });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
 
 test('classifyFromLog reads log evidence into the four categories', () => {
   assert.equal(classifyFromLog('AssertionError [ERR_ASSERTION]: Expected values to be strictly equal'), 'code');
@@ -84,6 +108,56 @@ test('buildResult reports no-checks instead of pass when there are zero checks',
   assert.equal(mixed.failing, 1);
   assert.equal(mixed.pending, 1);
   assert.equal(mixed.passing, 1);
+});
+
+test('watch reports bucket-fail ERROR checks as fail instead of pass (R3 repro 1)', () => {
+  const res = runWatchCli('[{"name":"ci","state":"ERROR","bucket":"fail","link":""}]');
+  assert.equal(res.status, 1, `expected exit 1, got ${res.status}: ${res.stdout} ${res.stderr}`);
+  const payload = JSON.parse(res.stdout);
+  assert.equal(payload.conclusion, 'fail');
+  assert.equal(payload.failing, 1);
+  assert.ok(payload.failures[0].name === 'ci');
+});
+
+test('watch keeps EXPECTED/bucket-pending checks pending instead of passing early (R3 repro 2)', () => {
+  const res = runWatchCli('[{"name":"ci","state":"EXPECTED","bucket":"pending","link":""}]', ['--max', '2', '--interval', '0']);
+  assert.equal(res.status, 2, `expected exit 2 (still pending), got ${res.status}: ${res.stdout} ${res.stderr}`);
+  const payload = JSON.parse(res.stdout);
+  assert.equal(payload.conclusion, 'pending');
+  assert.equal(payload.pending, 1);
+});
+
+test('rowVerdict judges by bucket and marks contradictions or unrecognized buckets unknown', () => {
+  assert.equal(rowVerdict({ name: 'ci', state: 'ERROR', bucket: 'fail' }), 'fail');
+  assert.equal(rowVerdict({ name: 'ci', state: 'CANCELLED', bucket: 'cancel' }), 'fail');
+  assert.equal(rowVerdict({ name: 'ci', state: 'EXPECTED', bucket: 'pending' }), 'pending');
+  assert.equal(rowVerdict({ name: 'ci', state: 'SUCCESS', bucket: 'pass' }), 'pass');
+  assert.equal(rowVerdict({ name: 'ci', state: 'NEUTRAL', bucket: 'skipping' }), 'neutral');
+
+  assert.equal(rowVerdict({ name: 'ci', state: 'FAILURE', bucket: 'pass' }), 'unknown');
+  assert.equal(rowVerdict({ name: 'ci', state: 'SUCCESS', bucket: 'fail' }), 'unknown');
+  assert.equal(rowVerdict({ name: 'ci', state: 'SUCCESS' }), 'unknown');
+  assert.equal(rowVerdict({ name: 'ci', state: 'ERROR', bucket: 'weird' }), 'unknown');
+
+  const unknownResult = buildResult({ pr: 7, rows: [
+    { name: 'ci', state: 'SUCCESS', bucket: 'weird', class: '', verdict: 'unknown' },
+  ] });
+  assert.equal(unknownResult.conclusion, 'unknown');
+});
+
+test('watch maps the real gh "no checks reported" failure to a no-checks conclusion (R4)', () => {
+  const res = runWatchScript('if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then\necho "no checks reported on the \'feat/work\' branch" >&2\nexit 1\nfi\nexit 1\n');
+  assert.equal(res.status, 2, `expected exit 2, got ${res.status}: ${res.stdout} ${res.stderr}`);
+  const payload = JSON.parse(res.stdout);
+  assert.equal(payload.conclusion, 'no-checks');
+  assert.equal(payload.total, 0);
+});
+
+test('watch keeps other gh failures as generic errors with exit 2 and no fake JSON (R4)', () => {
+  const res = runWatchScript('if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then\necho "gh: auth failed" >&2\nexit 1\nfi\nexit 1\n');
+  assert.equal(res.status, 2);
+  assert.equal(res.stdout, '');
+  assert.match(res.stderr, /gh pr checks/);
 });
 
 test('pollChecks returns pending at the max limit, stops early on pass, and reports only state changes', () => {

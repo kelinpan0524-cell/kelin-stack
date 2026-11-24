@@ -9,7 +9,9 @@
         "location": "skills/kelin-verify-stack/tests/mode.test.mjs",
         "command": "node --test skills/kelin-verify-stack/tests/mode.test.mjs"
       },
-      "enforcedIn": [".github/workflows/ci.yml"],
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
       "proof": {
         "command": "revert the reflect phase, then node --test skills/kelin-verify-stack/tests/mode.test.mjs",
         "expected": "fail-on-old"
@@ -24,7 +26,9 @@
         "location": "skills/kelin-verify-stack/scripts/catalog.mjs",
         "command": "node skills/kelin-verify-stack/scripts/offline-check.mjs"
       },
-      "enforcedIn": [".github/workflows/ci.yml"],
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
       "proof": {
         "command": "revert agents-check, rerun static; kelin-agents:accepts must fail",
         "expected": "fail-on-old"
@@ -39,7 +43,9 @@
         "location": "skills/kelin-guard/scripts/ratchet-check.mjs",
         "command": "node skills/kelin-guard/scripts/ratchet-check.mjs ratchet.json --check"
       },
-      "enforcedIn": [".github/workflows/ci.yml"],
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
       "proof": {
         "command": "add bare console.log in hooks/ or git commit -m \"[ZCode]\" in a SKILL.md, then run ratchet-check.mjs ratchet.json --check",
         "expected": "fail-on-old"
@@ -54,9 +60,113 @@
         "location": "skills/kelin-delegate/tests/delegate.test.mjs",
         "command": "node --test skills/kelin-delegate/tests/delegate.test.mjs"
       },
-      "enforcedIn": [".github/workflows/ci.yml"],
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
       "proof": {
         "command": "revert parseCliArgs flag check or buildCodexArgs --, then node --test skills/kelin-delegate/tests/delegate.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "merge-lane-workspace-query-fail-closed",
+      "bug": "git status exit 128 (poisoned status.showUntrackedFiles) was read as a clean tree, so the merge gate passed with ok:true",
+      "rootCause": "dirty flag defaulted to false on query failure instead of failing closed",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-ship/tests/merge-lane.test.mjs",
+        "command": "node --test skills/kelin-ship/tests/merge-lane.test.mjs"
+      },
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
+      "proof": {
+        "command": "git stash the explicit --untracked-files=normal flag and workspaceError handling in merge-lane.mjs, then node --test skills/kelin-ship/tests/merge-lane.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "merge-lane-strict-rollup-evidence",
+      "bug": "missing isDraft, bare conclusion:SUCCESS without status, and SKIPPED-only rollups were all accepted as CI green",
+      "rootCause": "rollupVerdict treated any SUCCESS-ish token as pass and isDraft defaulted to false",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-ship/tests/merge-lane.test.mjs",
+        "command": "node --test skills/kelin-ship/tests/merge-lane.test.mjs"
+      },
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
+      "proof": {
+        "command": "revert rollupVerdict to the PASS_CONCLUSIONS set version, then node --test skills/kelin-ship/tests/merge-lane.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "watch-bucket-authoritative",
+      "bug": "gh pr checks rows with state ERROR (bucket fail) or EXPECTED (bucket pending) were reported as pass with exit 0",
+      "rootCause": "verdict keyed on FAILING/PENDING state lists that omit ERROR and EXPECTED instead of the authoritative bucket field",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-watch/tests/watch.test.mjs",
+        "command": "node --test skills/kelin-watch/tests/watch.test.mjs"
+      },
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
+      "proof": {
+        "command": "restore the FAILING_STATES branch in watch.mjs fetchOnce, then node --test skills/kelin-watch/tests/watch.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "watch-real-no-checks-response",
+      "bug": "gh 2.96 zero-checks failure (stderr message, nonzero exit) surfaced only as a generic error, never as the documented no-checks conclusion",
+      "rootCause": "every gh failure took the same catch path without inspecting stderr",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-watch/tests/watch.test.mjs",
+        "command": "node --test skills/kelin-watch/tests/watch.test.mjs"
+      },
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
+      "proof": {
+        "command": "remove the no-checks stderr branch in watch.mjs fetchOnce, then node --test skills/kelin-watch/tests/watch.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "map-check-changed-from-ref-resolution",
+      "bug": "--changed-from README.md (a path, not a ref) silently reported ok:true changed:0; renames into nonRuntime dropped the old owner path from matched",
+      "rootCause": "the ref went straight into git diff as a pathspec and rename detection collapsed delete+add into one new path",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-map/tests/map-check.test.mjs",
+        "command": "node --test skills/kelin-map/tests/map-check.test.mjs"
+      },
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
+      "proof": {
+        "command": "revert map-check.mjs to git diff --name-only without rev-parse/--no-renames, then node --test skills/kelin-map/tests/map-check.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "map-check-verify-feature-coverage",
+      "bug": "verify could skip a matched feature entirely and mode.mjs advance still entered review with verdict VERIFIED",
+      "rootCause": "nothing compared map-check matched features against verify.json checks[].feature declarations",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-map/tests/map-check.test.mjs",
+        "command": "node --test skills/kelin-map/tests/map-check.test.mjs"
+      },
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
+      "proof": {
+        "command": "remove the --verify handling from map-check.mjs, then node --test skills/kelin-map/tests/map-check.test.mjs",
         "expected": "fail-on-old"
       }
     }

@@ -41,21 +41,37 @@ export const asciiField = (value) => {
 };
 
 const FAIL_CONCLUSIONS = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED']);
-const PASS_CONCLUSIONS = new Set(['SUCCESS', 'NEUTRAL', 'SKIPPED']);
-const PENDING_STATES = new Set(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PENDING', 'EXPECTED']);
+const SKIP_CONCLUSIONS = new Set(['SKIPPED', 'NEUTRAL']);
+const CHECK_PENDING_STATUSES = new Set(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PENDING']);
+const CONTEXT_FAIL_STATES = new Set(['ERROR', 'FAILURE']);
+const CONTEXT_PENDING_STATES = new Set(['PENDING', 'EXPECTED']);
 
+// 按 GitHub 两种检查类型分别判定：CheckRun（有 status/conclusion）必须 COMPLETED+SUCCESS 才算成功；
+// StatusContext（只有 state）必须 state=SUCCESS。识别不了的形状一律 unknown，不许当通过。
 export const rollupVerdict = (entry) => {
   const conclusion = String(entry?.conclusion || '').toUpperCase();
   const status = String(entry?.status || '').toUpperCase();
   const state = String(entry?.state || '').toUpperCase();
-  if (FAIL_CONCLUSIONS.has(conclusion) || state === 'ERROR' || state === 'FAILURE') return 'fail';
-  if (PASS_CONCLUSIONS.has(conclusion) || state === 'SUCCESS') return 'pass';
-  if (!conclusion && (PENDING_STATES.has(status) || PENDING_STATES.has(state))) return 'pending';
-  if (!conclusion) return 'pending';
-  return 'fail';
+  if (!status && !conclusion) {
+    if (state === 'SUCCESS') return 'success';
+    if (CONTEXT_FAIL_STATES.has(state)) return 'fail';
+    if (CONTEXT_PENDING_STATES.has(state)) return 'pending';
+    return 'unknown';
+  }
+  if (FAIL_CONCLUSIONS.has(conclusion)) return 'fail';
+  if (CHECK_PENDING_STATUSES.has(status)) return 'pending';
+  if (status === 'COMPLETED' && conclusion === 'SUCCESS') return 'success';
+  if (status === 'COMPLETED' && SKIP_CONCLUSIONS.has(conclusion)) return 'skipped';
+  return 'unknown';
 };
 
-export function evaluatePrCi({ dirty = false, localHead = '', headRefOid = '', isDraft = false, rollup = [], ghError = '' } = {}) {
+export function evaluatePrCi({ dirty = false, localHead = '', headRefOid = '', isDraft, rollup = [], ghError = '', workspaceError = '' } = {}) {
+  if (workspaceError) {
+    return { ok: false, status: 'error', reasons: [asciiField(`workspace query failed, not treated as clean: ${workspaceError}`)] };
+  }
+  if (typeof isDraft !== 'boolean') {
+    return { ok: false, status: 'error', reasons: [asciiField('pr isDraft missing or not a boolean in gh payload; incomplete evidence, not treated as pass')] };
+  }
   if (dirty) {
     return { ok: false, status: 'dirty', reasons: [asciiField('working tree not clean; commit or stash before collecting merge evidence')] };
   }
@@ -77,13 +93,19 @@ export function evaluatePrCi({ dirty = false, localHead = '', headRefOid = '', i
   if (entries.length === 0) {
     return { ok: false, status: 'none', reasons: [asciiField('no checks on pr head; no passing record to trust')] };
   }
-  const failedNames = entries.filter((entry) => rollupVerdict(entry) === 'fail').map((entry) => String(entry?.name || 'unnamed check'));
+  const verdicts = entries.map((entry) => rollupVerdict(entry));
+  const failedNames = entries.filter((entry, index) => verdicts[index] === 'fail').map((entry) => String(entry?.name || 'unnamed check'));
   if (failedNames.length > 0) {
     return { ok: false, status: 'fail', reasons: [asciiField(`failed checks: ${failedNames.join(', ')}`)] };
   }
-  const hasPending = entries.some((entry) => rollupVerdict(entry) === 'pending');
-  if (hasPending) {
+  if (verdicts.includes('unknown')) {
+    return { ok: false, status: 'unknown', reasons: [asciiField('rollup has entries without a recognizable CheckRun or StatusContext shape; incomplete evidence, needs human review')] };
+  }
+  if (verdicts.includes('pending')) {
     return { ok: false, status: 'pending', reasons: [asciiField('ci still queued or running; do not merge yet')] };
+  }
+  if (!verdicts.includes('success')) {
+    return { ok: false, status: 'none', reasons: [asciiField('no explicitly successful check in rollup; skipped or neutral alone is not a passing record')] };
   }
   return { ok: true, status: 'pass', reasons: [] };
 }
@@ -348,10 +370,17 @@ const main = () => {
   };
 
   if (prNumber) {
-    const statusRes = git(['status', '--porcelain']);
-    const dirty = statusRes.status === 0 && statusRes.stdout.trim().length > 0;
+    // 命令行 flag 覆盖用户 status.showUntrackedFiles 配置，防配置把未跟踪文件藏成干净
+    const statusRes = git(['status', '--porcelain', '--untracked-files=normal']);
     const headRes = git(['rev-parse', 'HEAD']);
-    const localHead = headRes.status === 0 ? headRes.stdout.trim() : '';
+    let workspaceError = '';
+    if (statusRes.status !== 0) {
+      workspaceError = `git status exited ${statusRes.status}: ${(statusRes.stderr || '').trim()}`;
+    } else if (headRes.status !== 0) {
+      workspaceError = `git rev-parse HEAD exited ${headRes.status}: ${(headRes.stderr || '').trim()}`;
+    }
+    const dirty = !workspaceError && statusRes.stdout.trim().length > 0;
+    const localHead = !workspaceError && headRes.status === 0 ? headRes.stdout.trim() : '';
     let ghError = '';
     let prData = null;
     const ghRes = spawnSync('gh', ['pr', 'view', prNumber, '--json', 'headRefOid,isDraft,statusCheckRollup'], {
@@ -373,9 +402,10 @@ const main = () => {
       dirty,
       localHead,
       headRefOid: typeof prData?.headRefOid === 'string' ? prData.headRefOid : '',
-      isDraft: prData?.isDraft === true,
+      isDraft: typeof prData?.isDraft === 'boolean' ? prData.isDraft : null,
       rollup: Array.isArray(prData?.statusCheckRollup) ? prData.statusCheckRollup : [],
       ghError,
+      workspaceError,
     });
     result.ci = ci;
     result.ok = ci.ok;

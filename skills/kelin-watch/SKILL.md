@@ -15,7 +15,9 @@ description: PR/CI 值守：轮询检查状态，把失败分成代码、环境�
 node "$SKILL_DIR"/scripts/watch.mjs --pr 123
 ```
 
-输出 JSON：每个 check 的名称、状态、链接；失败项分类与证据来源（`source: log | name | none`）；结论（`pass` / `pending` / `fail` / `no-checks`）。没有任何 check 时结论是 `no-checks`（退出 2），不当 pass 处理。
+输出 JSON：每个 check 的名称、状态、链接；失败项分类与证据来源（`source: log | name | none`）；结论（`pass` / `pending` / `fail` / `unknown` / `no-checks`）。没有任何 check 时结论是 `no-checks`（退出 2），不当 pass 处理——gh 2.96+ 对零 checks 返回的 `no checks reported on the '<branch>' branch` 失败响应也会被识别成 `no-checks`，其他 gh 失败仍是通用错误退出 2。
+
+判定以 gh 返回的 `bucket` 为准：`fail`/`cancel` 失败、`pending` 等待、`pass` 通过、`skipping` 中性；`state` 与 `bucket` 矛盾、或 bucket 缺失/无法识别时归 `unknown`（退出 2，需人看一眼，不报 pass）。`state=ERROR`/`EXPECTED` 这类与常见直觉不同的状态由 bucket 正确归类，不会被误报成 pass。
 
 ## 失败分类（证据优先级：日志 > 名字 > unknown）
 

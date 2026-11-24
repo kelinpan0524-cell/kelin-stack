@@ -94,7 +94,7 @@ node "$SKILL_DIR"/scripts/merge-lane.mjs --root . --base origin/main
 node "$SKILL_DIR"/scripts/merge-lane.mjs --root . --base origin/main --pr <N>
 ```
 
-传 `--pr` 时脚本依次机器核对（任何一项不过就 `ok:false`、退出码非 0，`ci` 段写明原因）：工作区干净（否则 `dirty`，先提交或清理）；PR 非 draft（否则 `draft`）；PR head SHA 与本地 HEAD 一致（否则 `mismatch`，输出两个 SHA）；该 head 的检查全绿（有失败为 `fail`、还在跑或排队为 `pending`、一条检查都没有为 `none` 即「没有成功记录」；`gh` 调用失败为 `error`，不当成通过）。**`ci.status` 不是 `pass` 一律不许合并**——六条里的第 1 条（CI 全绿）与证据绑定段（HEAD == 远端 PR head SHA）就以这条命令的输出为证据，不靠模型自称。先同步最新目标分支，再针对**同一远端 PR head SHA** 核对分流结果、CI、gate-scan（以及严车道的审查回执），合并命令用 `gh pr merge --squash --match-head-commit <SHA>` 锁定（按仓库合并策略显式传 `--merge`/`--rebase`/`--squash`），禁止拿本地旧回执拼远端新提交的绿门。
+传 `--pr` 时脚本依次机器核对（任何一项不过就 `ok:false`、退出码非 0，`ci` 段写明原因）：工作区干净（`git status --porcelain --untracked-files=normal` 显式查询，配置改不掉；查询失败为 `error`，不许当干净；否则 `dirty`，先提交或清理）；PR 非 draft（`isDraft` 必须是 gh 返回的显式布尔，缺失即 `error`；否则 `draft`）；PR head SHA 与本地 HEAD 一致（否则 `mismatch`，输出两个 SHA）；该 head 的检查按 GitHub 两种类型分别判定全绿——CheckRun 要 `status=COMPLETED` 且 `conclusion=SUCCESS`，StatusContext 要 `state=SUCCESS`，识别不了的形状归 `unknown`，且必须至少有一条明确成功（只有 SKIPPED/NEUTRAL 归 `none` 即「没有成功记录」；有失败为 `fail`，还在跑或排队为 `pending`；`gh` 调用失败或工作区查询失败为 `error`，一律不当成通过）。**`ci.status` 不是 `pass` 一律不许合并**——六条里的第 1 条（CI 全绿）与证据绑定段（HEAD == 远端 PR head SHA）就以这条命令的输出为证据，不靠模型自称。先同步最新目标分支，再针对**同一远端 PR head SHA** 核对分流结果、CI、gate-scan（以及严车道的审查回执），合并命令用 `gh pr merge --squash --match-head-commit <SHA>` 锁定（按仓库合并策略显式传 `--merge`/`--rebase`/`--squash`），禁止拿本地旧回执拼远端新提交的绿门。
 
 任一不满足：停下，列明缺项，交用户拍板。两条红线**优先于本门通用兜底**：Dependabot 大版本依赖 PR 依旧交人拍板或关闭；"合并即部署"仓库的部署确认不在此门覆盖内。
 

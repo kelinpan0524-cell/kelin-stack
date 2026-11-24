@@ -73,7 +73,15 @@ node "$SKILL_DIR"/scripts/map-check.mjs feature-map.json --changed-from HEAD~1
 - `unmapped`：没有归属的改动路径；
 - `nonRuntime`：命中 nonRuntime 的路径。
 
-有 unmapped 退出 1（先补地图，或写明核验依据再继续）；参数或 git 错误退出 2；只改 nonRuntime 或无改动退出 0。一个路径命中多个 owner 不在这里拦，默认校验模式会报 ambiguous。`kelin-mode` 的 verify 阶段消费这里的输出，verify 对 matched 的覆盖要求以 kelin-mode 路由（`references/routing.md`）为准。
+有 unmapped 退出 1（先补地图，或写明核验依据再继续）；参数或 git 错误退出 2；只改 nonRuntime 或无改动退出 0。一个路径命中多个 owner 不在这里拦，默认校验模式会报 ambiguous。`kelin-mode` 的 verify 阶段消费这里的输出，覆盖要求以 kelin-mode 路由（`references/routing.md`）为准。
+
+### --verify：feature 覆盖比对
+
+ref 会被先解析成 commit SHA（传文件路径等无效 ref 退出 2 并提示），改动路径按 `--no-renames` 取（重命名场景旧路径的 owner 验证项不会消失）。再加 `--verify <path>`（默认 `.kelin/verify.json`，文件不存在则跳过该检查）时，把 `matched` 命中的 feature 集合与 verify.json 里 `checks[].feature`（可选字符串）声明比对，缺项输出 `missing` 数组并退出 1，`verifyChecked` 标明本次是否执行了比对：
+
+```sh
+node "$SKILL_DIR"/scripts/map-check.mjs feature-map.json --changed-from <base> --verify .kelin/verify.json
+```
 
 ## 维护
 
