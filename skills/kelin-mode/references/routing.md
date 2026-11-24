@@ -30,7 +30,7 @@ SessionStart 会把这份路由注入会话。用户不需要点名 skill；按�
 - **何时 plan**：跨文件、跨模块、动数据/权限/对外接口、或同类任务曾返工；产品类先 `kelin-product` 再 `kelin-plan`。单文件可逆小改跳过。
 - **何时 refine**：`verify` 过后 diff > 100 行，或新增了抽象/依赖/死代码；紧急修复/纯配置/<20 行跳过。
 - **verify 三档**：快速（文案/单文件：1 条命令或截图）、标准（`acceptance.json` + 边界矩阵）、严格（钱/权限/迁移/对外接口：标准 + 差分/变异）。
-- **verify 覆盖改动路径**：verify 阶段必须跑 `node "$SKILL_DIR"/../kelin-map/scripts/map-check.mjs feature-map.json --changed-from <base> --verify .kelin/verify.json`，退出非 0（unmapped 或 `missing` 非空）不得 advance；`--verify` 把 `matched` 的 feature 集合与 verify.json `checks[].feature` 声明比对，缺项即拦截。无法覆盖的 feature 在 verify.json 对应检查上写 `skipReason` 申报（此时验收判 INCONCLUSIVE，不算通过）；`matched` 里的 verify 是核验要求原文，不是命令。
+- **verify 覆盖改动路径**：verify 阶段固定跑 `node "$SKILL_DIR"/../kelin-map/scripts/map-check.mjs feature-map.json --changed-from <base> --verify .kelin/verify.json --write`，退出非 0（unmapped、`missing` 非空或显式 `--verify` 文件缺失）不得 advance；`--write` 把命中的 feature 清单落到 `.kelin/changed-features.json`，`mode.mjs advance` 存在该文件时逐项复核 verify.json 的**非 skipped** `checks[].feature` 声明，缺任何一项拒绝推进并报出缺失 feature（没有该文件时行为不变）。无法覆盖的 feature 在 verify.json 对应检查上写 `skipReason` 申报（此时验收判 INCONCLUSIVE，不算通过）；`matched` 里的 verify 是核验要求原文，不是命令。
 - **verify 失败回退**：verify 阶段失败即用 `mode.mjs rewind --reason "<失败断言>"` 回 build，不允许失败后直接进 review；
 - 修完重跑**同一批断言**，不许只跑新增或改过的检查项；
 - 同一根因连续两轮仍失败，才启用 `kelin-loop` 的预算契约，不许无上限重试。

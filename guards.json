@@ -155,8 +155,8 @@
     },
     {
       "id": "map-check-verify-feature-coverage",
-      "bug": "verify could skip a matched feature entirely and mode.mjs advance still entered review with verdict VERIFIED",
-      "rootCause": "nothing compared map-check matched features against verify.json checks[].feature declarations",
+      "bug": "map-check --changed-from crossed no feature coverage evidence: an explicit --verify file that did not exist was silently skipped as verifyChecked:false, and matched features missing from verify.json checks[].feature were not listed",
+      "rootCause": "the verify file was read by existence check only, with no distinction between an explicitly requested spec and the optional default path",
       "guard": {
         "type": "test",
         "location": "skills/kelin-map/tests/map-check.test.mjs",
@@ -166,7 +166,58 @@
         ".github/workflows/ci.yml"
       ],
       "proof": {
-        "command": "remove the --verify handling from map-check.mjs, then node --test skills/kelin-map/tests/map-check.test.mjs",
+        "command": "remove the verifyExplicit --verify handling and --write record from map-check.mjs, then node --test skills/kelin-map/tests/map-check.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "mode-advance-changed-features-coverage",
+      "bug": "mode.mjs advance entered review with verdict VERIFIED even when verify.json omitted a changed feature, while guards.json claimed enforcement no test asserted",
+      "rootCause": "nothing at advance time compared .kelin/changed-features.json features against verify.json non-skipped checks[].feature declarations",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-verify-stack/tests/mode.test.mjs",
+        "command": "node --test skills/kelin-verify-stack/tests/mode.test.mjs"
+      },
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
+      "proof": {
+        "command": "remove the changed-features.json coverage block from the verify phase in mode.mjs inspect, then node --test skills/kelin-verify-stack/tests/mode.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "merge-lane-rollup-typed-and-contradiction",
+      "bug": "a CheckRun-typed rollup entry carrying only state:SUCCESS passed via the StatusContext path, and conclusion SUCCESS with state FAILURE passed by trusting the favorable field",
+      "rootCause": "rollupVerdict keyed on field presence alone, ignoring __typename and never comparing conclusion against state",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-ship/tests/merge-lane.test.mjs",
+        "command": "node --test skills/kelin-ship/tests/merge-lane.test.mjs"
+      },
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
+      "proof": {
+        "command": "revert rollupVerdict to field-presence branching without the __typename split or the conclusion/state conflict check, then node --test skills/kelin-ship/tests/merge-lane.test.mjs",
+        "expected": "fail-on-old"
+      }
+    },
+    {
+      "id": "watch-bucket-own-property-lookup",
+      "bug": "a gh pr checks row with bucket constructor (a prototype-chain key) crashed rowVerdict with a TypeError: exit 1, no JSON, and the exit code wrongly signaled a failed check",
+      "rootCause": "bucket and state lookup tables were read through the prototype chain without own-property checks",
+      "guard": {
+        "type": "test",
+        "location": "skills/kelin-watch/tests/watch.test.mjs",
+        "command": "node --test skills/kelin-watch/tests/watch.test.mjs"
+      },
+      "enforcedIn": [
+        ".github/workflows/ci.yml"
+      ],
+      "proof": {
+        "command": "replace the Object.hasOwn guards in watch.mjs rowVerdict with bare bracket access, then node --test skills/kelin-watch/tests/watch.test.mjs",
         "expected": "fail-on-old"
       }
     }

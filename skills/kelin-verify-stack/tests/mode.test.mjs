@@ -747,3 +747,80 @@ test('mode ship enforces preflight in Git repos across subdirs; route handles En
   assert.equal(nullOwner.status, 1);
   assert.equal(JSON.parse(nullOwner.stdout).ok, false);
 });
+
+test('verify advance refuses when changed-features.json features lack non-skipped verify coverage (final review S3)', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-coverage-'));
+  const acceptWith = async (checks) => {
+    const verifyFile = path.join(root, '.kelin', 'verify.json');
+    await writeFile(verifyFile, JSON.stringify({ checks }));
+    let accOut = '';
+    try {
+      accOut = execFileSync(process.execPath, [runAcceptance, verifyFile, '--json'], { cwd: root, encoding: 'utf8' });
+    } catch (error) {
+      // 含 skipped 检查时验收判 INCONCLUSIVE 退出 1，回执仍要落盘供 advance 诊断
+      accOut = error.stdout || '';
+    }
+    await writeFile(path.join(root, '.kelin', 'acceptance.json'), accOut);
+  };
+
+  await t.test('walk to the verify phase', async () => {
+    assert.equal(run(['init', '--mode', 'feature'], root).code, 0);
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'scope.md', '影响范围：src/a.mjs\n');
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'goal.md', validGoal);
+    await artifact(root, 'plan.md', validStandardPlan);
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'build.md', '实现单元 1 并加单测\n');
+    assert.equal(run(['advance'], root).code, 0);
+    assert.match(run(['status'], root).stdout, /"phase": "verify"/);
+  });
+
+  await t.test('feature absent from verify.json checks blocks advance and names the feature', async () => {
+    await acceptWith([{ id: 'docs', cmd: 'node -e "process.exit(0)"' }]);
+    await artifact(root, 'changed-features.json', JSON.stringify({
+      ref: 'main', sha: 'a'.repeat(40), features: ['product'], missing: [],
+    }));
+    const blocked = run(['advance'], root);
+    assert.equal(blocked.code, 1, 'missing coverage must refuse the advance');
+    assert.match(blocked.stdout, /changed-features\.json/);
+    assert.match(blocked.stdout, /product/);
+  });
+
+  await t.test('coverage only via a skipped check still blocks advance', async () => {
+    await acceptWith([
+      { id: 'docs', cmd: 'node -e "process.exit(0)"' },
+      { id: 'product-skipped', cmd: 'true', feature: 'product', skipped: true, skipReason: 'env unavailable' },
+    ]);
+    const blocked = run(['advance'], root);
+    assert.equal(blocked.code, 1);
+    assert.match(blocked.stdout, /product/);
+  });
+
+  await t.test('full non-skipped coverage allows the advance', async () => {
+    await acceptWith([
+      { id: 'docs', cmd: 'node -e "process.exit(0)"' },
+      { id: 'product-tests', cmd: 'node -e "process.exit(0)"', feature: 'product' },
+    ]);
+    assert.equal(run(['advance'], root).code, 0);
+    assert.match(run(['status'], root).stdout, /"phase": "review"/);
+  });
+
+  await t.test('no changed-features.json keeps the old behavior', async () => {
+    const plain = await mkdtemp(path.join(tmpdir(), 'kelin-mode-nocf-'));
+    assert.equal(run(['init', '--mode', 'feature'], plain).code, 0);
+    assert.equal(run(['advance'], plain).code, 0);
+    await artifact(plain, 'scope.md', '影响范围：src/a.mjs\n');
+    assert.equal(run(['advance'], plain).code, 0);
+    await artifact(plain, 'goal.md', validGoal);
+    await artifact(plain, 'plan.md', validStandardPlan);
+    assert.equal(run(['advance'], plain).code, 0);
+    await artifact(plain, 'build.md', '实现单元 1 并加单测\n');
+    assert.equal(run(['advance'], plain).code, 0);
+    await artifact(plain, 'verify.json', JSON.stringify({ checks: [{ id: 'c1', cmd: 'true' }] }));
+    await artifact(plain, 'acceptance.json', '{"ok": true}\n');
+    assert.equal(run(['advance'], plain).code, 1, 'unbound receipt must stay blocked');
+    await writeValidAcceptance(plain);
+    assert.equal(run(['advance'], plain).code, 0, 'without changed-features.json the old gate alone decides');
+  });
+});

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { classifyMergeLane, evaluatePrCi, isHighRiskPath } from '../scripts/merge-lane.mjs';
+import { classifyMergeLane, evaluatePrCi, isHighRiskPath, rollupVerdict } from '../scripts/merge-lane.mjs';
 
 const script = path.resolve(import.meta.dirname, '..', 'scripts', 'merge-lane.mjs');
 
@@ -164,6 +164,51 @@ test('evaluatePrCi judges rollup entries by their GitHub type and requires at le
   const notCompleted = evaluatePrCi({ ...base, rollup: [{ status: 'IN_PROGRESS', conclusion: 'SUCCESS' }] });
   assert.equal(notCompleted.ok, false);
   assert.equal(notCompleted.status, 'pending');
+});
+
+test('rollupVerdict keys on __typename and fails closed on contradictory evidence (final review S1)', () => {
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }), 'success');
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' }), 'fail');
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: 'SUCCESS' }), 'pending');
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', state: 'SUCCESS' }), 'unknown');
+
+  assert.equal(rollupVerdict({ __typename: 'StatusContext', state: 'SUCCESS' }), 'success');
+  assert.equal(rollupVerdict({ __typename: 'StatusContext', state: 'FAILURE' }), 'fail');
+  assert.equal(rollupVerdict({ __typename: 'StatusContext', state: 'EXPECTED' }), 'pending');
+
+  assert.equal(rollupVerdict({ status: 'COMPLETED', conclusion: 'SUCCESS' }), 'success');
+  assert.equal(rollupVerdict({ state: 'SUCCESS' }), 'success');
+
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS', state: 'FAILURE' }), 'fail');
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE', state: 'SUCCESS' }), 'fail');
+  assert.equal(rollupVerdict({ __typename: 'StatusContext', state: 'SUCCESS', conclusion: 'FAILURE' }), 'fail');
+  assert.equal(rollupVerdict({ __typename: 'FutureType', status: 'COMPLETED', conclusion: 'SUCCESS' }), 'unknown');
+});
+
+test('evaluatePrCi rejects shape-contradictory rollup evidence instead of trusting the favorable field (final review S1)', () => {
+  const sha = 'a'.repeat(40);
+  const base = { localHead: sha, headRefOid: sha, isDraft: false };
+
+  // Counterexample 1: CheckRun-typed entry carrying only state must not pass via the StatusContext path.
+  const typedNoStatus = evaluatePrCi({ ...base, rollup: [{ __typename: 'CheckRun', state: 'SUCCESS', name: 'ci' }] });
+  assert.equal(typedNoStatus.ok, false);
+  assert.equal(typedNoStatus.status, 'unknown');
+
+  // Counterexample 2: conclusion SUCCESS plus state FAILURE is a fail, never a pass.
+  const contradiction = evaluatePrCi({ ...base, rollup: [
+    { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS', state: 'FAILURE', name: 'ci' },
+  ] });
+  assert.equal(contradiction.ok, false);
+  assert.equal(contradiction.status, 'fail');
+  assert.ok(contradiction.reasons.join(' ').includes('ci'));
+
+  // Well-typed successes stay passes.
+  const cleanTyped = evaluatePrCi({ ...base, rollup: [
+    { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS', name: 'ci' },
+    { __typename: 'StatusContext', state: 'SUCCESS', context: 'lint' },
+  ] });
+  assert.equal(cleanTyped.ok, true);
+  assert.equal(cleanTyped.status, 'pass');
 });
 
 test('evaluatePrCi maps the statusCheckRollup to fail, pending, none, and pass', () => {

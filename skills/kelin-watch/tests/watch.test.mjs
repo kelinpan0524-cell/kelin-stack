@@ -145,6 +145,24 @@ test('rowVerdict judges by bucket and marks contradictions or unrecognized bucke
   assert.equal(unknownResult.conclusion, 'unknown');
 });
 
+test('rowVerdict ignores prototype-chain keys and marks unrecognized buckets unknown (final review S2)', () => {
+  assert.equal(rowVerdict({ name: 'ci', state: 'SUCCESS', bucket: 'constructor' }), 'unknown');
+  assert.equal(rowVerdict({ name: 'ci', state: 'SUCCESS', bucket: 'toString' }), 'unknown');
+  assert.equal(rowVerdict({ name: 'ci', state: 'SUCCESS', bucket: '__proto__' }), 'unknown');
+  assert.equal(rowVerdict({ name: 'ci', state: 'SUCCESS', bucket: 'hasOwnProperty' }), 'unknown');
+  assert.equal(rowVerdict({ name: 'ci', state: 'SUCCESS', bucket: 'PASS' }), 'pass');
+  assert.equal(rowVerdict({ name: 'ci', state: 'FAILURE', bucket: 'FAIL' }), 'fail');
+});
+
+test('watch CLI prints JSON with unknown conclusion and exits 2 on an unrecognized bucket (final review S2)', () => {
+  const res = runWatchCli('[{"name":"ci","state":"SUCCESS","bucket":"constructor","link":""}]');
+  assert.equal(res.status, 2, `expected exit 2 for unknown bucket, got ${res.status}: ${res.stdout} ${res.stderr}`);
+  const payload = JSON.parse(res.stdout);
+  assert.equal(payload.conclusion, 'unknown');
+  assert.equal(payload.unknown, 1);
+  assert.equal(payload.failing, 0);
+});
+
 test('watch maps the real gh "no checks reported" failure to a no-checks conclusion (R4)', () => {
   const res = runWatchScript('if [ "$1" = "pr" ] && [ "$2" = "checks" ]; then\necho "no checks reported on the \'feat/work\' branch" >&2\nexit 1\nfi\nexit 1\n');
   assert.equal(res.status, 2, `expected exit 2, got ${res.status}: ${res.stdout} ${res.stderr}`);

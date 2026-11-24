@@ -67,7 +67,8 @@ export const parseJobRef = (link) => {
   return match ? { runId: match[1], jobId: match[2] } : null;
 };
 
-// gh pr checks 的 bucket 是权威判定；state 与 bucket 矛盾、bucket 缺失或无法识别都归 unknown 交人看
+// gh pr checks 的 bucket 是权威判定；state 与 bucket 矛盾、bucket 缺失或无法识别都归 unknown 交人看。
+// 查表只认自有属性：constructor/toString 等原型链键不算 bucket，命中即崩。
 const BUCKET_VERDICTS = { fail: 'fail', cancel: 'fail', pending: 'pending', pass: 'pass', skipping: 'neutral' };
 const STATE_FAMILIES = {
   pass: ['SUCCESS'],
@@ -80,10 +81,9 @@ const STATE_FAMILIES = {
 export const rowVerdict = (check) => {
   const bucket = String(check?.bucket || '').toLowerCase();
   const state = String(check?.state || '').toUpperCase();
-  const verdict = BUCKET_VERDICTS[bucket];
-  if (!verdict) return 'unknown';
+  if (!Object.hasOwn(BUCKET_VERDICTS, bucket) || !Object.hasOwn(STATE_FAMILIES, bucket)) return 'unknown';
   if (state && !STATE_FAMILIES[bucket].includes(state)) return 'unknown';
-  return verdict;
+  return BUCKET_VERDICTS[bucket];
 };
 
 export const tailLog = (text, max = LOG_MAX_CHARS) => {

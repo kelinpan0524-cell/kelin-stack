@@ -77,11 +77,21 @@ node "$SKILL_DIR"/scripts/map-check.mjs feature-map.json --changed-from HEAD~1
 
 ### --verify：feature 覆盖比对
 
-ref 会被先解析成 commit SHA（传文件路径等无效 ref 退出 2 并提示），改动路径按 `--no-renames` 取（重命名场景旧路径的 owner 验证项不会消失）。再加 `--verify <path>`（默认 `.kelin/verify.json`，文件不存在则跳过该检查）时，把 `matched` 命中的 feature 集合与 verify.json 里 `checks[].feature`（可选字符串）声明比对，缺项输出 `missing` 数组并退出 1，`verifyChecked` 标明本次是否执行了比对：
+ref 会被先解析成 commit SHA（传文件路径等无效 ref 退出 2 并提示），改动路径按 `--no-renames` 取（重命名场景旧路径的 owner 验证项不会消失）。再加 `--verify <path>`（默认 `.kelin/verify.json`）时，把 `matched` 命中的 feature 集合与 verify.json 里 `checks[].feature`（可选字符串）声明比对，缺项输出 `missing` 数组并退出 1，`verifyChecked` 标明本次是否执行了比对；**显式传了 `--verify <path>` 而文件不存在退出 2**（点名要核验的凭据缺失不能静默当没有），只有默认路径不存在时才跳过比对继续退出 0：
 
 ```sh
 node "$SKILL_DIR"/scripts/map-check.mjs feature-map.json --changed-from <base> --verify .kelin/verify.json
 ```
+
+### --write：把改动 feature 清单落盘
+
+配 `--changed-from` 使用（单独传退出 2）。无论比对结果如何，把本轮改动记录写到 `.kelin/changed-features.json`：
+
+```json
+{ "ref": "<传入的 ref>", "sha": "<解析出的 commit SHA>", "features": ["命中的 feature"], "missing": ["verify.json 缺的 feature"] }
+```
+
+字段全部是可打印 ASCII、不超过 160 字符。`kelin-mode` 的 verify 推进读这份清单复核 `verify.json` 覆盖（规则见 `kelin-mode/references/routing.md`），缺文件时推进行为不变。
 
 ## 维护
 

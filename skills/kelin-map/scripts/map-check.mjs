@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -9,6 +9,8 @@ let file = 'feature-map.json';
 let explicitRoot = '';
 let changedFrom = '';
 let verifySpec = '.kelin/verify.json';
+let verifyExplicit = false;
+let writeRecord = false;
 for (let i = 0; i < rawArgs.length; i += 1) {
   if (rawArgs[i] === '--root' && rawArgs[i + 1]) {
     explicitRoot = rawArgs[i + 1];
@@ -26,11 +28,27 @@ for (let i = 0; i < rawArgs.length; i += 1) {
       process.exit(2);
     }
     verifySpec = rawArgs[i + 1];
+    verifyExplicit = true;
     i += 1;
+  } else if (rawArgs[i] === '--write') {
+    writeRecord = true;
   } else if (!rawArgs[i].startsWith('-')) {
     file = rawArgs[i];
   }
 }
+if (writeRecord && !changedFrom) {
+  console.error('--write requires --changed-from: there is no change set to record without a base ref');
+  process.exit(2);
+}
+// 落盘字段沿用门禁字段纪律：可打印 ASCII、去反引号尖括号、160 上限
+const asciiClamp = (value) => {
+  const cleaned = String(value ?? '')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/[<>`]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > 160 ? cleaned.slice(0, 160) : cleaned;
+};
 const configDir = path.dirname(path.resolve(file));
 const anchor = explicitRoot
   ? path.resolve(explicitRoot)
@@ -134,6 +152,10 @@ if (changedFrom) {
   const verifyPath = path.resolve(anchor, verifySpec);
   let verifyChecked = false;
   const missing = [];
+  if (verifyExplicit && !existsSync(verifyPath)) {
+    console.error(`--verify file not found: ${verifyPath} (explicit --verify must exist; omit --verify to use the default .kelin/verify.json optionally)`);
+    process.exit(2);
+  }
   if (existsSync(verifyPath)) {
     let parsed;
     try {
@@ -153,6 +175,22 @@ if (changedFrom) {
     verifyChecked = true;
   }
   const pass = ok && missing.length === 0;
+  if (writeRecord) {
+    const recordPath = path.join(anchor, '.kelin', 'changed-features.json');
+    const record = {
+      ref: asciiClamp(changedFrom),
+      sha: asciiClamp(baseSha),
+      features: [...new Set(matched.map((entry) => entry.feature).filter(Boolean))].sort().map(asciiClamp),
+      missing: missing.map(asciiClamp),
+    };
+    try {
+      mkdirSync(path.dirname(recordPath), { recursive: true });
+      writeFileSync(recordPath, `${JSON.stringify(record, null, 2)}\n`);
+    } catch (error) {
+      console.error(`cannot write ${recordPath}: ${error.message}`);
+      process.exit(2);
+    }
+  }
   console.log(JSON.stringify({
     file,
     ok: pass,

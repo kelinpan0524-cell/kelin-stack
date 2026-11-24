@@ -46,22 +46,28 @@ const CHECK_PENDING_STATUSES = new Set(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PEN
 const CONTEXT_FAIL_STATES = new Set(['ERROR', 'FAILURE']);
 const CONTEXT_PENDING_STATES = new Set(['PENDING', 'EXPECTED']);
 
-// 按 GitHub 两种检查类型分别判定：CheckRun（有 status/conclusion）必须 COMPLETED+SUCCESS 才算成功；
-// StatusContext（只有 state）必须 state=SUCCESS。识别不了的形状一律 unknown，不许当通过。
+// 按 GitHub 两种检查类型分别判定：__typename 缺失时按字段推断（有 status/conclusion 按 CheckRun，
+// 仅 state 按 StatusContext）。CheckRun 必须 COMPLETED+SUCCESS 才算成功；conclusion 与 state
+// 一成一败的矛盾形状判 fail，不许取有利的那个；识别不了的 __typename 一律 unknown。
 export const rollupVerdict = (entry) => {
   const conclusion = String(entry?.conclusion || '').toUpperCase();
   const status = String(entry?.status || '').toUpperCase();
   const state = String(entry?.state || '').toUpperCase();
-  if (!status && !conclusion) {
-    if (state === 'SUCCESS') return 'success';
-    if (CONTEXT_FAIL_STATES.has(state)) return 'fail';
-    if (CONTEXT_PENDING_STATES.has(state)) return 'pending';
+  const typename = String(entry?.__typename || '').toUpperCase();
+  if (typename && typename !== 'CHECKRUN' && typename !== 'STATUSCONTEXT') return 'unknown';
+  const conflict = (conclusion === 'SUCCESS' && CONTEXT_FAIL_STATES.has(state))
+    || (state === 'SUCCESS' && FAIL_CONCLUSIONS.has(conclusion));
+  if (conclusion && state && conflict) return 'fail';
+  if (typename === 'CHECKRUN' || (!typename && (status || conclusion))) {
+    if (FAIL_CONCLUSIONS.has(conclusion)) return 'fail';
+    if (CHECK_PENDING_STATUSES.has(status)) return 'pending';
+    if (status === 'COMPLETED' && conclusion === 'SUCCESS') return 'success';
+    if (status === 'COMPLETED' && SKIP_CONCLUSIONS.has(conclusion)) return 'skipped';
     return 'unknown';
   }
-  if (FAIL_CONCLUSIONS.has(conclusion)) return 'fail';
-  if (CHECK_PENDING_STATUSES.has(status)) return 'pending';
-  if (status === 'COMPLETED' && conclusion === 'SUCCESS') return 'success';
-  if (status === 'COMPLETED' && SKIP_CONCLUSIONS.has(conclusion)) return 'skipped';
+  if (state === 'SUCCESS') return 'success';
+  if (CONTEXT_FAIL_STATES.has(state)) return 'fail';
+  if (CONTEXT_PENDING_STATES.has(state)) return 'pending';
   return 'unknown';
 };
 
