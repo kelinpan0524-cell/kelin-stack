@@ -46,29 +46,38 @@ const CHECK_PENDING_STATUSES = new Set(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PEN
 const CONTEXT_FAIL_STATES = new Set(['ERROR', 'FAILURE']);
 const CONTEXT_PENDING_STATES = new Set(['PENDING', 'EXPECTED']);
 
-// 按 GitHub 两种检查类型分别判定：__typename 缺失时按字段推断（有 status/conclusion 按 CheckRun，
-// 仅 state 按 StatusContext）。CheckRun 必须 COMPLETED+SUCCESS 才算成功；conclusion 与 state
-// 一成一败的矛盾形状判 fail，不许取有利的那个；识别不了的 __typename 一律 unknown。
+// status/conclusion 与 state 双通道各自判定后合并：全部指向成功才算成功，任一指向失败/未完成
+// 就按失败/未完成处理，不许取有利的那个。__typename 缺失按字段推断；异类字段单独出现不可信
+// （判 unknown），与本类字段同时出现则一并核算；识别不了的 __typename 一律 unknown。
 export const rollupVerdict = (entry) => {
   const conclusion = String(entry?.conclusion || '').toUpperCase();
   const status = String(entry?.status || '').toUpperCase();
   const state = String(entry?.state || '').toUpperCase();
   const typename = String(entry?.__typename || '').toUpperCase();
   if (typename && typename !== 'CHECKRUN' && typename !== 'STATUSCONTEXT') return 'unknown';
-  const conflict = (conclusion === 'SUCCESS' && CONTEXT_FAIL_STATES.has(state))
-    || (state === 'SUCCESS' && FAIL_CONCLUSIONS.has(conclusion));
-  if (conclusion && state && conflict) return 'fail';
-  if (typename === 'CHECKRUN' || (!typename && (status || conclusion))) {
-    if (FAIL_CONCLUSIONS.has(conclusion)) return 'fail';
-    if (CHECK_PENDING_STATUSES.has(status)) return 'pending';
-    if (status === 'COMPLETED' && conclusion === 'SUCCESS') return 'success';
-    if (status === 'COMPLETED' && SKIP_CONCLUSIONS.has(conclusion)) return 'skipped';
-    return 'unknown';
+  const hasCheckrunFields = Boolean(status || conclusion);
+  const trustCheckrun = hasCheckrunFields && (!typename || typename === 'CHECKRUN' || Boolean(state));
+  const trustState = Boolean(state) && (!typename || typename === 'STATUSCONTEXT' || hasCheckrunFields);
+  const verdicts = [];
+  if (trustCheckrun) {
+    if (FAIL_CONCLUSIONS.has(conclusion)) verdicts.push('fail');
+    else if (CHECK_PENDING_STATUSES.has(status)) verdicts.push('pending');
+    else if (status === 'COMPLETED' && conclusion === 'SUCCESS') verdicts.push('success');
+    else if (status === 'COMPLETED' && SKIP_CONCLUSIONS.has(conclusion)) verdicts.push('skipped');
+    else verdicts.push('unknown');
   }
-  if (state === 'SUCCESS') return 'success';
-  if (CONTEXT_FAIL_STATES.has(state)) return 'fail';
-  if (CONTEXT_PENDING_STATES.has(state)) return 'pending';
-  return 'unknown';
+  if (trustState) {
+    if (state === 'SUCCESS') verdicts.push('success');
+    else if (CONTEXT_FAIL_STATES.has(state)) verdicts.push('fail');
+    else if (CONTEXT_PENDING_STATES.has(state)) verdicts.push('pending');
+    else verdicts.push('unknown');
+  }
+  if (verdicts.length === 0) return 'unknown';
+  if (verdicts.includes('fail')) return 'fail';
+  if (verdicts.includes('unknown')) return 'unknown';
+  if (verdicts.includes('pending')) return 'pending';
+  if (verdicts.includes('success')) return 'success';
+  return 'skipped';
 };
 
 export function evaluatePrCi({ dirty = false, localHead = '', headRefOid = '', isDraft, rollup = [], ghError = '', workspaceError = '' } = {}) {

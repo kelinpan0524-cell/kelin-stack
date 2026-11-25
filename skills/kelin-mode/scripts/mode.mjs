@@ -758,13 +758,17 @@ const inspect = (root, dir, state) => {
         .trim()
         .slice(0, 160);
       let changedRecord = null;
+      let changedParsed = false;
       try {
         changedRecord = JSON.parse(readFileSync(changedFeaturesFile, 'utf8'));
+        changedParsed = true;
       } catch {
         missing.push('changed-features.json (unreadable)');
       }
-      if (changedRecord) {
-        if (!Array.isArray(changedRecord?.features) || changedRecord.features.some((feature) => typeof feature !== 'string' || !feature.trim())) {
+      if (changedParsed && (!changedRecord || typeof changedRecord !== 'object' || Array.isArray(changedRecord))) {
+        missing.push('changed-features.json (corrupt coverage record: rerun map-check --write)');
+      } else if (changedParsed) {
+        if (!Array.isArray(changedRecord?.features) || changedRecord.features.some((feature) => typeof feature !== 'string' || !feature)) {
           missing.push('changed-features.json (features must be an array of non-empty strings)');
         } else {
           let parsedVerify = null;
@@ -774,10 +778,11 @@ const inspect = (root, dir, state) => {
             // verify.json 缺失或损坏已由 checkAcceptance 上报，这里不重复报
           }
           if (parsedVerify && Array.isArray(parsedVerify.checks)) {
+            // 与 map-check --write 的原样落盘口径一致：feature id 逐字节比对，不做 trim 归一化
             const covered = new Set(parsedVerify.checks
-              .filter((check) => check?.skipped !== true && typeof check?.feature === 'string' && check.feature.trim())
-              .map((check) => check.feature.trim()));
-            const uncovered = [...new Set(changedRecord.features.map((feature) => feature.trim()))].filter((feature) => !covered.has(feature));
+              .filter((check) => check?.skipped !== true && typeof check?.feature === 'string' && check.feature)
+              .map((check) => check.feature));
+            const uncovered = [...new Set(changedRecord.features)].filter((feature) => !covered.has(feature));
             if (uncovered.length) {
               missing.push(`changed-features.json (features without non-skipped verify.json coverage: ${asciiClamp(uncovered.join(', '))})`);
             }

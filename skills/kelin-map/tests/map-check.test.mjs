@@ -173,6 +173,48 @@ test('map-check --write records ref, sha, features, and missing coverage to .kel
   }
 });
 
+test('map-check --write emits feature ids byte-for-byte and --verify compares declared ids exactly (review round 3 T2)', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kelin-map-ws-'));
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
+  try {
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'map@example.invalid');
+    git('config', 'user.name', 'map');
+    mkdirSync(path.join(dir, 'src'), { recursive: true });
+    writeFileSync(path.join(dir, 'src', 'pay.mjs'), 'export const v = 1;\n');
+    writeFileSync(path.join(dir, 'feature-map.json'), JSON.stringify({
+      roots: ['src'],
+      owners: [{ pattern: 'src/**', feature: 'pay  api', verify: 'node --test src' }],
+      nonRuntime: [],
+    }));
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+    const baseSha = git('rev-parse', 'HEAD').trim();
+    writeFileSync(path.join(dir, 'src', 'pay.mjs'), 'export const v = 2;\n');
+    git('add', '-A');
+    git('commit', '-qm', 'edit');
+
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({
+      checks: [{ id: 'pay-tests', cmd: 'node --test src', feature: 'pay api' }],
+    }));
+    const single = runMapCheck(dir, ['--changed-from', baseSha, '--verify', 'verify.json', '--write']);
+    assert.equal(single.status, 1, 'a double-space id must not satisfy a single-space declaration');
+    const record = JSON.parse(readFileSync(path.join(dir, '.kelin', 'changed-features.json'), 'utf8'));
+    assert.equal(record.features[0], 'pay  api', '--write must keep the id exactly as declared in the map');
+
+    writeFileSync(path.join(dir, 'verify.json'), JSON.stringify({
+      checks: [{ id: 'pay-tests', cmd: 'node --test src', feature: 'pay  api' }],
+    }));
+    const exact = runMapCheck(dir, ['--changed-from', baseSha, '--verify', 'verify.json', '--write']);
+    assert.equal(exact.status, 0, `the exact declared id must pass: ${exact.stdout} ${exact.stderr}`);
+    const exactRecord = JSON.parse(readFileSync(path.join(dir, '.kelin', 'changed-features.json'), 'utf8'));
+    assert.equal(exactRecord.features[0], 'pay  api');
+    assert.deepEqual(exactRecord.missing, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('map-check --changed-from accepts a real ref and maps changed paths to features (R5)', () => {
   const { dir, git } = initRepo();
   try {

@@ -185,6 +185,22 @@ test('rollupVerdict keys on __typename and fails closed on contradictory evidenc
   assert.equal(rollupVerdict({ __typename: 'FutureType', status: 'COMPLETED', conclusion: 'SUCCESS' }), 'unknown');
 });
 
+test('rollupVerdict never calls a running or contradictory status record a success (review round 3 T3)', () => {
+  assert.equal(rollupVerdict({ __typename: 'StatusContext', status: 'IN_PROGRESS', state: 'SUCCESS' }), 'pending');
+  assert.equal(rollupVerdict({ __typename: 'StatusContext', status: 'QUEUED', state: 'SUCCESS' }), 'pending');
+  assert.equal(rollupVerdict({ status: 'COMPLETED', conclusion: 'SUCCESS', state: 'SUCCESS' }), 'success');
+  assert.equal(rollupVerdict({ status: 'IN_PROGRESS', conclusion: '', state: 'SUCCESS' }), 'pending');
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'PAUSED', conclusion: 'SUCCESS' }), 'unknown');
+});
+
+test('evaluatePrCi refuses a merge gate satisfied only by a running contradictory entry (review round 3 T3)', () => {
+  const sha = 'a'.repeat(40);
+  const base = { localHead: sha, headRefOid: sha, isDraft: false };
+  const gate = evaluatePrCi({ ...base, rollup: [{ __typename: 'StatusContext', status: 'IN_PROGRESS', state: 'SUCCESS', name: 'ci' }] });
+  assert.equal(gate.ok, false);
+  assert.equal(gate.status, 'pending');
+});
+
 test('evaluatePrCi rejects shape-contradictory rollup evidence instead of trusting the favorable field (final review S1)', () => {
   const sha = 'a'.repeat(40);
   const base = { localHead: sha, headRefOid: sha, isDraft: false };

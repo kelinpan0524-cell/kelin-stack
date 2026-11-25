@@ -40,7 +40,7 @@ if (writeRecord && !changedFrom) {
   console.error('--write requires --changed-from: there is no change set to record without a base ref');
   process.exit(2);
 }
-// 落盘字段沿用门禁字段纪律：可打印 ASCII、去反引号尖括号、160 上限
+// ref/sha/missing 沿用门禁字段纪律；features 必须原样落盘——advance 按原文精确比对，归一化会造成覆盖假绿
 const asciiClamp = (value) => {
   const cleaned = String(value ?? '')
     .replace(/[^\x20-\x7E]/g, ' ')
@@ -168,7 +168,7 @@ if (changedFrom) {
       console.error(`${verifyPath}: checks must be an array`);
       process.exit(2);
     }
-    const declared = new Set(parsed.checks.map((check) => (typeof check?.feature === 'string' && check.feature.trim()) || '').filter(Boolean));
+    const declared = new Set(parsed.checks.map((check) => (typeof check?.feature === 'string' && check.feature) || '').filter(Boolean));
     for (const feature of [...new Set(matched.map((entry) => entry.feature).filter(Boolean))].sort()) {
       if (!declared.has(feature)) missing.push(feature);
     }
@@ -180,7 +180,7 @@ if (changedFrom) {
     const record = {
       ref: asciiClamp(changedFrom),
       sha: asciiClamp(baseSha),
-      features: [...new Set(matched.map((entry) => entry.feature).filter(Boolean))].sort().map(asciiClamp),
+      features: [...new Set(matched.map((entry) => entry.feature).filter(Boolean))].sort(),
       missing: missing.map(asciiClamp),
     };
     try {

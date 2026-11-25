@@ -654,6 +654,55 @@ test('map-check --changed-from maps changed paths to features with verbatim veri
   assert.match(noGit.stderr, /git|repository/i);
 });
 
+test('verify advance treats falsy changed-features.json as corrupt and compares feature ids byte-for-byte (review round 3 T1+T2)', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-corrupt-'));
+  const acceptWith = async (checks) => {
+    const verifyFile = path.join(root, '.kelin', 'verify.json');
+    await writeFile(verifyFile, JSON.stringify({ checks }));
+    const accOut = execFileSync(process.execPath, [runAcceptance, verifyFile, '--json'], { cwd: root, encoding: 'utf8' });
+    await writeFile(path.join(root, '.kelin', 'acceptance.json'), accOut);
+  };
+
+  await t.test('walk to the verify phase', async () => {
+    assert.equal(run(['init', '--mode', 'feature'], root).code, 0);
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'scope.md', '影响范围：src/pay.mjs\n');
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'goal.md', validGoal);
+    await artifact(root, 'plan.md', validStandardPlan);
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'build.md', '实现单元 1 并加单测\n');
+    assert.equal(run(['advance'], root).code, 0);
+    assert.match(run(['status'], root).stdout, /"phase": "verify"/);
+  });
+
+  await t.test('null/false/0/empty-string/array records are corrupt, not absent', async () => {
+    await acceptWith([{ id: 'p', cmd: 'node -e "process.exit(0)"', feature: 'pay  api' }]);
+    for (const raw of ['null', 'false', '0', '""', '[]']) {
+      await artifact(root, 'changed-features.json', raw);
+      const blocked = run(['advance'], root);
+      assert.equal(blocked.code, 1, `${raw} must be treated as a corrupt record, not a missing one`);
+      assert.match(blocked.stdout, /corrupt coverage record/);
+    }
+  });
+
+  await t.test('a single-space verify declaration cannot cover a double-space id', async () => {
+    await acceptWith([{ id: 'p', cmd: 'node -e "process.exit(0)"', feature: 'pay api' }]);
+    await artifact(root, 'changed-features.json', JSON.stringify({
+      ref: 'main', sha: 'b'.repeat(40), features: ['pay  api'], missing: [],
+    }));
+    const blocked = run(['advance'], root);
+    assert.equal(blocked.code, 1, 'trim-based comparison must not paper over the whitespace diff');
+    assert.match(blocked.stdout, /pay api/);
+  });
+
+  await t.test('the exact double-space id on both sides passes', async () => {
+    await acceptWith([{ id: 'p', cmd: 'node -e "process.exit(0)"', feature: 'pay  api' }]);
+    assert.equal(run(['advance'], root).code, 0);
+    assert.match(run(['status'], root).stdout, /"phase": "review"/);
+  });
+});
+
 test('map docs separate project map from verify-stack registry and document --changed-from consumption', async () => {
   const { readFile: read } = await import('node:fs/promises');
   const mapDoc = await read(path.resolve(import.meta.dirname, '..', '..', 'kelin-map', 'SKILL.md'), 'utf8');
