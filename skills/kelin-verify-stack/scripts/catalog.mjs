@@ -326,7 +326,7 @@ async function checkTools(ctx) {
     const bin = path.join(ctx.tempDir, 'fake-bin');
     await mkdir(bin, { recursive: true });
     const fake = path.join(bin, 'gh');
-    await writeFile(fake, '#!/bin/sh\nif [ "$1" = "pr" ] && [ "$2" = "checks" ]; then\ncat <<\'JSON\'\n[{"name":"test","state":"FAILURE","link":"http://example.invalid/1"},{"name":"deploy","state":"IN_PROGRESS","link":""}]\nJSON\nexit 0\nfi\nexit 1\n');
+    await writeFile(fake, '#!/bin/sh\nif [ "$1" = "pr" ] && [ "$2" = "checks" ]; then\ncat <<\'JSON\'\n[{"name":"test","state":"FAILURE","bucket":"fail","link":"http://example.invalid/1"},{"name":"deploy","state":"IN_PROGRESS","bucket":"pending","link":""}]\nJSON\nexit 0\nfi\nexit 1\n');
     await chmod(fake, 0o755);
     const result = await run(process.execPath, [kelinWatch, '--pr', '7'], { timeoutMs: 30_000, env: { PATH: `${bin}:${process.env.PATH}` } });
     assertions.push(assertion('kelin-watch:reports-failure', result.code === 1 && result.stdout.includes('"conclusion": "fail"'), `exit ${result.code}`));

@@ -81,6 +81,31 @@ test('--json emits pure parseable JSON regardless of flag order', async () => {
   }
 });
 
+test('check.feature passes through to rows when valid and fails validation before running when malformed (R6)', async () => {
+  const { dir, file } = await makeSpec({
+    checks: [{ id: 'unit', cmd: 'node -e "process.exit(0)"', feature: 'product' }],
+  });
+  const good = run([file, '--json'], dir);
+  assert.equal(good.status, 0, good.stderr);
+  const payload = JSON.parse(good.stdout);
+  assert.equal(payload.rows[0].feature, 'product', 'valid feature must round-trip into the result row');
+
+  const badFeatures = ['', '   ', 123, null, 'x'.repeat(65), 'has`tick', 'has<angle>', 'has\x07bell'];
+  for (const [index, feature] of badFeatures.entries()) {
+    const bad = await makeSpec({
+      checks: [{ id: 'touch', cmd: 'node -e "process.exit(0)"', feature }],
+    });
+    const result = run([bad.file, '--json'], bad.dir);
+    assert.equal(result.status, 2, `bad feature case ${index} (${JSON.stringify(feature)}) should exit 2, got ${result.status}`);
+    assert.match(result.stderr, /feature/);
+  }
+
+  const absent = await makeSpec({ checks: [{ id: 'plain', cmd: 'node -e "process.exit(0)"' }] });
+  const okRun = run([absent.file, '--json'], absent.dir);
+  assert.equal(okRun.status, 0, 'omitting feature must stay accepted');
+  assert.equal(JSON.parse(okRun.stdout).rows[0].feature, undefined);
+});
+
 test('spec validation runs before any check executes (no partial side effects)', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-preflight-'));
   const sentinel = path.join(dir, 'should-not-exist');
@@ -294,7 +319,7 @@ test('runs .kelin/verify.json from repo root, emits verdict/hashes, and marks sk
   const sentinel = path.join(dir, 'should-not-run');
   await writeFile(specFile, JSON.stringify({
     checks: [
-      { id: 'skip-me', cmd: `node -e 'require("node:fs").writeFileSync(${JSON.stringify(sentinel)}, "1")'`, skipped: true },
+      { id: 'skip-me', cmd: `node -e 'require("node:fs").writeFileSync(${JSON.stringify(sentinel)}, "1")'`, skipped: true, skipReason: 'service under test cannot start on this host; rerun on the staging box' },
     ],
   }));
   const skipRes = run([specFile, '--json'], dir);
@@ -407,4 +432,44 @@ test('run-acceptance revalidates check cwds before each check, halts on mutation
   assert.equal(subPayload.rows.length, 1, 'remaining checks must halt immediately after mutation');
   assert.equal(existsSync(sentinel2), false);
   await rm(outside, { recursive: true, force: true });
+});
+
+test('skipped checks require a valid skipReason, echo it in rows and human output, and keep INCONCLUSIVE semantics', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-verify-skip-'));
+  const sentinel = path.join(dir, 'should-not-run');
+  const writeCmd = `node -e 'require("node:fs").writeFileSync(${JSON.stringify(sentinel)}, "1")'`;
+  const file = path.join(dir, 'verify.json');
+
+  const badReasons = [undefined, '', '     ', 'x'.repeat(161), 'has `backtick`', 'has <angle>', '中文原因', 'tab\tsep'];
+  for (const [index, reason] of badReasons.entries()) {
+    const spec = { checks: [{ id: 'skip-me', cmd: writeCmd, skipped: true }] };
+    if (reason !== undefined) spec.checks[0].skipReason = reason;
+    await writeFile(file, JSON.stringify(spec));
+    const result = run([file, '--json'], dir);
+    assert.equal(result.status, 2, `badReasons[${index}] (${JSON.stringify(reason)}) must exit 2, got ${result.status}`);
+    assert.equal(existsSync(sentinel), false, `badReasons[${index}] executed the check before failing validation`);
+    assert.match(result.stderr, /skipReason/, `badReasons[${index}] must name the offending field`);
+  }
+
+  const good = 'staging db unreachable; next reachable path: npm run seed then re-run';
+  await writeFile(file, JSON.stringify({ checks: [{ id: 'skip-me', cmd: writeCmd, skipped: true, skipReason: good }] }));
+  const human = run([file], dir);
+  assert.equal(human.status, 1, 'skipped required check must stay INCONCLUSIVE with exit 1');
+  assert.equal(existsSync(sentinel), false, 'skipped check must not execute');
+  assert.match(human.stdout, /SKIP skip-me/);
+  assert.ok(human.stdout.includes(good), 'human output must show the skip reason');
+
+  const jsonRun = run([file, '--json'], dir);
+  assert.equal(jsonRun.status, 1);
+  const payload = JSON.parse(jsonRun.stdout);
+  assert.equal(payload.verdict, 'INCONCLUSIVE');
+  assert.equal(payload.ok, false);
+  assert.equal(payload.rows[0].skipped, true);
+  assert.equal(payload.rows[0].skipReason, good);
+
+  const maxLen = 'a'.repeat(160);
+  await writeFile(file, JSON.stringify({ checks: [{ id: 'skip-me', cmd: writeCmd, skipped: true, skipReason: maxLen }] }));
+  const boundary = run([file, '--json'], dir);
+  assert.equal(boundary.status, 1, 'exactly 160 printable ASCII chars must be accepted');
+  assert.equal(JSON.parse(boundary.stdout).rows[0].skipReason, maxLen);
 });

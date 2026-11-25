@@ -583,6 +583,136 @@ test('mode hardening: POSIX quoting, history symlink check, /.kelin migration, P
   assert.match(mapEscAdv.stdout, /unsafe base/);
 });
 
+test('map-check --changed-from maps changed paths to features with verbatim verify text, flags unmapped, and keeps exit codes 0/1/2', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const mapCheckScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-map', 'scripts', 'map-check.mjs');
+  const dir = await mkdtemp(path.join(tmpdir(), 'kelin-map-changed-'));
+  const gitIn = (args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+  gitIn(['init', '-q', '-b', 'main']);
+  gitIn(['config', 'user.email', 'c@example.invalid']);
+  gitIn(['config', 'user.name', 'c']);
+  await mkdir(path.join(dir, 'src'), { recursive: true });
+  await mkdir(path.join(dir, 'docs'), { recursive: true });
+  await writeFile(path.join(dir, 'src', 'core.mjs'), 'export const core = 1;\n');
+  await writeFile(path.join(dir, 'docs', 'a.md'), 'doc\n');
+  const mapFile = path.join(dir, 'feature-map.json');
+  const naturalVerify = 'walk the core upload flow and confirm the exported row (human judgment, not a command)';
+  await writeFile(mapFile, JSON.stringify({
+    roots: ['src'],
+    owners: [{ pattern: 'src/**', feature: 'core-upload', verify: naturalVerify }],
+    nonRuntime: ['docs/**'],
+  }));
+  gitIn(['add', '-A']);
+  gitIn(['commit', '-qm', 'init']);
+
+  await writeFile(path.join(dir, 'src', 'core.mjs'), 'export const core = 2;\n');
+  await writeFile(path.join(dir, 'misc.txt'), 'unowned\n');
+  await writeFile(path.join(dir, 'docs', 'b.md'), 'new doc\n');
+  gitIn(['add', '-A']);
+  const mixed = spawnSync(process.execPath, [mapCheckScript, mapFile, '--changed-from', 'HEAD'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(mixed.status, 1, `unmapped change must exit 1: ${mixed.stdout} ${mixed.stderr}`);
+  const mixedPayload = JSON.parse(mixed.stdout);
+  assert.deepEqual(
+    mixedPayload.matched.map((entry) => ({ path: entry.path, feature: entry.feature, pattern: entry.pattern })),
+    [{ path: 'src/core.mjs', feature: 'core-upload', pattern: 'src/**' }],
+  );
+  assert.equal(mixedPayload.matched[0].verify, naturalVerify, 'verify text must round-trip verbatim');
+  assert.deepEqual(mixedPayload.unmapped, ['misc.txt']);
+  assert.deepEqual(mixedPayload.nonRuntime, ['docs/b.md']);
+
+  const { rmSync } = await import('node:fs');
+  rmSync(path.join(dir, 'misc.txt'));
+  rmSync(path.join(dir, 'src', 'core.mjs'));
+  await writeFile(path.join(dir, 'docs', 'c.md'), 'docs only\n');
+  gitIn(['add', '-A']);
+  const docsOnly = spawnSync(process.execPath, [mapCheckScript, mapFile, '--changed-from', 'HEAD'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(docsOnly.status, 0, 'deleted runtime paths and nonRuntime-only changes must not block');
+  const docsPayload = JSON.parse(docsOnly.stdout);
+  assert.deepEqual(docsPayload.matched.map((entry) => entry.path), ['src/core.mjs'], 'deleted runtime path still maps to its feature');
+  assert.equal(docsPayload.unmapped.length, 0);
+  assert.ok(docsPayload.nonRuntime.includes('docs/c.md'));
+
+  await writeFile(path.join(dir, 'src', 'core.mjs'), 'export const core = 3;\n');
+  const defaultMode = spawnSync(process.execPath, [mapCheckScript, mapFile], { cwd: dir, encoding: 'utf8' });
+  assert.equal(defaultMode.status, 0, defaultMode.stdout + defaultMode.stderr);
+  const defaultPayload = JSON.parse(defaultMode.stdout);
+  assert.equal(defaultPayload.ok, true);
+  assert.equal(defaultPayload.matched, undefined, 'default coverage output must stay unchanged');
+
+  const badRef = spawnSync(process.execPath, [mapCheckScript, mapFile, '--changed-from', 'no-such-ref'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(badRef.status, 2);
+  assert.match(badRef.stderr, /no-such-ref|git/);
+
+  const missingValue = spawnSync(process.execPath, [mapCheckScript, mapFile, '--changed-from'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(missingValue.status, 2);
+  assert.match(missingValue.stderr, /--changed-from/);
+
+  const plain = await mkdtemp(path.join(tmpdir(), 'kelin-map-nogit-'));
+  await writeFile(path.join(plain, 'feature-map.json'), JSON.stringify({ roots: ['src'], owners: [{ pattern: 'src/**', feature: 'a', verify: 'true' }] }));
+  const noGit = spawnSync(process.execPath, [mapCheckScript, 'feature-map.json', '--changed-from', 'HEAD'], { cwd: plain, encoding: 'utf8' });
+  assert.equal(noGit.status, 2);
+  assert.match(noGit.stderr, /git|repository/i);
+});
+
+test('verify advance treats falsy changed-features.json as corrupt and compares feature ids byte-for-byte (review round 3 T1+T2)', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-corrupt-'));
+  const acceptWith = async (checks) => {
+    const verifyFile = path.join(root, '.kelin', 'verify.json');
+    await writeFile(verifyFile, JSON.stringify({ checks }));
+    const accOut = execFileSync(process.execPath, [runAcceptance, verifyFile, '--json'], { cwd: root, encoding: 'utf8' });
+    await writeFile(path.join(root, '.kelin', 'acceptance.json'), accOut);
+  };
+
+  await t.test('walk to the verify phase', async () => {
+    assert.equal(run(['init', '--mode', 'feature'], root).code, 0);
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'scope.md', '影响范围：src/pay.mjs\n');
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'goal.md', validGoal);
+    await artifact(root, 'plan.md', validStandardPlan);
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'build.md', '实现单元 1 并加单测\n');
+    assert.equal(run(['advance'], root).code, 0);
+    assert.match(run(['status'], root).stdout, /"phase": "verify"/);
+  });
+
+  await t.test('null/false/0/empty-string/array records are corrupt, not absent', async () => {
+    await acceptWith([{ id: 'p', cmd: 'node -e "process.exit(0)"', feature: 'pay  api' }]);
+    for (const raw of ['null', 'false', '0', '""', '[]']) {
+      await artifact(root, 'changed-features.json', raw);
+      const blocked = run(['advance'], root);
+      assert.equal(blocked.code, 1, `${raw} must be treated as a corrupt record, not a missing one`);
+      assert.match(blocked.stdout, /corrupt coverage record/);
+    }
+  });
+
+  await t.test('a single-space verify declaration cannot cover a double-space id', async () => {
+    await acceptWith([{ id: 'p', cmd: 'node -e "process.exit(0)"', feature: 'pay api' }]);
+    await artifact(root, 'changed-features.json', JSON.stringify({
+      ref: 'main', sha: 'b'.repeat(40), features: ['pay  api'], missing: [],
+    }));
+    const blocked = run(['advance'], root);
+    assert.equal(blocked.code, 1, 'trim-based comparison must not paper over the whitespace diff');
+    assert.match(blocked.stdout, /pay api/);
+  });
+
+  await t.test('the exact double-space id on both sides passes', async () => {
+    await acceptWith([{ id: 'p', cmd: 'node -e "process.exit(0)"', feature: 'pay  api' }]);
+    assert.equal(run(['advance'], root).code, 0);
+    assert.match(run(['status'], root).stdout, /"phase": "review"/);
+  });
+});
+
+test('map docs separate project map from verify-stack registry and document --changed-from consumption', async () => {
+  const { readFile: read } = await import('node:fs/promises');
+  const mapDoc = await read(path.resolve(import.meta.dirname, '..', '..', 'kelin-map', 'SKILL.md'), 'utf8');
+  assert.ok(!mapDoc.includes('同一套结构'), 'the false "same registry" claim must be corrected');
+  assert.match(mapDoc, /--changed-from/, 'SKILL.md must document the --changed-from usage');
+  const routing = await read(path.resolve(import.meta.dirname, '..', '..', 'kelin-mode', 'references', 'routing.md'), 'utf8');
+  assert.match(routing, /--changed-from/, 'routing verify stage must reference --changed-from coverage');
+  assert.match(routing, /skipReason/, 'routing verify stage must point uncovered items to skipReason');
+});
+
 test('mode ship enforces preflight in Git repos across subdirs; route handles English read-only review; map-check enforces boundaries cleanly', async () => {
   const { spawnSync } = await import('node:child_process');
   const reviewCheckScript = path.resolve(import.meta.dirname, '..', '..', 'kelin-review', 'scripts', 'review-check.mjs');
@@ -665,4 +795,81 @@ test('mode ship enforces preflight in Git repos across subdirs; route handles En
   const nullOwner = spawnSync(process.execPath, [mapCheckScript, 'feature-map.json'], { cwd: mapRepo, encoding: 'utf8' });
   assert.equal(nullOwner.status, 1);
   assert.equal(JSON.parse(nullOwner.stdout).ok, false);
+});
+
+test('verify advance refuses when changed-features.json features lack non-skipped verify coverage (final review S3)', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-coverage-'));
+  const acceptWith = async (checks) => {
+    const verifyFile = path.join(root, '.kelin', 'verify.json');
+    await writeFile(verifyFile, JSON.stringify({ checks }));
+    let accOut = '';
+    try {
+      accOut = execFileSync(process.execPath, [runAcceptance, verifyFile, '--json'], { cwd: root, encoding: 'utf8' });
+    } catch (error) {
+      // 含 skipped 检查时验收判 INCONCLUSIVE 退出 1，回执仍要落盘供 advance 诊断
+      accOut = error.stdout || '';
+    }
+    await writeFile(path.join(root, '.kelin', 'acceptance.json'), accOut);
+  };
+
+  await t.test('walk to the verify phase', async () => {
+    assert.equal(run(['init', '--mode', 'feature'], root).code, 0);
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'scope.md', '影响范围：src/a.mjs\n');
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'goal.md', validGoal);
+    await artifact(root, 'plan.md', validStandardPlan);
+    assert.equal(run(['advance'], root).code, 0);
+    await artifact(root, 'build.md', '实现单元 1 并加单测\n');
+    assert.equal(run(['advance'], root).code, 0);
+    assert.match(run(['status'], root).stdout, /"phase": "verify"/);
+  });
+
+  await t.test('feature absent from verify.json checks blocks advance and names the feature', async () => {
+    await acceptWith([{ id: 'docs', cmd: 'node -e "process.exit(0)"' }]);
+    await artifact(root, 'changed-features.json', JSON.stringify({
+      ref: 'main', sha: 'a'.repeat(40), features: ['product'], missing: [],
+    }));
+    const blocked = run(['advance'], root);
+    assert.equal(blocked.code, 1, 'missing coverage must refuse the advance');
+    assert.match(blocked.stdout, /changed-features\.json/);
+    assert.match(blocked.stdout, /product/);
+  });
+
+  await t.test('coverage only via a skipped check still blocks advance', async () => {
+    await acceptWith([
+      { id: 'docs', cmd: 'node -e "process.exit(0)"' },
+      { id: 'product-skipped', cmd: 'true', feature: 'product', skipped: true, skipReason: 'env unavailable' },
+    ]);
+    const blocked = run(['advance'], root);
+    assert.equal(blocked.code, 1);
+    assert.match(blocked.stdout, /product/);
+  });
+
+  await t.test('full non-skipped coverage allows the advance', async () => {
+    await acceptWith([
+      { id: 'docs', cmd: 'node -e "process.exit(0)"' },
+      { id: 'product-tests', cmd: 'node -e "process.exit(0)"', feature: 'product' },
+    ]);
+    assert.equal(run(['advance'], root).code, 0);
+    assert.match(run(['status'], root).stdout, /"phase": "review"/);
+  });
+
+  await t.test('no changed-features.json keeps the old behavior', async () => {
+    const plain = await mkdtemp(path.join(tmpdir(), 'kelin-mode-nocf-'));
+    assert.equal(run(['init', '--mode', 'feature'], plain).code, 0);
+    assert.equal(run(['advance'], plain).code, 0);
+    await artifact(plain, 'scope.md', '影响范围：src/a.mjs\n');
+    assert.equal(run(['advance'], plain).code, 0);
+    await artifact(plain, 'goal.md', validGoal);
+    await artifact(plain, 'plan.md', validStandardPlan);
+    assert.equal(run(['advance'], plain).code, 0);
+    await artifact(plain, 'build.md', '实现单元 1 并加单测\n');
+    assert.equal(run(['advance'], plain).code, 0);
+    await artifact(plain, 'verify.json', JSON.stringify({ checks: [{ id: 'c1', cmd: 'true' }] }));
+    await artifact(plain, 'acceptance.json', '{"ok": true}\n');
+    assert.equal(run(['advance'], plain).code, 1, 'unbound receipt must stay blocked');
+    await writeValidAcceptance(plain);
+    assert.equal(run(['advance'], plain).code, 0, 'without changed-features.json the old gate alone decides');
+  });
 });

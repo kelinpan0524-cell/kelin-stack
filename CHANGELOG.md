@@ -1,5 +1,19 @@
 # Changelog
 
+# 0.25.0（2026-11-25）
+
+验证闭环补缺（第二批，分支 `feat/verify-loop-hardening`）：
+
+- **破坏性变化：`skipped:true` 必须带合规 `skipReason`（第一批，提交 914eb98 的行为收紧说明）**：旧规格里 `skipped:true` 缺 `skipReason`、或原因不合规（要求非空、≤160 字符、可打印 ASCII、不含反引号和尖括号）的 verify.json，`run-acceptance.mjs` 现在会在**执行任何命令之前**以退出码 2 失败（0.24.0 及之前会静默跳过并当通过处理）。迁移办法：给每个 `skipped:true` 的检查补一条写明阻塞原因与最近可达路径的 `skipReason` 字段。
+- **验证闭环四缺口（第一批，提交 914eb98）**：补齐 verify 实例新鲜度校验（过期实例不再当有效证据）、改动路径消费（verify 结果按本次改动路径分类执行）、skipReason 显性化（跳过的检查必须带原因，不静默当作通过）与失败回退路径（验证失败时回退到可复核的基线动作），让验证闭环的四类绕过口全部变成机器可拦。
+- **合并门前机器核对远端 CI 与 HEAD（本批，kelin-ship）**：`merge-lane.mjs` 新增 `--pr <N>`（**不传 `--pr` 时普通分流的输出与退出码不变**；`--help` 文本新增 `--pr N` 属于文本变化）：依次核对工作区干净（`dirty`）、PR 非 draft（`draft`）、PR head SHA 与本地 HEAD 一致（`mismatch`，输出两个 SHA）、该 head 的检查全绿（`fail` / `pending` / `none`，`gh` 调用失败为 `error` 且不当成通过），核心逻辑抽成可导入纯函数 `evaluatePrCi`，理由字段全部按仓规限为可打印 ASCII 且 ≤160 字符；`kelin-ship/SKILL.md` 把自动合并门第 1 条与证据绑定段的执行方式绑定到 `merge-lane.mjs --pr <N>` 命令输出，`ci.status` 非 `pass` 一律不许合并，`--match-head-commit <SHA>` 锁定要求保留。
+- **值守分类看日志证据、等待有上限（本批，kelin-watch）**：`watch.mjs` 失败分类改为证据优先级「日志 > 名字 > unknown」——对能定位到 Actions run/job 的失败 check 拉取失败日志尾部（≤8000 字符）判类（代码/环境/网络/权限），名字正则降级为无日志时的兜底且每个失败项带 `source`（`log`/`name`/`none`）与 `note`；无日志且名字无信号时给 `unknown` 并提示人看一眼，不许无证据当 code 开修；`total === 0` 结论改 `no-checks`（退出 2）不再报 pass；补齐文档已承诺的 `--interval <秒>` / `--max <次数>` 有限轮询（只在 pending 时继续、到上限带 pending 返回、只打印状态变化），分类与轮询抽成可导入纯函数并新增 `skills/kelin-watch/tests/watch.test.mjs`。
+- **假绿修复轮：机器门禁证据收紧（本批终审 7 条，同一分支追加）**：
+  - `merge-lane.mjs --pr`：工作区查询失败不再当干净——`git status` 显式带 `--untracked-files=normal`（命令行参数覆盖用户 `status.showUntrackedFiles` 配置），`git status` 或 `git rev-parse HEAD` 退出非 0 时 `ci.status=error`、`ok:false`；远端证据必须完整——`isDraft` 必须是显式布尔（缺失即 `error`），rollup 按 GitHub 两种检查类型分别判定（CheckRun 要求 `status=COMPLETED` 且 `conclusion=SUCCESS`，StatusContext 要求 `state=SUCCESS`），识别不了的形状归 `unknown` 不通过，且必须至少有一条明确成功——只有 SKIPPED/NEUTRAL 的 rollup 归 `none` 不通过，有成功项时其余跳过项才可放过。
+  - `watch.mjs`：判定以 `bucket` 为准（`fail`/`cancel` 失败、`pending` 等待、`pass` 通过、`skipping` 中性），`state` 与 `bucket` 矛盾或 bucket 缺失/无法识别归 `unknown`（退出 2 交人看，不报 pass），修复 `state=ERROR`/`state=EXPECTED` 被报成 pass 的假绿；识别 gh 的真实「no checks reported on the '<branch>' branch」失败响应为 `no-checks`（退出 2），其他 gh 失败仍按通用错误退出 2。
+  - `map-check.mjs --changed-from`：先 `git rev-parse --verify <ref>^{commit}` 解析成 SHA，失败退出 2 并提示是否误传了文件路径（此前传路径会算成「无需验证」的假绿）；取路径改用 `git diff --name-only --no-renames -z <sha> --`，重命名场景旧路径（含 owner 归属）与新路径同时计入，旧 owner 的验证项不再消失。
+  - `map-check.mjs` 新增 `--verify <path>`（默认 `.kelin/verify.json`，文件不存在则跳过）：比对 `matched` 的 feature 集合与 verify.json `checks[].feature` 声明集合，缺项输出 `missing` 数组并退出 1；`run-acceptance.mjs` 允许并透传 `check.feature`（可选字符串，1-64 位可打印 ASCII，不含反引号和尖括号），裁决语义不变；`kelin-mode` 路由规定 verify 阶段必须跑 `map-check.mjs <map> --changed-from <base> --verify .kelin/verify.json`，退出非 0 不得 advance，无法覆盖的 feature 用 `skipReason` 申报（仍判 INCONCLUSIVE）。
+
 # 0.24.0（2026-11-23）
 
 系统吸收上游 `pstack` / `open-pstack` / `noodle` 防审查钻牛角尖机制，补齐审查契约、噪音分诊与合并门分层（PR #29 / #30 / #31）：

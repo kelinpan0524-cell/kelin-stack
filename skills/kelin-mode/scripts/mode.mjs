@@ -747,6 +747,49 @@ const inspect = (root, dir, state) => {
   }
   if (state.phase === 'verify' && !missing.length) {
     checkAcceptance(acceptanceFile, verifyFile, missing, root);
+    // 覆盖闸门独立于验收回执：map-check --write 落下的改动 feature 必须被 verify.json
+    // 的非 skipped 检查逐项覆盖，缺一项就拒绝推进；没有 changed-features.json 时行为不变。
+    const changedFeaturesFile = path.join(dir, 'changed-features.json');
+    if (existsSync(changedFeaturesFile)) {
+      const asciiClamp = (value) => String(value ?? '')
+        .replace(/[^\x20-\x7E]/g, ' ')
+        .replace(/[<>`]/g, "'")
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 160);
+      let changedRecord = null;
+      let changedParsed = false;
+      try {
+        changedRecord = JSON.parse(readFileSync(changedFeaturesFile, 'utf8'));
+        changedParsed = true;
+      } catch {
+        missing.push('changed-features.json (unreadable)');
+      }
+      if (changedParsed && (!changedRecord || typeof changedRecord !== 'object' || Array.isArray(changedRecord))) {
+        missing.push('changed-features.json (corrupt coverage record: rerun map-check --write)');
+      } else if (changedParsed) {
+        if (!Array.isArray(changedRecord?.features) || changedRecord.features.some((feature) => typeof feature !== 'string' || !feature)) {
+          missing.push('changed-features.json (features must be an array of non-empty strings)');
+        } else {
+          let parsedVerify = null;
+          try {
+            parsedVerify = JSON.parse(readFileSync(verifyFile, 'utf8'));
+          } catch {
+            // verify.json 缺失或损坏已由 checkAcceptance 上报，这里不重复报
+          }
+          if (parsedVerify && Array.isArray(parsedVerify.checks)) {
+            // 与 map-check --write 的原样落盘口径一致：feature id 逐字节比对，不做 trim 归一化
+            const covered = new Set(parsedVerify.checks
+              .filter((check) => check?.skipped !== true && typeof check?.feature === 'string' && check.feature)
+              .map((check) => check.feature));
+            const uncovered = [...new Set(changedRecord.features)].filter((feature) => !covered.has(feature));
+            if (uncovered.length) {
+              missing.push(`changed-features.json (features without non-skipped verify.json coverage: ${asciiClamp(uncovered.join(', '))})`);
+            }
+          }
+        }
+      }
+    }
   }
   const validateReviewGate = (beforeShip) => {
     const reviewPath = path.join(dir, 'review.md');

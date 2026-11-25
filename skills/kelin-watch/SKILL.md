@@ -15,24 +15,30 @@ description: PR/CI 值守：轮询检查状态，把失败分成代码、环境�
 node "$SKILL_DIR"/scripts/watch.mjs --pr 123
 ```
 
-输出 JSON：每个 check 的名称、状态、链接；失败项分类；结论（`pass` / `pending` / `fail`）。
+输出 JSON：每个 check 的名称、状态、链接；失败项分类与证据来源（`source: log | name | none`）；结论（`pass` / `pending` / `fail` / `unknown` / `no-checks`）。没有任何 check 时结论是 `no-checks`（退出 2），不当 pass 处理——gh 2.96+ 对零 checks 返回的 `no checks reported on the '<branch>' branch` 失败响应也会被识别成 `no-checks`，其他 gh 失败仍是通用错误退出 2。
 
-## 失败分类
+判定以 gh 返回的 `bucket` 为准：`fail`/`cancel` 失败、`pending` 等待、`pass` 通过、`skipping` 中性；`state` 与 `bucket` 矛盾、或 bucket 缺失/无法识别时归 `unknown`（退出 2，需人看一眼，不报 pass）。`state=ERROR`/`EXPECTED` 这类与常见直觉不同的状态由 bucket 正确归类，不会被误报成 pass。
 
-| 类型 | 特征 | 动作 |
-| --- | --- | --- |
-| 代码 | 断言失败、类型错误、测试挂 | 修代码，不重跑 |
-| 环境 | 缺依赖、镜像拉不到、版本不匹配 | 修配置 |
-| 网络 | 超时、5xx、连接重置 | 允许重跑一次，仍失败就停 |
-| 权限 | 401/403、token 过期 | 找人，不重试 |
+## 失败分类（证据优先级：日志 > 名字 > unknown）
 
-分类写进报告，不要把所有失败都叫“CI 挂了”。
+对第一个失败的 check，脚本按其链接定位 Actions run/job，拉取失败日志的尾部（最多 8000 字符）判类；拿不到日志才用 check 名字兜底；名字也无信号就是 unknown。
+
+| 证据 | 类别 | 特征 | 动作 |
+| --- | --- | --- | --- |
+| 日志 / 名字 | 代码 | 断言失败、类型错误、lint 失败 | 修代码，不重跑 |
+| 日志 / 名字 | 环境 | 缺依赖、镜像拉不到、setup 步骤失败 | 修配置 |
+| 日志 / 名字 | 网络 | 超时、5xx、连接重置、DNS | 允许重跑一次，仍失败就停 |
+| 日志 / 名字 | 权限 | 401/403、token 过期 | 找人，不重试 |
+| 无日志且名字无信号 | unknown | 证据不足 | 人看一眼，不自动开修 |
+
+每个失败项带 `source`（`log` = 依据日志判类；`name` = 仅按 check 名字推断，需人复核；`none` = 无证据）和 `note` 说明。`source` 不是 `log` 的分类只作参考，**不要当成 code 就直接开修**。
 
 ## 轮询
 
-- 默认只查一次；需要持续盯时用 `--interval 60`，并设 `--max 10` 次上限；
-- 只报**状态变化**：新失败、从失败变绿、长时间 pending；
-- 连续两次相同失败不要重复刷屏。
+- 默认只查一次；需要持续盯时用 `--interval 60`（秒），并设 `--max 10`（次数上限）；
+- 只在 `pending` 时继续轮询，出现 `pass` / `fail` 立即返回；到上限仍是 `pending` 就带 pending 返回；
+- 只打印状态变化：结论或失败集合没变就不重复输出，不刷屏；
+- gh 调用失败直接退出 2，不猜结果。
 
 ## 升级
 

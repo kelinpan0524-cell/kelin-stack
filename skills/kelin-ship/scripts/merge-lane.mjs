@@ -31,6 +31,103 @@ export const isHighRiskPath = (filePath) => {
   return HIGH_RISK_PATTERNS.some((re) => re.test(normalized));
 };
 
+export const asciiField = (value) => {
+  const cleaned = String(value ?? '')
+    .replace(/[^\x20-\x7E]/g, ' ')
+    .replace(/[<>`]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > 160 ? cleaned.slice(0, 160) : cleaned;
+};
+
+const FAIL_CONCLUSIONS = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED']);
+const SKIP_CONCLUSIONS = new Set(['SKIPPED', 'NEUTRAL']);
+const CHECK_PENDING_STATUSES = new Set(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PENDING']);
+const CONTEXT_FAIL_STATES = new Set(['ERROR', 'FAILURE']);
+const CONTEXT_PENDING_STATES = new Set(['PENDING', 'EXPECTED']);
+
+// status/conclusion 与 state 双通道各自判定后合并：任一指向失败/未完成就按失败/未完成处理，
+// 不许取有利的那个；success 只能来自主字段——有 conclusion 时 state 的 SUCCESS 不计入，无
+// conclusion 时才由 state 判成功。__typename 缺失按字段推断；异类字段单独出现不可信
+// （判 unknown），与本类字段同时出现则一并核算；识别不了的 __typename 一律 unknown。
+export const rollupVerdict = (entry) => {
+  const conclusion = String(entry?.conclusion || '').toUpperCase();
+  const status = String(entry?.status || '').toUpperCase();
+  const state = String(entry?.state || '').toUpperCase();
+  const typename = String(entry?.__typename || '').toUpperCase();
+  if (typename && typename !== 'CHECKRUN' && typename !== 'STATUSCONTEXT') return 'unknown';
+  const hasCheckrunFields = Boolean(status || conclusion);
+  const trustCheckrun = hasCheckrunFields && (!typename || typename === 'CHECKRUN' || Boolean(state));
+  const trustState = Boolean(state) && (!typename || typename === 'STATUSCONTEXT' || hasCheckrunFields);
+  const verdicts = [];
+  if (trustCheckrun) {
+    if (FAIL_CONCLUSIONS.has(conclusion)) verdicts.push('fail');
+    else if (CHECK_PENDING_STATUSES.has(status)) verdicts.push('pending');
+    else if (status === 'COMPLETED' && conclusion === 'SUCCESS') verdicts.push('success');
+    else if (status === 'COMPLETED' && SKIP_CONCLUSIONS.has(conclusion)) verdicts.push('skipped');
+    else verdicts.push('unknown');
+  }
+  if (trustState) {
+    if (state === 'SUCCESS') {
+      // 有 conclusion 时主字段说了算，state 的 SUCCESS 只保留矛盾否决权、不计成功
+      if (!conclusion) verdicts.push('success');
+    } else if (CONTEXT_FAIL_STATES.has(state)) verdicts.push('fail');
+    else if (CONTEXT_PENDING_STATES.has(state)) verdicts.push('pending');
+    else verdicts.push('unknown');
+  }
+  if (verdicts.length === 0) return 'unknown';
+  if (verdicts.includes('fail')) return 'fail';
+  if (verdicts.includes('unknown')) return 'unknown';
+  if (verdicts.includes('pending')) return 'pending';
+  if (verdicts.includes('success')) return 'success';
+  return 'skipped';
+};
+
+export function evaluatePrCi({ dirty = false, localHead = '', headRefOid = '', isDraft, rollup = [], ghError = '', workspaceError = '' } = {}) {
+  if (workspaceError) {
+    return { ok: false, status: 'error', reasons: [asciiField(`workspace query failed, not treated as clean: ${workspaceError}`)] };
+  }
+  if (typeof isDraft !== 'boolean') {
+    return { ok: false, status: 'error', reasons: [asciiField('pr isDraft missing or not a boolean in gh payload; incomplete evidence, not treated as pass')] };
+  }
+  if (dirty) {
+    return { ok: false, status: 'dirty', reasons: [asciiField('working tree not clean; commit or stash before collecting merge evidence')] };
+  }
+  if (ghError) {
+    return { ok: false, status: 'error', reasons: [asciiField(`gh call failed, not treated as pass: ${ghError}`)] };
+  }
+  if (isDraft) {
+    return { ok: false, status: 'draft', reasons: [asciiField('pr is in draft; mark ready for review first')] };
+  }
+  const local = String(localHead || '').toLowerCase();
+  const remote = String(headRefOid || '').toLowerCase();
+  if (!local || !remote) {
+    return { ok: false, status: 'error', reasons: [asciiField('missing local or pr head sha; head identity unverified, not treated as pass')] };
+  }
+  if (local !== remote) {
+    return { ok: false, status: 'mismatch', reasons: [asciiField(`local head ${local}`), asciiField(`pr head ${remote}`)] };
+  }
+  const entries = Array.isArray(rollup) ? rollup : [];
+  if (entries.length === 0) {
+    return { ok: false, status: 'none', reasons: [asciiField('no checks on pr head; no passing record to trust')] };
+  }
+  const verdicts = entries.map((entry) => rollupVerdict(entry));
+  const failedNames = entries.filter((entry, index) => verdicts[index] === 'fail').map((entry) => String(entry?.name || 'unnamed check'));
+  if (failedNames.length > 0) {
+    return { ok: false, status: 'fail', reasons: [asciiField(`failed checks: ${failedNames.join(', ')}`)] };
+  }
+  if (verdicts.includes('unknown')) {
+    return { ok: false, status: 'unknown', reasons: [asciiField('rollup has entries without a recognizable CheckRun or StatusContext shape; incomplete evidence, needs human review')] };
+  }
+  if (verdicts.includes('pending')) {
+    return { ok: false, status: 'pending', reasons: [asciiField('ci still queued or running; do not merge yet')] };
+  }
+  if (!verdicts.includes('success')) {
+    return { ok: false, status: 'none', reasons: [asciiField('no explicitly successful check in rollup; skipped or neutral alone is not a passing record')] };
+  }
+  return { ok: true, status: 'pass', reasons: [] };
+}
+
 export function classifyMergeLane({
   files = [],
   changedLines = 0,
@@ -177,13 +274,18 @@ const main = () => {
   };
 
   if (args.includes('--help') || args.includes('-h')) {
-    console.error('Usage: node merge-lane.mjs [--root DIR] [--base REF] [--staged]');
+    console.error('Usage: node merge-lane.mjs [--root DIR] [--base REF] [--staged] [--pr N]');
     process.exit(2);
   }
 
   const root = path.resolve(option('--root', process.cwd()));
   const explicitBase = option('--base', '');
   const staged = args.includes('--staged');
+  const prNumber = option('--pr', '');
+  if (prNumber && !/^\d+$/.test(prNumber)) {
+    console.error(`--pr expects a numeric PR number, got: ${prNumber}`);
+    process.exit(2);
+  }
   const top = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd: root, encoding: 'utf8' });
   if (top.status !== 0 || !top.stdout.trim()) {
     console.error(`not a git repository: ${root}`);
@@ -284,6 +386,51 @@ const main = () => {
     base,
     staged,
   };
+
+  if (prNumber) {
+    // 命令行 flag 覆盖用户 status.showUntrackedFiles 配置，防配置把未跟踪文件藏成干净
+    const statusRes = git(['status', '--porcelain', '--untracked-files=normal']);
+    const headRes = git(['rev-parse', 'HEAD']);
+    let workspaceError = '';
+    if (statusRes.status !== 0) {
+      workspaceError = `git status exited ${statusRes.status}: ${(statusRes.stderr || '').trim()}`;
+    } else if (headRes.status !== 0) {
+      workspaceError = `git rev-parse HEAD exited ${headRes.status}: ${(headRes.stderr || '').trim()}`;
+    }
+    const dirty = !workspaceError && statusRes.stdout.trim().length > 0;
+    const localHead = !workspaceError && headRes.status === 0 ? headRes.stdout.trim() : '';
+    let ghError = '';
+    let prData = null;
+    const ghRes = spawnSync('gh', ['pr', 'view', prNumber, '--json', 'headRefOid,isDraft,statusCheckRollup'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      timeout: 30_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    if (ghRes.error || ghRes.status !== 0) {
+      ghError = asciiField((ghRes.stderr || ghRes.error?.message || `gh exited with ${ghRes.status}`).trim());
+    } else {
+      try {
+        prData = JSON.parse(ghRes.stdout);
+      } catch {
+        ghError = asciiField('gh pr view returned invalid JSON');
+      }
+    }
+    const ci = evaluatePrCi({
+      dirty,
+      localHead,
+      headRefOid: typeof prData?.headRefOid === 'string' ? prData.headRefOid : '',
+      isDraft: typeof prData?.isDraft === 'boolean' ? prData.isDraft : null,
+      rollup: Array.isArray(prData?.statusCheckRollup) ? prData.statusCheckRollup : [],
+      ghError,
+      workspaceError,
+    });
+    result.ci = ci;
+    result.ok = ci.ok;
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(ci.ok ? 0 : 1);
+  }
+
   console.log(JSON.stringify(result, null, 2));
 };
 

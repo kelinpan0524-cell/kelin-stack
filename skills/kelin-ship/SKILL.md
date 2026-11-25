@@ -81,14 +81,20 @@ node "$SKILL_DIR"/scripts/merge-lane.mjs --root . --base origin/main
 
 以下六条（快车道可跳过第 2 条的跨模型阻塞等待，严车道必须全满足）：
 
-1. CI 全绿，且用例总数相对基线只增不减；
+1. CI 全绿，且用例总数相对基线只增不减（机器核对方式见下方证据绑定段：`merge-lane.mjs --pr <N>` 的 `ci.status` 非 `pass` 不许合并）；
 2. （严车道强制）`kelin-review` 回执为 `CURRENT` 且 P0/P1 = 0，本档全部必需审查者返回合法裁决且主裁完成裁决（存在未消解审查失败时禁止合并，即使 P0/P1 计数为 0）；
 3. PR 正文写明回滚方式；
 4. 非 Dependabot 或其他依赖机器人 PR；
 5. `gate-scan` 无未解释的门禁放宽类发现；
 6. 改动不涉及未授权的自动部署、密钥或真实数据。
 
-证据绑定：证据采集前 `git status` 必须干净（无未提交/未暂存改动）且 HEAD == 远端 PR head SHA，不满足先停；先同步最新目标分支，针对**同一远端 PR head SHA** 核对分流结果、CI、gate-scan（以及严车道的审查回执），合并命令用 `gh pr merge --squash --match-head-commit <SHA>` 锁定（按仓库合并策略显式传 `--merge`/`--rebase`/`--squash`），禁止拿本地旧回执拼远端新提交的绿门。
+证据绑定用机器核对，不要肉眼比对。证据采集前先跑：
+
+```sh
+node "$SKILL_DIR"/scripts/merge-lane.mjs --root . --base origin/main --pr <N>
+```
+
+传 `--pr` 时脚本依次机器核对（任何一项不过就 `ok:false`、退出码非 0，`ci` 段写明原因）：工作区干净（`git status --porcelain --untracked-files=normal` 显式查询，配置改不掉；查询失败为 `error`，不许当干净；否则 `dirty`，先提交或清理）；PR 非 draft（`isDraft` 必须是 gh 返回的显式布尔，缺失即 `error`；否则 `draft`）；PR head SHA 与本地 HEAD 一致（否则 `mismatch`，输出两个 SHA）；该 head 的检查按 GitHub 两种类型分别判定全绿——CheckRun 要 `status=COMPLETED` 且 `conclusion=SUCCESS`，StatusContext 要 `state=SUCCESS`，识别不了的形状归 `unknown`，且必须至少有一条明确成功（只有 SKIPPED/NEUTRAL 归 `none` 即「没有成功记录」；有失败为 `fail`，还在跑或排队为 `pending`；`gh` 调用失败或工作区查询失败为 `error`，一律不当成通过）。**`ci.status` 不是 `pass` 一律不许合并**——六条里的第 1 条（CI 全绿）与证据绑定段（HEAD == 远端 PR head SHA）就以这条命令的输出为证据，不靠模型自称。先同步最新目标分支，再针对**同一远端 PR head SHA** 核对分流结果、CI、gate-scan（以及严车道的审查回执），合并命令用 `gh pr merge --squash --match-head-commit <SHA>` 锁定（按仓库合并策略显式传 `--merge`/`--rebase`/`--squash`），禁止拿本地旧回执拼远端新提交的绿门。
 
 任一不满足：停下，列明缺项，交用户拍板。两条红线**优先于本门通用兜底**：Dependabot 大版本依赖 PR 依旧交人拍板或关闭；"合并即部署"仓库的部署确认不在此门覆盖内。
 
