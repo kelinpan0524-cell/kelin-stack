@@ -46,8 +46,9 @@ const CHECK_PENDING_STATUSES = new Set(['QUEUED', 'IN_PROGRESS', 'WAITING', 'PEN
 const CONTEXT_FAIL_STATES = new Set(['ERROR', 'FAILURE']);
 const CONTEXT_PENDING_STATES = new Set(['PENDING', 'EXPECTED']);
 
-// status/conclusion 与 state 双通道各自判定后合并：全部指向成功才算成功，任一指向失败/未完成
-// 就按失败/未完成处理，不许取有利的那个。__typename 缺失按字段推断；异类字段单独出现不可信
+// status/conclusion 与 state 双通道各自判定后合并：任一指向失败/未完成就按失败/未完成处理，
+// 不许取有利的那个；success 只能来自主字段——有 conclusion 时 state 的 SUCCESS 不计入，无
+// conclusion 时才由 state 判成功。__typename 缺失按字段推断；异类字段单独出现不可信
 // （判 unknown），与本类字段同时出现则一并核算；识别不了的 __typename 一律 unknown。
 export const rollupVerdict = (entry) => {
   const conclusion = String(entry?.conclusion || '').toUpperCase();
@@ -67,8 +68,10 @@ export const rollupVerdict = (entry) => {
     else verdicts.push('unknown');
   }
   if (trustState) {
-    if (state === 'SUCCESS') verdicts.push('success');
-    else if (CONTEXT_FAIL_STATES.has(state)) verdicts.push('fail');
+    if (state === 'SUCCESS') {
+      // 有 conclusion 时主字段说了算，state 的 SUCCESS 只保留矛盾否决权、不计成功
+      if (!conclusion) verdicts.push('success');
+    } else if (CONTEXT_FAIL_STATES.has(state)) verdicts.push('fail');
     else if (CONTEXT_PENDING_STATES.has(state)) verdicts.push('pending');
     else verdicts.push('unknown');
   }

@@ -193,6 +193,23 @@ test('rollupVerdict never calls a running or contradictory status record a succe
   assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'PAUSED', conclusion: 'SUCCESS' }), 'unknown');
 });
 
+test('rollupVerdict denies a CheckRun state field from rescuing a SKIPPED or NEUTRAL conclusion (U1)', () => {
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SKIPPED', state: 'SUCCESS' }), 'skipped');
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'NEUTRAL', state: 'SUCCESS' }), 'skipped');
+
+  const sha = 'a'.repeat(40);
+  const base = { localHead: sha, headRefOid: sha, isDraft: false };
+  for (const conclusion of ['SKIPPED', 'NEUTRAL']) {
+    const gate = evaluatePrCi({ ...base, rollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion, state: 'SUCCESS', name: 'ci' }] });
+    assert.equal(gate.ok, false, conclusion);
+    assert.equal(gate.status, 'none', conclusion);
+  }
+
+  assert.equal(rollupVerdict({ status: 'QUEUED', state: 'SUCCESS' }), 'pending');
+  assert.equal(rollupVerdict({ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS', state: 'FAILURE' }), 'fail');
+  assert.equal(rollupVerdict({ __typename: 'StatusContext', state: 'SUCCESS' }), 'success');
+});
+
 test('evaluatePrCi refuses a merge gate satisfied only by a running contradictory entry (review round 3 T3)', () => {
   const sha = 'a'.repeat(40);
   const base = { localHead: sha, headRefOid: sha, isDraft: false };

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -228,6 +228,67 @@ test('map-check --changed-from accepts a real ref and maps changed paths to feat
     assert.equal(payload.ok, true);
     assert.deepEqual(payload.matched.map((entry) => entry.path), ['src/feature.mjs']);
     assert.equal(payload.matched[0].feature, 'product');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('map-check rejects blank-after-trim feature ids on both sides and keeps matching exact (U2)', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kelin-map-blank-'));
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' });
+  const writeMap = (feature) => writeFileSync(path.join(dir, 'feature-map.json'), JSON.stringify({
+    roots: ['src'],
+    owners: [{ pattern: 'src/**', feature, verify: 'node --test src' }],
+    nonRuntime: ['feature-map.json'],
+  }));
+  const writeVerify = (feature) => {
+    mkdirSync(path.join(dir, '.kelin'), { recursive: true });
+    writeFileSync(path.join(dir, '.kelin', 'verify.json'), JSON.stringify({
+      checks: [{ id: 'check', cmd: 'true', feature }],
+    }));
+  };
+  try {
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.email', 'map@example.invalid');
+    git('config', 'user.name', 'map');
+    mkdirSync(path.join(dir, 'src'), { recursive: true });
+    writeFileSync(path.join(dir, 'src', 'pay.mjs'), 'export const v = 1;\n');
+    writeMap('  ');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+    const baseSha = git('rev-parse', 'HEAD').trim();
+    writeFileSync(path.join(dir, 'src', 'pay.mjs'), 'export const v = 2;\n');
+    git('add', '-A');
+    git('commit', '-qm', 'edit');
+    writeVerify('  ');
+
+    const both = runMapCheck(dir, ['--changed-from', baseSha, '--verify', '.kelin/verify.json', '--write']);
+    assert.equal(both.status, 2, `blank feature ids must exit 2, got ${both.status}: ${both.stdout} ${both.stderr}`);
+    assert.match(both.stderr, /blank/i);
+    assert.ok(!existsSync(path.join(dir, '.kelin', 'changed-features.json')), 'no coverage record may be written from blank ids');
+
+    writeMap(' ');
+    git('add', '-A');
+    git('commit', '-qm', 'blank owner id');
+    writeVerify('product');
+    const ownerBlank = runMapCheck(dir, ['--changed-from', baseSha, '--verify', '.kelin/verify.json']);
+    assert.equal(ownerBlank.status, 2, `blank owner feature must exit 2, got ${ownerBlank.status}: ${ownerBlank.stdout} ${ownerBlank.stderr}`);
+    assert.match(ownerBlank.stderr, /blank/i);
+
+    writeMap('product');
+    git('add', '-A');
+    git('commit', '-qm', 'restore owner id');
+    writeVerify('\t');
+    const verifyBlank = runMapCheck(dir, ['--changed-from', baseSha, '--verify', '.kelin/verify.json']);
+    assert.equal(verifyBlank.status, 2, `blank verify feature must exit 2, got ${verifyBlank.status}: ${verifyBlank.stdout} ${verifyBlank.stderr}`);
+    assert.match(verifyBlank.stderr, /blank/i);
+
+    writeMap(' pay ');
+    git('add', '-A');
+    git('commit', '-qm', 'padded owner id');
+    writeVerify('pay');
+    const exact = runMapCheck(dir, ['--changed-from', baseSha, '--verify', '.kelin/verify.json']);
+    assert.equal(exact.status, 1, 'a padded id must not satisfy a trimmed declaration: matching stays byte-for-byte');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

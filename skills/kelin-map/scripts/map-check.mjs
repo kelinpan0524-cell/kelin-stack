@@ -90,6 +90,11 @@ const problems = [];
 const roots = Array.isArray(spec?.roots) ? spec.roots : [];
 const owners = Array.isArray(spec?.owners) ? spec.owners : [];
 const nonRuntime = Array.isArray(spec?.nonRuntime) ? spec.nonRuntime : [];
+const blankOwners = owners.filter((owner) => typeof owner?.feature === 'string' && !owner.feature.trim());
+if (blankOwners.length > 0) {
+  console.error(`${file}: invalid feature id (blank after trim) on pattern(s): ${blankOwners.map((owner) => String(owner?.pattern ?? '')).join(', ')}`);
+  process.exit(2);
+}
 const anchorReal = existsSync(anchor) ? realpathSync(anchor) : path.resolve(anchor);
 
 if (typeof spec?.base === 'string' && spec.base) {
@@ -166,6 +171,11 @@ if (changedFrom) {
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !Array.isArray(parsed.checks)) {
       console.error(`${verifyPath}: checks must be an array`);
+      process.exit(2);
+    }
+    const blankVerifyChecks = parsed.checks.filter((check) => typeof check?.feature === 'string' && !check.feature.trim());
+    if (blankVerifyChecks.length > 0) {
+      console.error(`${verifyPath}: invalid feature id (blank after trim) on check(s): ${blankVerifyChecks.map((check) => String(check?.id ?? '')).join(', ')}`);
       process.exit(2);
     }
     const declared = new Set(parsed.checks.map((check) => (typeof check?.feature === 'string' && check.feature) || '').filter(Boolean));
