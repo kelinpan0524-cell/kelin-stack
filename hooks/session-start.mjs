@@ -2,13 +2,13 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { PHASE_TABLE, phaseMeta, resolvePhase } from '../skills/kelin-mode/scripts/mode.mjs';
+import { PHASES_BY_MODE, PHASE_TABLE, phaseMeta, resolvePhase } from '../skills/kelin-mode/scripts/mode.mjs';
 
 const hostIndex = process.argv.indexOf('--host');
 const hostArg = hostIndex >= 0 ? process.argv[hostIndex + 1] || '' : '';
 const explicitAgy = hostArg === 'antigravity';
 
-const VALID_MODES = new Set(['feature', 'fix', 'legacy', 'audit', 'light']);
+const VALID_MODES = new Set(Object.keys(PHASES_BY_MODE));
 const VALID_PHASES = new Set(Object.keys(PHASE_TABLE));
 const VALID_SKILL = /^verify-[a-z0-9][a-z0-9-]{0,62}$/;
 const VALID_SAFETY = new Set(['off', 'relaxed', 'strict']);
@@ -147,7 +147,7 @@ const verifyLine = verifySkills.length
 
 const lines = [
   `[kelin-stack ${version}] 已自动启用，用户不需要点名 skill。`,
-  '入口：非平凡任务（跨 2 个文件、多步、产品/交付/审计）先加载 kelin-mode，按阶段调用；单文件小修直接做 + kelin-verify 快速档。',
+  '入口：非平凡任务（跨 2 个文件、多步、产品/交付/审计）或只读调研/原型/续做/盯 PR，先加载 kelin-mode 路由选剧本；单文件小修直接做 + kelin-verify 快速档。',
   `自动：PreToolUse 安全钩子模式=${mode}（KELIN_SAFETY 或 ~/.kelin/safety.mode）；编辑冻结${frozen ? '已开启' : '未开启'}。`,
   stateLine,
   ...(projectDir

@@ -16,7 +16,7 @@ description: 自动编排整套 kelin-stack：安装后 SessionStart 自动启�
 | 你说什么 | 自动做什么 | 命令 |
 | --- | --- | --- |
 | “kelin mode setup”（首次接入/体检） | 先只读预览环境检查项（`AGENTS.md`、`.gitignore`、`kelin-policy.json`、`REVIEW.md`、`verify-*`、`pre-commit`、内存/安全/委托），确认后加 `--apply` 写入 | `node "$SKILL_DIR"/scripts/mode.mjs setup --root . [--host antigravity\|codex\|zcode] [--apply] [--with-verify-app] [--with-precommit] [--with-review-policy]` |
-| “用 kelin mode 做 `<任务>`”（不懂选模式） | 自动检查是否需要 setup / 续跑、判定模式（`setup`/`audit`/`legacy`/`fix`/`light`/`feature`）、是否要先 `kelin-grill` 问清、并返回首阶段配套 `companionSkills` | `node "$SKILL_DIR"/scripts/mode.mjs route --task "<需求>" --root .` |
+| “用 kelin mode 做 `<任务>`”（不懂选模式） | 自动检查是否需要 setup / 续跑、按 9 条剧本分流（`setup`/`audit`/`investigate`/`babysit`/`prototype`/`resume`/`legacy`/`fix`/`light`/`feature`）、标明 `readOnly`、判定是否先 `kelin-grill` 问清，并返回首阶段配套 `companionSkills` | `node "$SKILL_DIR"/scripts/mode.mjs route --task "<需求>" --root .` |
 | 直接按任务开跑 | 若上一轮已到 `done`，再次 `init` 自动归档到 `.kelin/history/`；`init`/`status`/`advance` 会直接带出当前阶段 `activeSkills` 与人话摘要 | `node "$SKILL_DIR"/scripts/mode.mjs init --task "<需求>" --root .` |
 
 ## 什么时候用，什么时候别用
@@ -34,23 +34,28 @@ description: 自动编排整套 kelin-stack：安装后 SessionStart 自动启�
 | 跨模块、动数据、对外接口 | `kelin-mode feature` | 不要跳过 map |
 | 需求模糊 / 只给十几个字 | `kelin-grill` 先问透 + `kelin-goal` 写契约 | 不要边猜边写代码 |
 | 同一问题反复失败 | `kelin-loop`（设上限） | 不要无限重试 |
-| 只想知道哪里有问题 | `kelin-mode audit`（只读轨道） | 不要顺手改 |
+| 只想知道哪里有问题 / 查原理不改代码 | `audit`（全仓体检）或 `investigate`（只读调研） | 不要改代码或建分支 |
+| 做抛弃式原型 / 续做暂停 / 盯 PR | `prototype` / `resume` / `babysit`（见 [playbooks.md](references/playbooks.md)） | 不要硬套十阶段或绕过门禁 |
 | 老仓库、迁移或跨仓 | `kelin-mode legacy`（多仓加 `kelin-multirepo`） | 不要两个仓同时改或大爆炸重写 |
 | 前端界面 / AI 味文案 | 配套 `kelin-ui` / `kelin-unslop` | 不要只看代码或套话互换 |
 
 plan / refine / verify 三档与 ZCode `/workflow` 选择细节见 [references/routing.md](references/routing.md)。
 
-## 五种模式
+## 九条剧本（5 主轨道 + 4 轻剧本）
 
-| 模式 | 适用 | 主链路 |
+| 剧本 | 适用 | 主链路 |
 | --- | --- | --- |
 | `light` | 单文件、文案、小修 | intake → design（三行）→ build → verify（快速）→ ship → reflect → done |
 | `feature` | 加功能、改行为 | intake → map → design（跨模块含草图）→ build → verify → review → refine → ship → reflect → done |
 | `fix` | 修 bug、回归 | intake → map → design → build（`tdd` + `guard`）→ verify → review → refine → ship → reflect → done |
 | `legacy` | 老仓库改造、迁移 | intake → map（`feature-map.json`）→ design → build（切片）→ verify → review → refine → ship → reflect → done |
-| `audit` | 只审不改 | intake → map（`feature-map.json`）→ audit（含覆盖声明）→ reflect → done |
+| `audit` | 只审不改（全仓体检） | intake → map（`feature-map.json`）→ audit（含覆盖声明）→ reflect → done |
+| `investigate` | 只读查原理/比方案 | intake → investigate（`investigation.md`，只读）→ done |
+| `prototype` | 抛弃式原型/真探针 | intake → prototype（`prototype.md`）→ done |
+| `resume` | 续做 / 安全暂停交接 | intake → handoff（`handoff.md`）→ done |
+| `babysit` | PR 值守/盯 CI/清分支 | intake → babysit（`babysit.md`）→ done |
 
-模式由 `route` 在 intake 阶段自动判定；判断不了就问一句，不靠猜。
+模式由 `route` 在 intake 自动判定；轻剧本细则见 [references/playbooks.md](references/playbooks.md)。
 
 ## 状态机
 

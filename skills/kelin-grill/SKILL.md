@@ -9,7 +9,11 @@ description: 把方案、决定或想法一层层问透，只问不答：把决�
 
 审阅的问题是：**给了方案就等于替他想了**——他立刻从“思考”切换成“评价你的方案”，自己的漏洞一个没动。
 
-来源：Matt Pocock 的 grilling（`mattpocock/skills`，MIT，2026-11-18 版）。原版只有一段话，这版补了分工、反模式和衔接。
+来源：Matt Pocock 的 grilling（`mattpocock/skills`，MIT，2026-11-18 版），融入 `pstack` 开场校准。
+
+## 开场三步校准
+
+问第一轮前先做三步校准（细则见 [references/opener.md](references/opener.md)）：① 大白话复述意图；② 模糊问题定名纠偏；③ 做深不做大（实验类取舍交 `kelin-mode prototype`，产品决策留给人）。
 
 ## 设计树 + 轮次
 

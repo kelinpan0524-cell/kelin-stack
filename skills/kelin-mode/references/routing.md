@@ -21,7 +21,8 @@ SessionStart 会把这份路由注入会话。用户不需要点名 skill；按�
 - 每个会话 SessionStart 注入版本、当前 mode/phase、本阶段配套 skill（`activeSkills`）、项目接入状态、本地 verify skill、冻结状态和安全钩子。
 - 有 `.kelin/state.json` 且未到 `done` 就续跑；若上一轮已 `done`，再次 `init` 会自动归档到 `.kelin/history/`。
 - 说“kelin mode setup”或首次接入仓库时，先预览 `setup --root .`，确认后再 `--apply`（可选 `--with-verify-app` / `--with-precommit`）。
-- 说“kelin mode”或任意任务描述时，先跑 `route --task "<需求>" --root .` 自动判定模式、是否需要 `kelin-grill` 先问透、以及条件 companion（`kelin-product`/`kelin-ui`/`kelin-multirepo`/`kelin-benchmark`）。
+- 说“kelin mode”或任意任务描述时，先跑 `route --task "<需求>" --root .` 自动判定 9 条剧本路线（5 条工程主轨道 `feature`/`fix`/`legacy`/`audit`/`light` + 4 条轻量剧本 `investigate`/`prototype`/`resume`/`babysit`）、是否只读（`readOnly`）、是否需要 `kelin-grill` 先问透、以及条件 companion（`kelin-product`/`kelin-ui`/`kelin-multirepo`/`kelin-benchmark`）。四条轻量剧本细则见 [playbooks.md](playbooks.md)。
+- **只读硬护栏**：凡明确要求只读（“只读/只看/别改代码/不改文件/read-only/without modifying”）且非全仓 `audit` 的任务，一律路由到 `investigate`（`readOnly: true`），不串联 `setup` 写入，绝不送进开发建分支流程。
 - 本地 `verify-*` skill 只在验证阶段执行；会话开始不自动起服务。
 - 不要每轮重复声明 kelin-stack 规则；按本表选 skill。
 

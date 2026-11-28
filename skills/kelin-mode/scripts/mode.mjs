@@ -12,7 +12,8 @@ const VALID_HOSTS = new Set(['antigravity', 'codex', 'zcode']);
 const RUN_ARTIFACTS = [
   'scope.md', 'feature-map.json', 'audit.md', 'goal.md', 'plan.md', 'plan-gate.json',
   'build.md', 'verify.json', 'acceptance.json', 'review.md', 'review.json', 'refine.md',
-  'ship.md', 'reflect.md',
+  'ship.md', 'reflect.md', 'investigation.md', 'prototype.md', 'handoff.md', 'babysit.md',
+  'changed-features.json',
 ];
 
 const loadOptional = async (rel, exportName) => {
@@ -39,9 +40,39 @@ const isGitRepo = (projectRoot) => spawnSync('git', ['-C', projectRoot, 'rev-par
 export const PHASE_TABLE = {
   intake: {
     required: () => [],
-    activeSkills: (m) => (m === 'legacy' ? ['kelin-recall', 'kelin-agents', 'kelin-legacy'] : ['kelin-recall', 'kelin-agents']),
+    activeSkills: (m) => {
+      if (m === 'legacy') return ['kelin-recall', 'kelin-agents', 'kelin-legacy'];
+      if (m === 'investigate') return ['kelin-recall', 'kelin-map'];
+      if (m === 'babysit') return ['kelin-watch', 'kelin-branches'];
+      if (m === 'resume') return ['kelin-recall', 'kelin-branches', 'kelin-brief'];
+      return ['kelin-recall', 'kelin-agents'];
+    },
     checks: () => ['AGENTS.md', 'kelin-policy.json'],
-    humanSummary: '对齐仓库规则、现状和风险边界，确认任务该走哪种模式',
+    humanSummary: '对齐仓库规则、现状和风险边界，确认任务该走哪种剧本',
+  },
+  investigate: {
+    required: () => ['investigation.md'],
+    activeSkills: () => ['kelin-recall', 'kelin-map', 'kelin-unslop'],
+    checks: () => ['read-only', 'evidence-cited'],
+    humanSummary: '只读查代码与历史，输出带文件位置证据的解释或方案对比，不改代码也不建分支',
+  },
+  prototype: {
+    required: () => ['prototype.md'],
+    activeSkills: () => ['kelin-plan', 'kelin-brief'],
+    checks: () => ['throwaway-isolated', 'observed-evidence'],
+    humanSummary: '在隔离草稿区做最小可跑探针或样板，凭观察结果定方向，抛弃式不走交付门禁',
+  },
+  handoff: {
+    required: () => ['handoff.md'],
+    activeSkills: () => ['kelin-recall', 'kelin-branches', 'kelin-brief'],
+    checks: () => ['git-state', 'resume-point'],
+    humanSummary: '重建现场并核对已完成与待办边界，给出明确续跑入口或安全暂停交接单',
+  },
+  babysit: {
+    required: () => ['babysit.md'],
+    activeSkills: () => ['kelin-watch', 'kelin-branches', 'kelin-ship'],
+    checks: () => ['watch.mjs', 'merge-lane.mjs'],
+    humanSummary: '值守已开 PR 的 CI、评审评论与分支清理，合并与部署仍守门禁',
   },
   map: {
     required: (m) => (m === 'legacy' || m === 'audit' ? ['feature-map.json'] : ['scope.md']),
@@ -111,6 +142,10 @@ export const PHASES_BY_MODE = {
   legacy: ['intake', 'map', 'design', 'build', 'verify', 'review', 'refine', 'ship', 'reflect', 'done'],
   audit: ['intake', 'map', 'audit', 'reflect', 'done'],
   light: ['intake', 'design', 'build', 'verify', 'ship', 'reflect', 'done'],
+  investigate: ['intake', 'investigate', 'done'],
+  prototype: ['intake', 'prototype', 'done'],
+  resume: ['intake', 'handoff', 'done'],
+  babysit: ['intake', 'babysit', 'done'],
 };
 
 const MODES = Object.keys(PHASES_BY_MODE);
@@ -268,30 +303,82 @@ export function routeTask(task, projectRoot = process.cwd()) {
   const needsSetup = !hasWorkflow;
   const verifySkills = findVerifySkillsInRoot(root);
 
-  let mode = 'feature';
-  let reason = '多步新需求，走标准规划、实现、验收与自审流程';
-  if (/(\bsetup\b|初始化|接入\s*kelin|环境检查|新手引导|配置\s*kelin|一键接入)/i.test(text)) {
-    mode = 'setup';
-    reason = '需要初始化或检查项目的 kelin-stack 接入环境';
-  } else if (
-    /(只审不改|全仓审查|体检报告|\baudit\b|接手体检|哪里最容易出事)/i.test(text)
+  const explicitReadOnly = /(只读|只看|只分析不改|只查不改|仅分析|仅查看|只调研|(?:先)?(?:别|不要|不|勿)(?:改|修改|动|写)(?:任何)?(?:代码|文件)|(?:先)?(?:别|不要|不)(?:改|修改)(?=$|[，,。.！!？?；;]))/i.test(text)
+    || /(\bread[- ]?only\b|\b(?:do\s+not|don'?t|without)\s+(?:edit|editing|modify|modifying|change|changing|write|writing)(?:\s+(?:any\s+)?(?:code|files?)\b|(?=$|[.,;!?]))|\bno\s+(?:code\s+)?(?:edits?|changes?|modifications?)\b)/i.test(text);
+  const cleanedForWrite = text
+    .replace(/(?:先)?(?:别|不要|不|勿)(?:改|修改|动|写|修|修复|提交|建分支)(?:任何)?(?:代码|文件)?/g, '')
+    .replace(/(?:怎么|如何|为啥|为什么)(?:实现|修复|修改|改造|重构|迁移)(?:的)?/g, '')
+    .replace(/\b(?:do\s+not|don'?t|without|no)\s+(?:edit|editing|modify|modifying|change|changing|write|writing|fix|fixing)(?:\s+(?:any\s+)?(?:code|files?))?/gi, '');
+  const hasWriteIntent = /(?:修复|修好|修掉|修改|改一下|改好|帮我改|新增|实现|改造|重构|迁移|加上|写一个|做个|补上|删除|升级|\b(?:implement|build|add|fix|edit|write|refactor|migrate|update|create|change|modify|patch|delete)\b)/i.test(cleanedForWrite);
+  const isExplicitSetup = /(kelin[- ]?mode\s+setup|接入\s*kelin|配置\s*kelin|一键接入|环境检查|新手引导)/i.test(text);
+  const isGenericSetup = /(\bsetup\b|初始化)/i.test(text);
+  const isAudit = /(只审不改|全仓审查|体检报告|\baudit\b|接手体检|哪里最容易出事)/i.test(text)
     || /(?:read[- ]?only\s+(?:code\s+)?review|(?:code\s+)?review\s+only|(?:only|just)\s+(?:do\s+a\s+)?(?:code\s+)?review|\b(?:review|inspect|check)\b.*\b(?:without|no)\s+(?:editing|changing|modifying|writing)\s+(?:code|files))/i.test(text)
-    || (/^\s*(?:please\s+)?(?:review|inspect)\b/i.test(text) && !/\b(?:implement|build|add|fix|edit|write|refactor|migrate|update|create|change|modify|patch)\b|修复|修改|新增|实现|改造/i.test(text))
-  ) {
+    || (/^\s*(?:please\s+)?(?:review|inspect)\b/i.test(text) && !hasWriteIntent);
+  const isInvestigateCue = /(调研|查一下|查清楚|排查一下|讲讲原理|怎么工作的|怎么跑的|怎么实现的|怎么判定的|为什么这样设计|为啥这么写|为什么这么写|梳理一下|解释一下|对比一下方案|\binvestigat(?:e|ion)\b|\bhow\s+does\b|\bwhy\s+(?:is|was|does|did)\b|\bexplain\b|\btrace\s+(?:how|why|the)\b)/i.test(text);
+  const isBabysit = /(盯\s*pr|盯着.*pr|看下\s*pr|守\s*pr|pr\s*评论|修\s*ci|ci\s*挂了|ci\s*红了|分支清理|清理分支|工作树清理|哪些分支能删|\bbabysit\b|\bwatch\s+pr\b|\bworktree\s+cleanup\b)/i.test(text);
+  const isPrototype = !/(?:产品原型|原型图|按原型|照着?原型|demo\s*环境)/i.test(text)
+    && /(?:(?:做个?|写个?|搭个?|出个?|先做|快速|最小|抛弃式)\s*原型|原型验证|(?:做个?|写个?|搭个?)\s*demo\b|\bdemo\s*(?:验证|样板|页面)|\bprototype\b|\bpoc\b|最小探针|真探针|先试一下|验证方案可行性|草稿样板|抛弃式)/i.test(text);
+  const isPause = /(安全暂停|暂停一下|留个交接|保存现场|先停一下|\bpause[- ]?safely\b)/i.test(text);
+  const isPureContinue = /^(继续|接着|continue|resume)$/i.test(text);
+  const isPickup = /(接着上次|我们做到哪了|做到哪了|重建现场|恢复上次|\bsession[- ]?pickup\b|\bpick\s+up\s+where\b)/i.test(text)
+    || (/接手/.test(text) && !/(祖传|老仓库|重构|迁移)/.test(text) && !hasWriteIntent);
+
+  let mode = 'feature';
+  let playbook = 'feature';
+  let reason = '多步新需求，走标准规划、实现、验收与自审流程';
+  if (isExplicitSetup) {
+    mode = 'setup';
+    playbook = 'setup';
+    reason = '需要初始化或检查项目的 kelin-stack 接入环境';
+  } else if (isAudit) {
     mode = 'audit';
+    playbook = 'audit';
     reason = '只做全仓只读审查并出覆盖声明，不直接改代码';
-  } else if (/(老仓库|祖传|重构|迁移|\blegacy\b|跨仓|多仓库)/i.test(text)) {
+  } else if (explicitReadOnly) {
+    mode = 'investigate';
+    playbook = 'investigate';
+    reason = '明确要求只读，走只读调研剧本，输出带文件证据的结论且不改代码不建分支';
+  } else if (isBabysit) {
+    mode = 'babysit';
+    playbook = 'babysit';
+    reason = '值守已开 PR 的 CI、评审评论或清理已合分支，走轻量 PR 值守剧本';
+  } else if (isPrototype) {
+    mode = 'prototype';
+    playbook = 'prototype';
+    reason = '做抛弃式最小原型或真探针验证方向，不走重型交付门禁';
+  } else if (isInvestigateCue && !hasWriteIntent) {
+    mode = 'investigate';
+    playbook = 'investigate';
+    reason = '只读调研与原理查证，输出带文件证据的解释或对比，不改代码也不建分支';
+  } else if (isGenericSetup) {
+    mode = 'setup';
+    playbook = 'setup';
+    reason = '需要初始化或检查项目的 kelin-stack 接入环境';
+  } else if (isPause) {
+    mode = resume ? resume.mode : 'resume';
+    playbook = 'pause';
+    reason = resume
+      ? `暂停当前 ${resume.mode} 流程（${resume.phase} 阶段），整理干净交接点`
+      : '整理当前工作区状态并留下安全暂停交接单';
+  } else if (isPureContinue || isPickup) {
+    mode = resume ? resume.mode : 'resume';
+    playbook = 'resume';
+    reason = resume
+      ? `续接未完成的 ${resume.mode} 流程（当前在 ${resume.phase} 阶段）`
+      : '从提交历史与现状重建现场，定位下一步续跑入口';
+  } else if (/(老仓库|祖传|重构|迁移|\blegacy\b|\brefactor\b|\bmigrat(?:e|ion)\b|跨仓|多仓库)/i.test(text)) {
     mode = 'legacy';
+    playbook = 'legacy';
     reason = '老项目/迁移/跨仓改造，需先建功能地图与基线再切片实施';
   } else if (/(修\s*bug|\bfix\b|报错|失败|崩溃|异常|500|回归|闪退|卡死|修一下)/i.test(text)) {
     mode = 'fix';
+    playbook = 'fix';
     reason = '修 bug 或异常回归，走复现测试 + 防再犯加固链路';
   } else if (/(改个文案|改一行|单个文件|typo|错别字|小修|样式微调|\blight\b)/i.test(text)) {
     mode = 'light';
+    playbook = 'light';
     reason = '局部小改动，走轻量化规划与快速验证链路';
-  } else if (resume && /^(继续|接着|continue|resume)$/i.test(text)) {
-    mode = resume.mode;
-    reason = `续接未完成的 ${resume.mode} 流程（当前在 ${resume.phase} 阶段）`;
   }
 
   if (mode === 'setup') {
@@ -299,6 +386,8 @@ export function routeTask(task, projectRoot = process.cwd()) {
     return {
       ok: true,
       mode: 'setup',
+      playbook: 'setup',
+      readOnly: false,
       firstPhase: 'setup',
       phases: ['setup'],
       activeSkills: ['kelin-agents', 'kelin-ci', 'kelin-verify-app'],
@@ -313,20 +402,32 @@ export function routeTask(task, projectRoot = process.cwd()) {
     };
   }
 
+  const readOnly = mode === 'audit' || mode === 'investigate';
+  const isHandoffPlaybook = mode === 'resume' || playbook === 'resume' || playbook === 'pause';
   const phases = phasesFor(mode);
   const firstPhase = phases[0];
   const companions = new Set(phaseMeta(firstPhase, mode).activeSkills);
-  if (/(产品|需求|prd|权限|审批|上传|导出|报价|订单|表单|后台|列表)/i.test(text)) companions.add('kelin-product');
-  if (/(页面|前端|界面|ui|样式|弹窗|响应|手机端|按钮|layout|css)/i.test(text)) companions.add('kelin-ui');
+  const devFlow = !readOnly && mode !== 'babysit' && !isHandoffPlaybook;
+  if (devFlow && /(产品|需求|prd|权限|审批|上传|导出|报价|订单|表单|后台|列表)/i.test(text)) companions.add('kelin-product');
+  if (devFlow && /(页面|前端|界面|ui|样式|弹窗|响应|手机端|按钮|layout|css)/i.test(text)) companions.add('kelin-ui');
   if (/(多仓|跨仓|两个仓|共库)/i.test(text)) companions.add('kelin-multirepo');
   if (/(性能|慢|卡顿|耗时|benchmark|压测|延迟)/i.test(text)) companions.add('kelin-benchmark');
   if (mode === 'audit') companions.add('kelin-audit');
+  if (mode === 'investigate') companions.add('kelin-unslop');
+  if (mode === 'prototype') companions.add('kelin-brief');
+  if (mode === 'babysit') companions.add('kelin-ship');
+  if (isHandoffPlaybook) {
+    companions.add('kelin-recall');
+    companions.add('kelin-brief');
+  }
 
   const concreteTarget = /[a-z0-9_-]+\.[a-z0-9]+|\/[a-z0-9_-]+/i.test(text);
-  const needsGrill = mode !== 'light' && (
-    /(不确定|没想清|帮我想|怎么设计|拷问|grill|模糊|大概想做)/i.test(text)
+  const nonGrillModes = new Set(['light', 'investigate', 'babysit', 'resume']);
+  const explicitGrill = /(拷问|\bgrill\b)/i.test(text);
+  const needsGrill = explicitGrill || (!nonGrillModes.has(mode) && !isHandoffPlaybook && (
+    /(不确定|没想清|帮我想|怎么设计|模糊|大概想做)/i.test(text)
     || (mode === 'feature' && text.length > 0 && text.length <= 14 && !concreteTarget)
-  );
+  ));
   const companionSkills = needsGrill ? ['kelin-grill', ...[...companions].filter((s) => s !== 'kelin-grill')] : [...companions];
 
   const nextArgs = resume
@@ -340,12 +441,14 @@ export function routeTask(task, projectRoot = process.cwd()) {
         '--root',
         root,
       ];
-  const setupArgs = needsSetup && !resume ? ['setup', '--root', root] : null;
+  const setupArgs = needsSetup && !resume && !readOnly ? ['setup', '--root', root] : null;
   const nextCommand = setupArgs ? `${modeCmd(setupArgs)} && ${modeCmd(nextArgs)}` : modeCmd(nextArgs);
 
   return {
     ok: true,
     mode,
+    playbook,
+    readOnly,
     firstPhase,
     phases,
     activeSkills: phaseMeta(firstPhase, mode).activeSkills,
@@ -668,6 +771,26 @@ const inspect = (root, dir, state) => {
   const verifyFile = path.join(dir, 'verify.json');
   const acceptanceFile = path.join(dir, 'acceptance.json');
 
+  if (state.phase === 'investigate' && !missing.length) {
+    if (!readFileSync(path.join(dir, 'investigation.md'), 'utf8').trim()) {
+      missing.push('investigation.md (empty)');
+    }
+  }
+  if (state.phase === 'prototype' && !missing.length) {
+    if (!readFileSync(path.join(dir, 'prototype.md'), 'utf8').trim()) {
+      missing.push('prototype.md (empty)');
+    }
+  }
+  if (state.phase === 'handoff' && !missing.length) {
+    if (!readFileSync(path.join(dir, 'handoff.md'), 'utf8').trim()) {
+      missing.push('handoff.md (empty)');
+    }
+  }
+  if (state.phase === 'babysit' && !missing.length) {
+    if (!readFileSync(path.join(dir, 'babysit.md'), 'utf8').trim()) {
+      missing.push('babysit.md (empty)');
+    }
+  }
   if (state.phase === 'map' && !missing.length) {
     if (state.mode === 'legacy' || state.mode === 'audit') {
       const mapPath = path.join(dir, 'feature-map.json');
@@ -1098,7 +1221,7 @@ function main(argv = process.argv.slice(2)) {
     process.exit(0);
   }
 
-  console.error('Usage: node mode.mjs setup [--root DIR] [--host antigravity|codex|zcode] [--apply] [--with-verify-app] [--with-precommit] [--with-review-policy] | route --task "<text>" [--root DIR] | init [--mode feature|fix|legacy|audit|light] [--task "<text>"] [--cross-module] [--root DIR] | status [--root DIR] | advance [--root DIR] | rewind --reason "<why>" [--root DIR]');
+  console.error('Usage: node mode.mjs setup [--root DIR] [--host antigravity|codex|zcode] [--apply] [--with-verify-app] [--with-precommit] [--with-review-policy] | route --task "<text>" [--root DIR] | init [--mode feature|fix|legacy|audit|light|investigate|prototype|resume|babysit] [--task "<text>"] [--cross-module] [--root DIR] | status [--root DIR] | advance [--root DIR] | rewind --reason "<why>" [--root DIR]');
   process.exit(2);
 }
 

@@ -177,3 +177,22 @@ test('SessionStart recognizes audit phase, injects companion skills and onboardi
   const { readFileSync } = await import('node:fs');
   assert.equal(readFileSync(path.join(legacyDir, '.kelin', 'state.json'), 'utf8'), rawLegacyState);
 });
+
+test('SessionStart recognizes lightweight playbook modes (investigate, prototype, resume, babysit)', async () => {
+  const cases = [
+    { mode: 'investigate', phase: 'investigate', expectSkill: /kelin-unslop/ },
+    { mode: 'prototype', phase: 'prototype', expectSkill: /kelin-plan/ },
+    { mode: 'resume', phase: 'handoff', expectSkill: /kelin-recall/ },
+    { mode: 'babysit', phase: 'babysit', expectSkill: /kelin-watch/ },
+  ];
+  for (const item of cases) {
+    const dir = await mkdtemp(path.join(tmpdir(), `kelin-session-${item.mode}-`));
+    await mkdir(path.join(dir, '.kelin'), { recursive: true });
+    await writeFile(path.join(dir, '.kelin', 'state.json'), JSON.stringify({ mode: item.mode, phase: item.phase }));
+    const res = run({ hook_event_name: 'SessionStart' }, { ZCODE_PROJECT_DIR: dir });
+    assert.equal(res.status, 0, res.stderr);
+    const ctx = JSON.parse(res.stdout).hookSpecificOutput.additionalContext;
+    assert.match(ctx, new RegExp(`mode=${item.mode} phase=${item.phase}`));
+    assert.match(ctx, item.expectSkill);
+  }
+});
