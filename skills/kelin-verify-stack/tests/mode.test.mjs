@@ -873,3 +873,164 @@ test('verify advance refuses when changed-features.json features lack non-skippe
     assert.equal(run(['advance'], plain).code, 0, 'without changed-features.json the old gate alone decides');
   });
 });
+
+test('mode route enforces read-only guardrail and routes lightweight playbooks (investigate, prototype, resume/pause, babysit)', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'kelin-mode-playbooks-'));
+  const route = (task) => JSON.parse(run(['route', '--task', task], root).stdout);
+
+  // Regression: explicit read-only prompts MUST NOT be sent into fix/legacy/feature/setup even if they mention 500/bug/refactor/fix/setup
+  const readOnlyCases = [
+    '请只读排查一下如何修复登录 500 报错，先别改代码',
+    '排查一下怎么修复登录 500 报错，不改文件',
+    '先别改，查一下登录 500 报错',
+    '只读分析老仓库为什么报错，不要修改任何文件',
+    '只读排查一下项目初始化为什么报错，别改代码',
+    'Read-only: explain how setup works',
+    'Read-only: trace why checkout returns 500 and how to fix it without modifying files',
+    'Explain why checkout fails without editing.',
+    '先不改代码，只看一下报价单计算逻辑为什么变慢了',
+    '查一下 kelin-ship 的合并门是怎么判定的',
+    '查一下 merge-lane 是怎么实现的',
+    '报价单计算是怎么实现的',
+    'explain how quote pricing works',
+  ];
+  for (const task of readOnlyCases) {
+    const res = route(task);
+    assert.equal(res.mode, 'investigate', `read-only task misrouted: ${task} -> ${res.mode}`);
+    assert.equal(res.playbook, 'investigate');
+    assert.equal(res.readOnly, true);
+    assert.equal(res.setupArgs, undefined, `read-only route must not chain setup writes: ${task}`);
+    assert.equal(res.needsGrill, false);
+    assert.ok(!res.companionSkills.includes('kelin-product'), `read-only route must not pull kelin-product: ${task}`);
+  }
+
+  // Regression: init --task on read-only setup question must initialize investigate, never silently fall back to feature
+  const initRoDir = await mkdtemp(path.join(tmpdir(), 'kelin-init-ro-setup-'));
+  const initRo = run(['init', '--task', '只读排查一下项目初始化为什么报错，别改代码'], initRoDir);
+  assert.equal(initRo.code, 0, initRo.stdout);
+  assert.equal(JSON.parse(initRo.stdout).mode, 'investigate');
+
+  // Contrast: normal write tasks with scoped non-goal constraints MUST NOT be hijacked into read-only investigate
+  assert.equal(route('修复报价接口 500 报错，不要改数据库结构').mode, 'fix');
+  assert.equal(route('实现导出功能，不要修改现有接口').mode, 'feature');
+  assert.equal(route('Fix checkout 500 without modifying public API').mode, 'fix');
+  assert.equal(route('Refactor billing without changing database schema').mode, 'legacy');
+  assert.equal(route('查一下登录 500 报错并顺手修复').mode, 'fix');
+  assert.equal(route('查一下登录 500 报错并顺手修复').readOnly, false);
+  assert.equal(route('分析并修复报价接口报错').mode, 'fix');
+  assert.equal(route('只审不改全仓体检').mode, 'audit');
+  assert.equal(route('只审不改：全仓审查初始化模块').mode, 'audit');
+  assert.equal(route('只审不改全仓体检').readOnly, true);
+  assert.equal(route('Perform an independent read-only code review').mode, 'audit');
+
+  // Contrast: formal feature/fix mentioning product mockups or demo env MUST NOT be hijacked into throwaway prototype
+  assert.equal(route('按产品原型实现报价列表页面').mode, 'feature');
+  assert.equal(route('照着原型图做个审批表单').mode, 'feature');
+  assert.equal(route('修复 demo 环境的登录 500 报错').mode, 'fix');
+
+  // Prototype playbook (10-line probe / throwaway UI demo)
+  const probe = route('先跑个 10 行真探针验证妙搭接口通不通');
+  assert.equal(probe.mode, 'prototype');
+  assert.equal(probe.playbook, 'prototype');
+  assert.equal(probe.readOnly, false);
+  assert.ok(probe.companionSkills.includes('kelin-brief'));
+  assert.ok(!probe.companionSkills.includes('kelin-ui'));
+
+  const uiDemo = route('帮我做个最小原型 demo 先验证弹窗页面布局');
+  assert.equal(uiDemo.mode, 'prototype');
+  assert.ok(uiDemo.companionSkills.includes('kelin-ui'));
+
+  // Babysit playbook (PR/CI watch & branch cleanup)
+  const watchPr = route('盯着 PR #12，查一下 CI 为什么挂了');
+  assert.equal(watchPr.mode, 'babysit');
+  assert.equal(watchPr.playbook, 'babysit');
+  assert.equal(watchPr.readOnly, false);
+  assert.ok(watchPr.companionSkills.includes('kelin-watch'));
+  assert.ok(watchPr.companionSkills.includes('kelin-ship'));
+
+  const cleanBranches = route('看看哪些分支能删，清理一下工作树');
+  assert.equal(cleanBranches.mode, 'babysit');
+
+  // Resume & pause playbooks without active state
+  const pickup = route('我们做到哪了，接着上次继续');
+  assert.equal(pickup.mode, 'resume');
+  assert.equal(pickup.playbook, 'resume');
+  assert.ok(pickup.companionSkills.includes('kelin-recall'));
+  assert.ok(pickup.companionSkills.includes('kelin-brief'));
+
+  const pauseNoState = route('先暂停一下，帮我留个交接点');
+  assert.equal(pauseNoState.mode, 'resume');
+  assert.equal(pauseNoState.playbook, 'pause');
+
+  // Legacy handoff phrasing with refactor keywords still routes to legacy
+  assert.equal(route('接手一个祖传仓库做重构').mode, 'legacy');
+
+  // Pause & resume with an active feature state preserve the track, suppress needsGrill, and attach kelin-brief
+  const featRoot = await mkdtemp(path.join(tmpdir(), 'kelin-active-feat-'));
+  assert.equal(run(['init', '--mode', 'feature'], featRoot).code, 0);
+  assert.equal(run(['advance'], featRoot).code, 0);
+  const pauseFeat = JSON.parse(run(['route', '--task', '安全暂停，留个交接'], featRoot).stdout);
+  assert.equal(pauseFeat.mode, 'feature');
+  assert.equal(pauseFeat.playbook, 'pause');
+  assert.equal(pauseFeat.needsGrill, false);
+  assert.ok(pauseFeat.companionSkills.includes('kelin-brief'));
+  assert.ok(!pauseFeat.companionSkills.includes('kelin-grill'));
+  assert.deepEqual(pauseFeat.nextArgs, ['status', '--root', featRoot]);
+
+  const resumeFeat = JSON.parse(run(['route', '--task', '继续'], featRoot).stdout);
+  assert.equal(resumeFeat.mode, 'feature');
+  assert.equal(resumeFeat.playbook, 'resume');
+  assert.equal(resumeFeat.needsGrill, false);
+  assert.ok(resumeFeat.companionSkills.includes('kelin-brief'));
+  assert.ok(!resumeFeat.companionSkills.includes('kelin-grill'));
+});
+
+test('lightweight playbook modes enforce non-empty artifacts, advance to done, and archive cleanly', async () => {
+  const tracks = [
+    { mode: 'investigate', phase: 'investigate', file: 'investigation.md', body: '结论：src/a.mjs:1 走只读链路。\n' },
+    { mode: 'prototype', phase: 'prototype', file: 'prototype.md', body: '抛弃式探针观察：方案 A 延迟 12ms。\n' },
+    { mode: 'resume', phase: 'handoff', file: 'handoff.md', body: '续跑点：feat/demo 已过单测，待补集成测。\n' },
+    { mode: 'babysit', phase: 'babysit', file: 'babysit.md', body: 'PR #12 CI 失败已定位为测试环境超时。\n' },
+  ];
+
+  for (const track of tracks) {
+    const dir = await mkdtemp(path.join(tmpdir(), `kelin-pb-${track.mode}-`));
+    assert.equal(run(['init', '--mode', track.mode], dir).code, 0);
+    assert.equal(run(['advance'], dir).code, 0);
+    assert.match(run(['status'], dir).stdout, new RegExp(`"phase": "${track.phase}"`));
+
+    // Missing and empty artifacts must be blocked
+    assert.equal(run(['advance'], dir).code, 1);
+    await artifact(dir, track.file, '   \n');
+    const emptyRes = run(['advance'], dir);
+    assert.equal(emptyRes.code, 1);
+    assert.match(emptyRes.stdout, new RegExp(`${track.file.replace('.', '\\.')} \\(empty\\)`));
+
+    await artifact(dir, track.file, track.body);
+    assert.equal(run(['advance'], dir).code, 0);
+    assert.match(run(['status'], dir).stdout, /"phase": "done"/);
+
+    // Next run archives the playbook artifact cleanly
+    const nextInit = run(['init', '--mode', 'light'], dir);
+    assert.equal(nextInit.code, 0, nextInit.stdout);
+    const archivedDir = path.join(dir, JSON.parse(nextInit.stdout).archived);
+    assert.equal(existsSync(path.join(archivedDir, track.file)), true);
+    assert.equal(existsSync(path.join(dir, '.kelin', track.file)), false);
+  }
+});
+
+test('playbook docs, grill opener calibration, and ship PR reviewability guidance stay wired', async () => {
+  const modeDoc = await readFile(path.resolve(import.meta.dirname, '..', '..', 'kelin-mode', 'SKILL.md'), 'utf8');
+  const pbDoc = await readFile(path.resolve(import.meta.dirname, '..', '..', 'kelin-mode', 'references', 'playbooks.md'), 'utf8');
+  const grillDoc = await readFile(path.resolve(import.meta.dirname, '..', '..', 'kelin-grill', 'SKILL.md'), 'utf8');
+  const shipDoc = await readFile(path.resolve(import.meta.dirname, '..', '..', 'kelin-ship', 'SKILL.md'), 'utf8');
+
+  assert.match(modeDoc, /references\/playbooks\.md/);
+  for (const name of ['investigate', 'prototype', 'resume', 'babysit']) {
+    assert.match(pbDoc, new RegExp(name));
+  }
+  assert.match(grillDoc, /开场三步校准/);
+  assert.match(grillDoc, /大白话复述/);
+  assert.match(shipDoc, /ORIGINAL_TREE/);
+  assert.match(shipDoc, /阅读顺序/);
+});

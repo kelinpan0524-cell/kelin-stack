@@ -87,20 +87,24 @@ $ node skills/kelin-health/scripts/health.mjs --root .
 3. **连续迭代不打架**：上一轮跑到 `done` 后，下一轮直接 `init` 会把旧记录归档到 `.kelin/history/`；没跑完的任务下个会话接续执行。
 
 <p align="center">
-  <img src="./assets/readme/workflow.svg" width="100%" alt="kelin-mode 状态机：route 自动分流五种模式，展示 feature/fix/legacy 十阶段门禁链路（light 7 阶段，audit 5 阶段）">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="kelin-mode 状态机：route 自动分流九条剧本路线（5 主轨道 + 4 轻剧本），展示 feature/fix/legacy 十阶段门禁链路（light 7 阶段，audit 5 阶段，4 轻剧本 3 阶段）">
 </p>
 
-### 五种模式按任务复杂度分流
+### 九条剧本路线按任务场景分流（5 工程主轨道 + 4 轻剧本）
 
-| 模式 | 适用场景 | 阶段链路 | 说明 |
+| 剧本 | 适用场景 | 阶段链路 | 说明 |
 | --- | --- | --- | --- |
 | `light` | 单文件、文案、小修 | `intake → design → build → verify → ship → reflect → done` | 轻量三行计划 + 快速验证 |
 | `feature` | 加功能、改行为 | 完整 10 阶段 | 跨模块强制设计草图与双镜头 `plan-gate` |
 | `fix` | 修 bug、修回归 | 完整 10 阶段 | `build` 阶段联动 `kelin-tdd` + `kelin-guard` 防再犯 |
 | `legacy` | 老仓库改造、迁移 | 完整 10 阶段 | `map` 强制 `feature-map.json`，切片推进 |
-| `audit` | 只审不改 | `intake → map → audit → reflect → done` | 只读体检并强制输出覆盖声明表 |
+| `audit` | 只审不改（全仓体检） | `intake → map → audit → reflect → done` | 只读体检并强制输出覆盖声明表 |
+| `investigate` | 只读查原理/问原因/方案对比 | `intake → investigate → done` | 只读硬护栏：不改代码、不建分支、不串联 `setup` 写入 |
+| `prototype` | 快速原型 / 10 行真探针 | `intake → prototype → done` | 隔离草稿区抛弃式实验，凭观察结果定方向 |
+| `resume` | 跨会话续做 / 安全暂停交接 | `intake → handoff → done` | 有活跃状态续跑原轨道，无状态则重建现场或留交接单 |
+| `babysit` | PR 值守 / 盯 CI / 分支清理 | `intake → babysit → done` | 联动 `kelin-watch` / `kelin-branches` / `kelin-ship`，合入仍守门禁 |
 
-阶段判定细节与 `plan`/`refine`/`verify` 三档规则见 [kelin-mode](skills/kelin-mode/SKILL.md)。
+阶段判定细节、轻剧本细则与 `plan`/`refine`/`verify` 三档规则见 [kelin-mode](skills/kelin-mode/SKILL.md) 与 [playbooks](skills/kelin-mode/references/playbooks.md)。
 
 ## 七道硬机制
 
@@ -278,7 +282,7 @@ node skills/kelin-verify-stack/scripts/verify-stack.mjs run --changed skills/kel
 | pstack | kelin-stack | 取舍原因 |
 | --- | --- | --- |
 | 46 个 skill | 40 个 skill | 只保留对应真实工程故障的命令，不凑数 |
-| `poteto-mode` | `kelin-mode` | 加入 24GB 内存预算、5 模式路由与老仓库切片 |
+| `poteto-mode` | `kelin-mode` | 加入 24GB 内存预算、9 剧本路由（5 主轨道 + 4 轻剧本）与老仓库切片 |
 | T3 / 宿主外编排 | 不做 | 避免与宿主自身调度冲突；改为 SessionStart 注入 + `kelin-delegate` |
 | swarm / arena 多代理 | 最多 2 个（1 写 1 读） | 防止 24GB 本机开 3 个以上会话拖进 swap |
 | 20+ 条 `principle-*` | 合并为一页 `kelin-principles` | 十条操作底线 + 六条工程原则能记住也用得上 |

@@ -1,5 +1,15 @@
 # Changelog
 
+# 0.26.0（2026-11-28）
+
+吸收 `pstack` 场景剧本路由、开场问题校准与 PR 易审化实践（不膨胀技能数量，全部收口进现有核心技能与脚本门禁）：
+
+- **`kelin-mode` 九条剧本路由与只读硬护栏**：在原有 5 条工程主轨道（`feature`/`fix`/`legacy`/`audit`/`light`）外新增 4 条轻量场景剧本——`investigate`（只读调研/讲原理，`intake → investigate → done`）、`prototype`（抛弃式原型/10 行真探针，`intake → prototype → done`）、`resume`（跨会话续做与安全暂停交接，`intake → handoff → done`，若已有活跃 `.kelin/state.json` 仍保留原轨道不覆盖）、`babysit`（PR 值守/修 CI/分支清理，`intake → babysit → done`）；`routeTask` 返回新增 `playbook` 与 `readOnly` 字段，明确要求只读（即便提及报错/重构/修改方式）一律强制进 `investigate`（或全仓 `audit`），不串联 `setup` 写入，绝不误送开发建分支流程；新增 [skills/kelin-mode/references/playbooks.md](skills/kelin-mode/references/playbooks.md) 写明四条轻剧本步骤，并将新产物与 `changed-features.json` 纳入 `done` 后自动归档清单。
+- **`SessionStart` 单真源同步**：`hooks/session-start.mjs` 直接从 `mode.mjs` 导出 `PHASES_BY_MODE` 派生 `VALID_MODES`，消除模式集合重复定义，原生识别四条新剧本状态与配套技能。
+- **`kelin-grill` 开场三步校准**：在首轮拷问前融入 `pstack` 的 `in-your-own-words` / `reframe` / `sharpen` 思路——先大白话复述意图、再给模糊描述定名纠偏、最后拔高客观验收标尺并将可实验选择分流到 `kelin-mode prototype`。
+- **`kelin-ship` PR 易审化清单**：吸收 `make-pr-easy-to-review`，明确按依赖顺序分层提交、改写历史前后校验 `HEAD^{tree}` 一致、在 PR 正文开头给出审查 TL;DR 与文件阅读顺序。
+- **回归测试补齐**：`mode.test.mjs` 新增 4 条新剧本端到端状态机流转、归档与「明确只读不得误入开发流」回归矩阵；`session-start.test.mjs` 新增新剧本状态注入测试。
+
 # 0.25.0（2026-11-25）
 
 验证闭环补缺（第二批，分支 `feat/verify-loop-hardening`）：
